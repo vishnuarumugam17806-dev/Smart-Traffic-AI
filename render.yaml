@@ -1,0 +1,15 @@
+services:
+  - type: web
+    name: vigitra-backend
+    env: docker
+    dockerfilePath: backend/Dockerfile
+    dockerContext: backend
+    plan: free
+    region: oregon
+    envVars:
+      - key: PORT
+        value: 8000
+      - key: MONGODB_URI
+        value: mongodb+srv://vigitra_admin:VigitraAdmin2026%21@vigitra.0faq4de.mongodb.net/vigitra_db?retryWrites=true&w=majority&appName=VIGITRA
+      - key: MONGODB_DB_NAME
+        value: vigitra_db

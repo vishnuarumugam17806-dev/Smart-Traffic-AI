@@ -1,0 +1,67 @@
+@import "tailwindcss/base";
+@import "tailwindcss/components";
+@import "tailwindcss/utilities";
+
+@layer base {
+  body {
+    background-color: #F6F8FA;
+    color: #24313D;
+  }
+}
+
+.glass-panel {
+  background: #FFFFFF;
+  border: 1px solid #DCE4EA;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.04);
+}
+
+.glass-card {
+  background: #FFFFFF;
+  border: 1px solid #DCE4EA;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.04);
+  transition: transform 180ms ease-out, box-shadow 180ms ease-out;
+}
+
+.glass-card:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.05), 0 2px 4px -1px rgba(0, 0, 0, 0.03);
+}
+
+.pulse-glow {
+  box-shadow: 0 0 10px rgba(36, 91, 132, 0.1);
+}
+
+.pulse-red {
+  animation: pulse-red-anim 2.0s infinite;
+}
+
+@keyframes pulse-red-anim {
+  0% {
+    box-shadow: 0 0 0 0 rgba(200, 93, 93, 0.4);
+  }
+  70% {
+    box-shadow: 0 0 0 8px rgba(200, 93, 93, 0);
+  }
+  100% {
+    box-shadow: 0 0 0 0 rgba(200, 93, 93, 0);
+  }
+}
+
+/* Custom Scrollbar */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+::-webkit-scrollbar-track {
+  background: #F6F8FA;
+}
+
+::-webkit-scrollbar-thumb {
+  background: #DCE4EA;
+  border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: #CBD6DE;
+}

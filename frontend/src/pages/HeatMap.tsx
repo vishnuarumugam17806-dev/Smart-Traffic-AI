@@ -1,0 +1,140 @@
+import React, { useEffect, useState, useRef } from 'react';
+import { Flame } from 'lucide-react';
+import { apiClient } from '../api/client';
+import { useStore } from '../store/useStore';
+
+interface GraphNode {
+  id: number;
+  name: string;
+  lat: number;
+  lng: number;
+  status: string;
+}
+
+export const HeatMap: React.FC = () => {
+  const [nodes, setNodes] = useState<GraphNode[]>([]);
+  const [measurements, setMeasurements] = useState<any>({});
+  const { activeLiveUpdate } = useStore();
+  
+  const mapRef = useRef<any>(null);
+  const circlesRef = useRef<any[]>([]);
+
+  const fetchMetrics = async () => {
+    try {
+      const graphRes = await apiClient.get('/gis/graph');
+      const nodesData = graphRes.data.nodes;
+      setNodes(nodesData);
+
+      const measureRes = await apiClient.get('/traffic/measurements', { params: { limit: 20 } });
+      const measureMap: any = {};
+      measureRes.data.forEach((m: any) => {
+        if (!measureMap[m.camera_id]) {
+          measureMap[m.camera_id] = m;
+        }
+      });
+      setMeasurements(measureMap);
+
+      updateHeatmap(nodesData, measureMap);
+    } catch (err) {
+      console.error('Error loading heatmap metrics:', err);
+    }
+  };
+
+  useEffect(() => {
+    fetchMetrics();
+    return () => {
+      if (mapRef.current) {
+        mapRef.current.remove();
+        mapRef.current = null;
+      }
+    };
+  }, []);
+
+  useEffect(() => {
+    if (activeLiveUpdate && activeLiveUpdate.event === 'TRAFFIC_UPDATE') {
+      fetchMetrics();
+    }
+  }, [activeLiveUpdate]);
+
+  useEffect(() => {
+    const L = (window as any).L;
+    if (!L || mapRef.current || nodes.length === 0) return;
+
+    const map = L.map('leaflet-heatmap-map', {
+      zoomControl: false
+    }).setView([12.9716, 77.5946], 13);
+    mapRef.current = map;
+
+    L.tileLayer('https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png', {
+      attribution: '&copy; OpenStreetMap contributors &copy; CartoDB',
+      maxZoom: 20
+    }).addTo(map);
+
+    L.control.zoom({ position: 'bottomright' }).addTo(map);
+
+    updateHeatmap(nodes, measurements);
+  }, [nodes]);
+
+  const updateHeatmap = (nodesList: GraphNode[], measureMap: any) => {
+    const L = (window as any).L;
+    if (!L || !mapRef.current) return;
+
+    circlesRef.current.forEach(c => mapRef.current.removeLayer(c));
+    circlesRef.current = [];
+
+    nodesList.forEach((node) => {
+      const data = measureMap[node.id];
+      const level = data ? data.congestion_level : 'LOW';
+      
+      let color = '#76A98A'; // LOW (Calm green overlay)
+      let radius = 100;
+      let opacity = 0.28;
+
+      if (level === 'SEVERE') {
+        color = '#C95B5B'; // SEVERE (Soft Red)
+        radius = 280;
+        opacity = 0.38;
+      } else if (level === 'HIGH') {
+        color = '#D98855'; // HIGH (Soft Orange)
+        radius = 220;
+        opacity = 0.33;
+      } else if (level === 'MODERATE') {
+        color = '#D4A84F'; // MODERATE (Soft Yellow)
+        radius = 160;
+        opacity = 0.30;
+      }
+
+      const circle = L.circle([node.lat, node.lng], {
+        color: color,
+        fillColor: color,
+        fillOpacity: opacity,
+        radius: radius,
+        stroke: false
+      }).addTo(mapRef.current);
+
+      circle.bindTooltip(`<b>${node.name}</b><br>Congestion: ${level}`, { direction: 'top' });
+      circlesRef.current.push(circle);
+    });
+  };
+
+  return (
+    <div className="p-6 space-y-6 bg-[#F7F9FB]">
+      {/* Page Header */}
+      <div className="flex items-center justify-between border-b border-[#DCE4EA] pb-4">
+        <div>
+          <h1 className="text-lg font-bold text-slate-800 tracking-tight">GEOGRAPHIC TRAFFIC MAP</h1>
+          <p className="text-xs text-slate-500 font-mono mt-0.5">Real-Time City Spatial Vehicle Density and Hotspots</p>
+        </div>
+      </div>
+
+      {/* Map display */}
+      <div className="relative rounded-lg overflow-hidden border border-[#DCE4EA] h-[520px] bg-white shadow-sm">
+        <div className="absolute top-4 left-4 z-20 pointer-events-none p-3 bg-white/90 border border-[#DCE4EA] rounded shadow-sm flex items-center gap-2">
+          <Flame className="w-4 h-4 text-accent-teal animate-pulse" />
+          <span className="text-[10px] font-mono font-bold text-slate-700 uppercase tracking-wider">Spatial density overlay active</span>
+        </div>
+        <div id="leaflet-heatmap-map" className="w-full h-full z-10" />
+      </div>
+    </div>
+  );
+};

@@ -1,0 +1,38 @@
+# Dependencies
+node_modules/
+frontend/node_modules/
+.venv/
+env/
+venv/
+
+# Antigravity artifacts
+.gemini/
+
+# Binary AI models (YOLO download on demand)
+*.pt
+backend/*.pt
+
+# Python cache & bytecode
+__pycache__/
+*.py[cod]
+*$py.class
+.pytest_cache/
+
+# Databases & local state
+*.db
+vigitra.db
+backend/vigitra.db
+
+# Media & Generated videos
+*.mp4
+frontend/dist/
+
+# Environment local files
+.env.local
+.env.development.local
+
+# IDE & OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db

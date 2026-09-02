@@ -1,0 +1,26 @@
+{
+  "pythonVersion": "3.11",
+  "pythonPlatform": "Windows",
+  "extraPaths": [
+    "backend"
+  ],
+  "executionEnvironments": [
+    {
+      "root": "scripts",
+      "extraPaths": [
+        "../backend"
+      ]
+    },
+    {
+      "root": ".",
+      "extraPaths": [
+        "backend"
+      ]
+    }
+  ],
+  "reportMissingImports": "none",
+  "reportMissingTypeStubs": false,
+  "exclude": [
+    "**/__pyrefly_virtual__/**"
+  ]
+}
