@@ -303,6 +303,37 @@ async def background_video_processing_loop():
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     logger.info("Starting VIGITRA AI Platform Engine...")
+    # Seed default admin and operator users if missing
+    try:
+        from app.core import security
+        from app.models.models import User, RoleEnum
+        db_seed: Session = SessionLocal()
+        try:
+            if not db_seed.query(User).filter(User.username == "admin").first():
+                admin_user = User(
+                    username="admin",
+                    email="admin@vigitra.ai",
+                    hashed_password=security.get_password_hash("admin123"),
+                    full_name="System Administrator",
+                    role=RoleEnum.ADMIN,
+                    is_active=True
+                )
+                operator_user = User(
+                    username="operator",
+                    email="operator@vigitra.ai",
+                    hashed_password=security.get_password_hash("operator123"),
+                    full_name="Traffic Operator",
+                    role=RoleEnum.OPERATOR,
+                    is_active=True
+                )
+                db_seed.add_all([admin_user, operator_user])
+                db_seed.commit()
+                logger.info("Seeded default users: 'admin' and 'operator'.")
+        finally:
+            db_seed.close()
+    except Exception as seed_err:
+        logger.error(f"Error seeding default users: {seed_err}")
+
     bg_task = asyncio.create_task(background_video_processing_loop())
     yield
     bg_task.cancel()
