@@ -8,8 +8,10 @@ export const Layout: React.FC = () => {
   const { setIsConnected, setActiveLiveUpdate } = useStore();
 
   useEffect(() => {
+    const envWsUrl = import.meta.env.VITE_WS_URL;
     const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-    const wsUrl = `${protocol}//${window.location.host}/ws/traffic`;
+    const fallbackWsUrl = `${protocol}//${window.location.host}/ws/traffic`;
+    const wsUrl = envWsUrl || fallbackWsUrl;
     
     let ws: WebSocket | null = null;
     try {
