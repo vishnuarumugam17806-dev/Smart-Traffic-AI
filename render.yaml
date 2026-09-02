@@ -13,3 +13,20 @@ services:
         value: mongodb+srv://vigitra_admin:VigitraAdmin2026%21@vigitra.0faq4de.mongodb.net/vigitra_db?retryWrites=true&w=majority&appName=VIGITRA
       - key: MONGODB_DB_NAME
         value: vigitra_db
+
+  - type: web
+    name: vigitra-frontend
+    env: static
+    buildCommand: cd frontend && npm install && npm run build
+    staticPublishPath: frontend/dist
+    plan: free
+    region: oregon
+    routes:
+      - type: rewrite
+        source: /*
+        destination: /index.html
+    envVars:
+      - key: VITE_API_BASE_URL
+        value: https://vigitra-backend.onrender.com/api/v1
+      - key: VITE_WS_URL
+        value: wss://vigitra-backend.onrender.com/ws
