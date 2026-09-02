@@ -14,12 +14,10 @@ services:
       - key: MONGODB_DB_NAME
         value: vigitra_db
 
-  - type: web
+  - type: static
     name: vigitra-frontend
-    env: static
     buildCommand: cd frontend && npm install && npm run build
     staticPublishPath: frontend/dist
-    plan: free
     routes:
       - type: rewrite
         source: /*
