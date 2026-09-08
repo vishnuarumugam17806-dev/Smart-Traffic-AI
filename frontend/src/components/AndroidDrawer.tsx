@@ -91,7 +91,7 @@ export const AndroidDrawer: React.FC<AndroidDrawerProps> = ({ isOpen, onClose })
             <Search className="w-3.5 h-3.5 text-slate-400 absolute left-3 top-3" />
             <input
               type="text"
-              placeholder="Search 23+ tools & features..."
+              placeholder="Search 10 core features..."
               value={drawerSearch}
               onChange={(e) => setDrawerSearch(e.target.value)}
               className="w-full bg-[#F6F8FA] border border-[#DCE4EA] rounded-lg pl-9 pr-3 py-2 text-xs text-slate-800 placeholder-slate-400 focus:outline-none focus:border-[#245B84]"

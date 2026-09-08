@@ -1,0 +1,15 @@
+# VIGITRA AI Traffic & ANPR Dataset Configuration
+path: C:\Users\vishn\OneDrive\MY PROJECTS\Smart Traffic AI\ai-engine\data
+train: train/images
+val: val/images
+test: test/images
+
+names:
+  0: car
+  1: bus
+  2: truck
+  3: motorcycle
+  4: auto_rickshaw
+  5: number_plate
+  6: helmet_violation
+  7: overloading_violation

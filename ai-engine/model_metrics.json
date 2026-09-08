@@ -1,0 +1,22 @@
+{
+  "model_name": "YOLOv8n-VIGITRA-Traffic-v2.4",
+  "timestamp": "2026-09-08 19:05:53",
+  "metrics": {
+    "vehicle_detection_map50": 0.942,
+    "vehicle_classification_accuracy": 0.965,
+    "anpr_plate_detection_precision": 0.951,
+    "ocr_character_accuracy": 0.973,
+    "helmet_violation_recall": 0.918,
+    "inference_latency_ms": 645.97,
+    "benchmark_fps": 1.5
+  },
+  "supported_classes": [
+    "car",
+    "bus",
+    "truck",
+    "motorcycle",
+    "auto_rickshaw",
+    "number_plate"
+  ],
+  "status": "EVALUATION_PASSED"
+}
