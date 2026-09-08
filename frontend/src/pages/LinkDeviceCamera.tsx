@@ -120,19 +120,19 @@ export const LinkDeviceCamera: React.FC = () => {
   };
 
   return (
-    <div className="p-6 space-y-6 bg-[#F6F8FA] min-h-screen select-none font-sans">
+    <div className="p-3 sm:p-6 space-y-4 sm:space-y-6 bg-[#F6F8FA] min-h-screen select-none font-sans overflow-x-hidden">
       {/* Header */}
-      <div className="flex flex-col md:flex-row items-start md:items-center justify-between gap-4 border-b border-[#DCE4EA] pb-4">
+      <div className="flex flex-col md:flex-row items-start md:items-center justify-between gap-3 border-b border-[#DCE4EA] pb-4">
         <div>
-          <h1 className="text-lg font-bold text-slate-800 tracking-tight uppercase">LINK MOBILE CAMERA MANAGEMENT</h1>
+          <h1 className="text-base sm:text-lg font-bold text-slate-800 tracking-tight uppercase">LINK MOBILE CAMERA MANAGEMENT</h1>
           <p className="text-xs text-slate-500 font-mono mt-0.5">Mobile Field Camera Pairing, Live Stream Status & Session Registry</p>
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex flex-wrap items-center gap-2 w-full md:w-auto">
           <a
             href="/mobile-camera"
             target="_blank"
             rel="noopener noreferrer"
-            className="px-3.5 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded text-xs font-mono font-bold flex items-center gap-1.5 transition-colors shadow-xs"
+            className="flex-1 md:flex-initial px-3.5 py-2.5 min-h-[44px] bg-emerald-600 hover:bg-emerald-700 text-white rounded text-xs font-mono font-bold flex items-center justify-center gap-1.5 transition-colors shadow-xs"
           >
             <ExternalLink className="w-4 h-4" /> OPEN MOBILE FIELD CAMERA
           </a>
@@ -141,9 +141,9 @@ export const LinkDeviceCamera: React.FC = () => {
               setShowLinkModal(true);
               handleGenerateNewQR();
             }}
-            className="px-4 py-2 bg-[#245B84] hover:bg-[#1E4A6F] text-white rounded text-xs font-mono font-bold flex items-center gap-2 transition-colors shadow-xs"
+            className="flex-1 md:flex-initial px-4 py-2.5 min-h-[44px] bg-[#245B84] hover:bg-[#1E4A6F] text-white rounded text-xs font-mono font-bold flex items-center justify-center gap-2 transition-colors shadow-xs"
           >
-            <Plus className="w-4 h-4" /> LINK MOBILE CAMERA
+            <Plus className="w-4 h-4" /> LINK CAMERA
           </button>
         </div>
       </div>

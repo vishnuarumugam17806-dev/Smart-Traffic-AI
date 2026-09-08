@@ -59,23 +59,23 @@ export const Signals: React.FC = () => {
   return (
     <div className="p-6 space-y-6 bg-[#F6F8FA] min-h-screen">
       {/* Header */}
-      <div className="flex items-center justify-between border-b border-[#DCE4EA] pb-4">
+      <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 border-b border-[#DCE4EA] pb-4">
         <div>
-          <h1 className="text-lg font-bold text-slate-800 tracking-tight uppercase">EXPLAINABLE ADAPTIVE SIGNAL CONTROL</h1>
+          <h1 className="text-base sm:text-lg font-bold text-slate-800 tracking-tight uppercase">EXPLAINABLE ADAPTIVE SIGNAL CONTROL</h1>
           <p className="text-xs text-slate-500 font-mono mt-0.5">Multi-Factor AI Optimization, Safety Boundaries & Authorized Manual Override</p>
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex flex-wrap items-center gap-2 w-full sm:w-auto">
           <button
             onClick={() => setShowOverrideModal(true)}
-            className="px-3 py-1.5 bg-[#B7791F] hover:bg-[#9B6416] text-white rounded text-xs font-mono font-bold flex items-center gap-1.5 transition-colors"
+            className="flex-1 sm:flex-initial px-3 py-2 min-h-[44px] sm:min-h-0 bg-[#B7791F] hover:bg-[#9B6416] text-white rounded text-xs font-mono font-bold flex items-center justify-center gap-1.5 transition-colors shadow-xs"
           >
-            <ShieldAlert className="w-4 h-4" /> AUTHORIZED MANUAL CONTROL
+            <ShieldAlert className="w-4 h-4" /> MANUAL CONTROL
           </button>
           <button
             onClick={handleReturnToAuto}
-            className="px-3 py-1.5 bg-[#2E7D5B] hover:bg-[#236347] text-white rounded text-xs font-mono font-bold flex items-center gap-1.5 transition-colors"
+            className="flex-1 sm:flex-initial px-3 py-2 min-h-[44px] sm:min-h-0 bg-[#2E7D5B] hover:bg-[#236347] text-white rounded text-xs font-mono font-bold flex items-center justify-center gap-1.5 transition-colors shadow-xs"
           >
-            <RotateCcw className="w-4 h-4" /> RETURN TO AUTOMATIC
+            <RotateCcw className="w-4 h-4" /> RETURN TO AUTO
           </button>
         </div>
       </div>

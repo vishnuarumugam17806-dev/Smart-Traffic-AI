@@ -369,6 +369,15 @@ def root():
         "system_status": "ONLINE"
     }
 
+@app.get("/health")
+def health_check():
+    return {
+        "status": "HEALTHY",
+        "system_status": "ONLINE",
+        "timestamp": datetime.now(timezone.utc).isoformat()
+    }
+
+
 @app.websocket("/ws/traffic")
 async def websocket_endpoint(websocket: WebSocket):
     await ws_manager.connect(websocket)

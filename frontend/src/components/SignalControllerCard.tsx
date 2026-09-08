@@ -114,11 +114,38 @@ export const SignalControllerCard: React.FC<SignalControllerCardProps> = ({
         </div>
 
         {/* AI Operational Explanation */}
-        <div className="p-3 bg-accent-teal/5 rounded border border-accent-teal/20 text-xs">
+        <div className="p-3 bg-accent-teal/5 rounded border border-accent-teal/20 text-xs mb-4">
           <p className="text-[9px] font-bold font-mono text-accent-teal flex items-center gap-1.5 mb-1">
             <Cpu className="w-3.5 h-3.5" /> SYSTEM DECISION LOG
           </p>
           <p className="text-slate-650 text-[11px] leading-relaxed font-medium">{lastReasoning}</p>
+        </div>
+
+        {/* Section 9 Requirement: Touch-friendly Manual Override Buttons [ RED ] [ GREEN ] */}
+        <div className="space-y-2 border-t border-[#DCE4EA] pt-3">
+          <p className="text-[10px] font-mono font-bold text-slate-500 uppercase">MANUAL SIGNAL OVERRIDE (TOUCH CONTROLS)</p>
+          <div className="grid grid-cols-2 gap-2">
+            <button
+              onClick={() => { setPhase('RED'); setTimeLeft(30); }}
+              className={`py-3 min-h-[44px] rounded-lg font-bold text-xs font-mono flex items-center justify-center gap-1.5 transition-all shadow-xs ${
+                phase === 'RED'
+                  ? 'bg-red-600 text-white ring-2 ring-red-400'
+                  : 'bg-red-50 hover:bg-red-100 text-red-700 border border-red-200'
+              }`}
+            >
+              🔴 FORCE RED
+            </button>
+            <button
+              onClick={() => { setPhase('GREEN'); setTimeLeft(45); }}
+              className={`py-3 min-h-[44px] rounded-lg font-bold text-xs font-mono flex items-center justify-center gap-1.5 transition-all shadow-xs ${
+                phase === 'GREEN'
+                  ? 'bg-emerald-600 text-white ring-2 ring-emerald-400'
+                  : 'bg-emerald-50 hover:bg-emerald-100 text-emerald-700 border border-emerald-200'
+              }`}
+            >
+              🟢 FORCE GREEN
+            </button>
+          </div>
         </div>
       </div>
 
@@ -126,10 +153,10 @@ export const SignalControllerCard: React.FC<SignalControllerCardProps> = ({
       <button
         onClick={handleOptimizeNow}
         disabled={isOptimizing}
-        className="mt-4 w-full py-2.5 rounded-lg bg-primary-500 hover:bg-primary-600 disabled:opacity-50 text-white font-bold text-xs transition-colors flex items-center justify-center gap-2 shadow-sm select-none"
+        className="mt-4 w-full py-3 min-h-[44px] rounded-lg bg-[#245B84] hover:bg-[#1E4A6F] disabled:opacity-50 text-white font-bold text-xs transition-colors flex items-center justify-center gap-2 shadow-xs select-none"
       >
-        <RotateCw className={`w-3.5 h-3.5 ${isOptimizing ? 'animate-spin' : ''}`} />
-        <span>{isOptimizing ? 'Optimizing Signal...' : 'Trigger Adaptive Optimization'}</span>
+        <RotateCw className={`w-4 h-4 ${isOptimizing ? 'animate-spin' : ''}`} />
+        <span>{isOptimizing ? 'Optimizing Signal...' : 'Trigger Adaptive AI Optimization'}</span>
       </button>
     </div>
   );

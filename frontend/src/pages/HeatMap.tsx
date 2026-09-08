@@ -65,10 +65,19 @@ export const HeatMap: React.FC = () => {
     }).setView([12.9716, 77.5946], 13);
     mapRef.current = map;
 
-    L.tileLayer('https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png', {
-      attribution: '&copy; OpenStreetMap contributors &copy; CartoDB',
-      maxZoom: 20
-    }).addTo(map);
+    const tileLayer = L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+      attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors',
+      maxZoom: 19
+    });
+
+    tileLayer.on('tileerror', (error: any) => {
+      if (error.tile && !error.tile.dataset.retried) {
+        error.tile.dataset.retried = 'true';
+        error.tile.src = `https://tile.openstreetmap.org/${error.coords.z}/${error.coords.x}/${error.coords.y}.png`;
+      }
+    });
+
+    tileLayer.addTo(map);
 
     L.control.zoom({ position: 'bottomright' }).addTo(map);
 

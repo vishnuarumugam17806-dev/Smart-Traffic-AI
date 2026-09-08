@@ -81,11 +81,25 @@ export const GISMap: React.FC<GISMapProps> = ({
 
     mapRef.current = map;
 
-    // High quality government-grade CartoDB Light Tile layer
-    const styleUrl = (import.meta as any).env?.VITE_MAP_STYLE_URL || 'https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png';
-    L.tileLayer(styleUrl, {
-      maxZoom: 20
-    }).addTo(map);
+    // High quality free OpenStreetMap tile layer (0 API key required)
+    const envStyleUrl = (import.meta as any).env?.VITE_MAP_STYLE_URL;
+    const styleUrl = (envStyleUrl && !envStyleUrl.includes('cartocdn.com/light_all')) 
+      ? envStyleUrl 
+      : 'https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png';
+
+    const tileLayer = L.tileLayer(styleUrl, {
+      maxZoom: 19,
+      attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
+    });
+
+    tileLayer.on('tileerror', (error: any) => {
+      if (error.tile && !error.tile.dataset.retried) {
+        error.tile.dataset.retried = 'true';
+        error.tile.src = `https://tile.openstreetmap.org/${error.coords.z}/${error.coords.x}/${error.coords.y}.png`;
+      }
+    });
+
+    tileLayer.addTo(map);
 
     L.control.zoom({ position: 'bottomright' }).addTo(map);
   }, []);

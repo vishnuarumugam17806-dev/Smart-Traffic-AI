@@ -29,8 +29,9 @@ class Settings(BaseSettings):
     DATABASE_URL: Optional[str] = None
 
     # MongoDB Atlas
-    MONGODB_URI: str = os.getenv("MONGODB_URI", "mongodb+srv://vigitra_admin:<db_password>@vigitra.0faq4de.mongodb.net/vigitra_db?retryWrites=true&w=majority&appName=VIGITRA")
+    MONGODB_URI: str = os.getenv("MONGODB_URI", "")
     MONGODB_DB_NAME: str = os.getenv("MONGODB_DB_NAME", "vigitra_db")
+
 
     # Fallback to local SQLite if Postgres is unavailable
     USE_SQLITE_FALLBACK: bool = True

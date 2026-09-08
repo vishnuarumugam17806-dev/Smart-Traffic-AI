@@ -2,29 +2,92 @@
 @import "tailwindcss/components";
 @import "tailwindcss/utilities";
 
+:root {
+  --vh: 1vh;
+  --vw: 1vw;
+  --app-scale: 1;
+  --fluid-rem: 15px;
+}
+
 @layer base {
+  html {
+    font-size: var(--fluid-rem, clamp(13px, 0.85vw + 8px, 18px));
+    text-rendering: optimizeLegibility;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+    touch-action: manipulation;
+    -webkit-tap-highlight-color: transparent;
+  }
+
   body {
     background-color: #F6F8FA;
     color: #24313D;
+    min-height: 100vh;
+    min-height: calc(var(--vh, 1vh) * 100);
+    width: 100%;
+    max-width: 100vw;
+    overflow-x: hidden;
   }
 }
 
+/* Dynamic Fluid Container & Scalable Layout Utilities */
+.scalable-app-wrapper {
+  width: 100%;
+  max-width: 100vw;
+  min-height: calc(var(--vh, 1vh) * 100);
+  overflow-x: hidden;
+  display: flex;
+  flex-direction: column;
+}
+
+.fluid-container {
+  width: 100%;
+  max-width: 100%;
+  padding-left: clamp(0.5rem, 1.5vw, 2rem);
+  padding-right: clamp(0.5rem, 1.5vw, 2rem);
+  margin-left: auto;
+  margin-right: auto;
+}
+
+.fluid-card-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(clamp(240px, 22vw, 340px), 1fr));
+  gap: clamp(0.75rem, 1.2vw, 1.5rem);
+}
+
+/* Table Responsive Container */
+.table-responsive-wrapper {
+  width: 100%;
+  max-width: 100%;
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+  margin-bottom: 0.5rem;
+}
+
+/* Glass & Card Components */
 .glass-panel {
   background: #FFFFFF;
   border: 1px solid #DCE4EA;
   box-shadow: 0 1px 3px rgba(0, 0, 0, 0.04);
+  border-radius: clamp(0.5rem, 0.8vw, 0.875rem);
 }
 
 .glass-card {
   background: #FFFFFF;
   border: 1px solid #DCE4EA;
   box-shadow: 0 1px 3px rgba(0, 0, 0, 0.04);
+  border-radius: clamp(0.5rem, 0.8vw, 0.875rem);
   transition: transform 180ms ease-out, box-shadow 180ms ease-out;
 }
 
 .glass-card:hover {
   transform: translateY(-1px);
   box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.05), 0 2px 4px -1px rgba(0, 0, 0, 0.03);
+}
+
+/* Sidebar Collapse Transitions */
+.sidebar-transition {
+  transition: width 220ms cubic-bezier(0.4, 0, 0.2, 1), padding 220ms ease;
 }
 
 .pulse-glow {
@@ -48,20 +111,36 @@
 }
 
 /* Custom Scrollbar */
+.custom-scrollbar::-webkit-scrollbar,
 ::-webkit-scrollbar {
-  width: 6px;
-  height: 6px;
+  width: clamp(4px, 0.4vw, 8px);
+  height: clamp(4px, 0.4vw, 8px);
 }
 
+.custom-scrollbar::-webkit-scrollbar-track,
 ::-webkit-scrollbar-track {
   background: #F6F8FA;
 }
 
+.custom-scrollbar::-webkit-scrollbar-thumb,
 ::-webkit-scrollbar-thumb {
   background: #DCE4EA;
   border-radius: 4px;
 }
 
+.custom-scrollbar::-webkit-scrollbar-thumb:hover,
 ::-webkit-scrollbar-thumb:hover {
   background: #CBD6DE;
 }
+
+/* Touch Device Target Helper */
+@media (max-width: 767px) {
+  input, select, button {
+    font-size: 14px !important;
+  }
+  .touch-target {
+    min-height: 44px;
+    min-width: 44px;
+  }
+}
+

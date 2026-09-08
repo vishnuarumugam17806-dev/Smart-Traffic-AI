@@ -185,37 +185,40 @@ def seed_database():
             db.commit()
             print("Seeded starting blacklist and route anomaly alerts.")
 
-        # 7. Seed Emergencies & Incidents
-        if db.query(EmergencyEvent).count() == 0:
-            e1 = EmergencyEvent(
-                vehicle_type="ambulance",
-                intersection_id=1,
-                priority_level="HIGH",
-                action_taken="Activated Green Wave Priority Phase for 60s",
-                status="ACTIVE",
-                detected_at=datetime.utcnow() - timedelta(minutes=3)
+        # 7. Seed Active Alerts
+        if db.query(Alert).count() == 0:
+            alert1 = Alert(
+                type="BLACKLISTED_VEHICLE",
+                severity="CRITICAL",
+                timestamp=datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(minutes=10),
+                camera_id=2,
+                location="Metro Station Cross",
+                vehicle_plate="KA05MN3821",
+                message="Watchlist vehicle KA05MN3821 detected at Metro Station Cross.",
+                status="NEW",
+                confidence=0.97
             )
-            inc1 = Incident(
-                incident_type="sudden_stoppage",
+            alert2 = Alert(
+                type="CONGESTION_ALERT",
                 severity="HIGH",
-                intersection_id=1,
-                status=IncidentStatusEnum.INVESTIGATING,
-                confidence=0.94,
-                description="Stalled vehicle detected blocking Lane 2.",
-                detected_at=datetime.utcnow() - timedelta(minutes=10)
-            )
-            v1 = Violation(
-                violation_type="no_helmet",
+                timestamp=datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(minutes=5),
                 camera_id=1,
-                license_plate="KA05MN3821",
-                confidence=0.91,
-                evidence_image="evidence_01.jpg",
-                status="PENDING",
-                timestamp=datetime.utcnow() - timedelta(minutes=15)
+                location="Central Plaza Junction",
+                vehicle_plate="TN01AB1234",
+                message="High traffic density queue detected at Central Plaza Junction.",
+                status="NEW",
+                confidence=0.92
             )
-            db.add_all([e1, inc1, v1])
+            db.add_all([alert1, alert2])
             db.commit()
-            print("Seeded active emergencies and traffic incidents.")
+            print("Seeded active traffic alerts.")
+
+        # 8. Attempt MongoDB Atlas Sync if configured
+        try:
+            from sync_mongodb import sync_all_to_mongodb
+            sync_all_to_mongodb()
+        except Exception as mongo_err:
+            print(f"Notice: MongoDB Atlas sync step skipped/deferred ({mongo_err})")
 
     except Exception as e:
         print(f"Error seeding database: {e}")
@@ -226,5 +229,9 @@ def seed_database():
 if __name__ == "__main__":
     # Remove old sqlite file if exists to start fresh
     if os.path.exists("vigitra.db"):
-        os.remove("vigitra.db")
+        try:
+            os.remove("vigitra.db")
+        except Exception as e:
+            print(f"Notice: Could not remove existing vigitra.db ({e}), proceeding with existing file...")
     seed_database()
+

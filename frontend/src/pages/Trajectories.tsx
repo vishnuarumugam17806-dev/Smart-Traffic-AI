@@ -67,9 +67,19 @@ export const Trajectories: React.FC = () => {
     }).setView([12.9716, 77.5946], 13);
     mapRef.current = map;
 
-    L.tileLayer('https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png', {
-      maxZoom: 20
-    }).addTo(map);
+    const tileLayer = L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+      attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors',
+      maxZoom: 19
+    });
+
+    tileLayer.on('tileerror', (error: any) => {
+      if (error.tile && !error.tile.dataset.retried) {
+        error.tile.dataset.retried = 'true';
+        error.tile.src = `https://tile.openstreetmap.org/${error.coords.z}/${error.coords.x}/${error.coords.y}.png`;
+      }
+    });
+
+    tileLayer.addTo(map);
 
     L.control.zoom({ position: 'bottomright' }).addTo(map);
 
@@ -178,34 +188,35 @@ export const Trajectories: React.FC = () => {
   }, [graphData]);
 
   return (
-    <div className="flex flex-col lg:flex-row h-[calc(100vh-64px)] overflow-hidden bg-[#F4F8FA]">
+    <div className="flex flex-col lg:flex-row h-auto lg:h-[calc(100vh-64px)] overflow-x-hidden bg-[#F4F8FA]">
       {/* Sidebar Controls */}
-      <div className="w-full lg:w-[380px] border-b lg:border-b-0 lg:border-r border-[#DCE4EA] bg-[#F1F6F8] p-5 flex flex-col justify-between shrink-0 overflow-y-auto select-none">
-        <div className="space-y-5">
+      <div className="w-full lg:w-[380px] border-b lg:border-b-0 lg:border-r border-[#DCE4EA] bg-[#F1F6F8] p-4 sm:p-5 flex flex-col justify-between shrink-0 overflow-y-auto select-none">
+        <div className="space-y-4">
           <div>
-            <h1 className="text-sm font-bold text-slate-800 tracking-tight uppercase">CROSS-CAMERA TRAJECTORY RECONSTRUCTION</h1>
-            <p className="text-[10px] text-slate-500 font-mono mt-0.5">Multi-Camera License Plate & Appearance Journey Timeline</p>
+            <h1 className="text-xs sm:text-sm font-bold text-slate-800 tracking-tight uppercase">CROSS-CAMERA TRAJECTORY RECONSTRUCTION</h1>
+            <p className="text-[10px] text-slate-500 font-mono mt-0.5">Multi-Camera License Plate & Journey Timeline</p>
           </div>
 
           {/* Search Box */}
           <form onSubmit={handleSearch} className="space-y-3">
             <div className="space-y-1">
               <label className="block text-[9px] font-mono font-bold text-slate-500 uppercase">Authorized License Plate Search</label>
-              <div className="relative">
+              <div className="relative flex items-center gap-2">
                 <input
                   type="text"
                   required
                   placeholder="e.g. TN01AB1234"
                   value={plate}
                   onChange={(e) => setPlate(e.target.value)}
-                  className="w-full bg-white border border-[#DCE4EA] rounded pl-3 pr-10 py-2 text-xs text-slate-850 placeholder-slate-400 font-mono focus:border-[#245B84] focus:outline-none"
+                  className="flex-1 bg-white border border-[#DCE4EA] rounded px-3 py-2.5 min-h-[44px] text-xs text-slate-850 placeholder-slate-400 font-mono focus:border-[#245B84] focus:outline-none uppercase"
                 />
                 <button
                   type="submit"
                   disabled={loading}
-                  className="absolute right-1 top-1 p-1 bg-[#245B84] hover:bg-[#1D4D70] text-white rounded transition-colors"
+                  className="px-4 py-2.5 min-h-[44px] bg-[#245B84] hover:bg-[#1D4D70] text-white font-mono font-bold text-xs rounded transition-colors flex items-center justify-center gap-1 shrink-0"
                 >
-                  <Search className="w-3.5 h-3.5" />
+                  <Search className="w-4 h-4" />
+                  <span className="hidden sm:inline">TRACK</span>
                 </button>
               </div>
             </div>
@@ -221,11 +232,11 @@ export const Trajectories: React.FC = () => {
           {/* Trajectory Metadata Card */}
           {timeline.length > 0 && (
             <div className="space-y-4">
-              <div className="p-3.5 bg-white rounded border border-[#DCE4EA] space-y-2 text-xs">
+              <div className="p-3.5 bg-white rounded border border-[#DCE4EA] space-y-2 text-xs shadow-xs">
                 <div className="flex items-center justify-between border-b pb-2">
-                  <span className="font-mono font-bold text-[#245B84]">GLOBAL ID: {globalVehicleId}</span>
-                  <span className="px-2 py-0.5 bg-[#EAF7EF] text-[#2E7D5B] border border-[#D2EADA] font-mono font-bold text-[10px] rounded">
-                    VERIFIED MATCH
+                  <span className="font-mono font-bold text-[#245B84] text-xs">GLOBAL ID: {globalVehicleId}</span>
+                  <span className="px-2 py-0.5 bg-[#EAF7EF] text-[#2E7D5B] border border-[#D2EADA] font-mono font-bold text-[9px] rounded">
+                    VERIFIED
                   </span>
                 </div>
                 <div className="grid grid-cols-2 gap-2 font-mono text-[11px]">
@@ -239,7 +250,7 @@ export const Trajectories: React.FC = () => {
                   </div>
                   <div>
                     <span className="text-slate-400 text-[9px]">TRAVEL DURATION</span>
-                    <p className="font-bold text-slate-700">{duration} seconds</p>
+                    <p className="font-bold text-slate-700">{duration} sec</p>
                   </div>
                   <div>
                     <span className="text-slate-400 text-[9px]">AVG SPEED</span>
@@ -262,7 +273,7 @@ export const Trajectories: React.FC = () => {
 
               {/* Chronological Route Timeline */}
               <h3 className="text-[10px] font-mono font-bold text-slate-600 uppercase">Camera Observation Timeline</h3>
-              <div className="relative border-l-2 border-[#245B84]/30 pl-4 ml-2 space-y-4 py-1">
+              <div className="relative border-l-2 border-[#245B84]/30 pl-4 ml-2 space-y-3 py-1">
                 {timeline.map((item, idx) => (
                   <div key={idx} className="relative space-y-0.5">
                     <span className="absolute -left-[21px] top-1.5 h-2.5 w-2.5 rounded-full bg-[#245B84] border-2 border-white" />
@@ -289,14 +300,14 @@ export const Trajectories: React.FC = () => {
       </div>
 
       {/* Main Interactive Map */}
-      <div className="flex-1 h-full relative">
+      <div className="flex-1 h-[360px] sm:h-[480px] lg:h-full relative min-h-[300px]">
         <div id="leaflet-gis-map" className="w-full h-full z-10" />
 
-        <div className="absolute top-4 left-4 z-20 pointer-events-none">
-          <div className="p-3 bg-white/90 border border-[#DCE4EA] rounded shadow-xs flex items-center gap-2">
-            <Activity className="w-4 h-4 text-[#245B84] animate-pulse" />
-            <span className="text-[10px] font-mono font-bold text-slate-700 uppercase tracking-wider">
-              GIS TRAJECTORY VISUALIZATION
+        <div className="absolute top-3 left-3 z-20 pointer-events-none">
+          <div className="p-2 sm:p-3 bg-white/90 border border-[#DCE4EA] rounded shadow-xs flex items-center gap-2">
+            <Activity className="w-3.5 h-3.5 sm:w-4 sm:h-4 text-[#245B84] animate-pulse" />
+            <span className="text-[9px] sm:text-[10px] font-mono font-bold text-slate-700 uppercase tracking-wider">
+              TRAJECTORY VISUALIZATION
             </span>
           </div>
         </div>

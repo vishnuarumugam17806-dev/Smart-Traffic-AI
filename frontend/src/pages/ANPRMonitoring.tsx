@@ -94,11 +94,11 @@ export const ANPRMonitoring: React.FC = () => {
   });
 
   return (
-    <div className="p-6 space-y-6 bg-[#F7F9FB]">
+    <div className="p-3 sm:p-6 space-y-4 sm:space-y-6 bg-[#F7F9FB] overflow-x-hidden">
       {/* Page Header */}
       <div className="flex items-center justify-between border-b border-[#DCE4EA] pb-4">
         <div>
-          <h1 className="text-lg font-bold text-slate-800 tracking-tight">HIGH-ACCURACY ANPR MONITORING</h1>
+          <h1 className="text-base sm:text-lg font-bold text-slate-800 tracking-tight uppercase">HIGH-ACCURACY ANPR MONITORING</h1>
           <p className="text-xs text-slate-500 font-mono mt-0.5">Real-Time Deep Learning Multi-Lane License Plate Recognition Logs</p>
         </div>
       </div>
@@ -143,8 +143,8 @@ export const ANPRMonitoring: React.FC = () => {
       </div>
 
       {/* Filters Panel */}
-      <div className="bg-[#EFF6FB] p-4 rounded border border-[#DCE4EA] flex flex-col md:flex-row md:items-center justify-between gap-4">
-        <div className="flex items-center gap-3">
+      <div className="bg-[#EFF6FB] p-3 sm:p-4 rounded border border-[#DCE4EA] flex flex-col md:flex-row md:items-center justify-between gap-3">
+        <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2.5">
           <div className="relative">
             <Search className="w-4 h-4 text-slate-400 absolute left-3 top-2.5" />
             <input
@@ -152,31 +152,31 @@ export const ANPRMonitoring: React.FC = () => {
               placeholder="Search plate..."
               value={searchPlate}
               onChange={(e) => setSearchPlate(e.target.value)}
-              className="pl-9 pr-4 py-2 bg-white border border-[#DCE4EA] rounded text-xs text-slate-800 placeholder-slate-400 w-48 font-mono focus:border-[#245B84] focus:outline-none"
+              className="pl-9 pr-4 py-2 bg-white border border-[#DCE4EA] rounded text-xs text-slate-800 placeholder-slate-400 w-full sm:w-48 font-mono focus:border-[#245B84] focus:outline-none"
             />
           </div>
-          <div className="flex bg-[#EEF4F8] p-0.5 rounded border border-[#DCE4EA] text-[10px] font-mono">
+          <div className="flex flex-wrap bg-[#EEF4F8] p-1 rounded border border-[#DCE4EA] text-[10px] font-mono gap-1">
             <button
               onClick={() => setFilterConf('ALL')}
-              className={`px-3 py-1.5 rounded font-bold transition-colors ${filterConf === 'ALL' ? 'bg-[#245B84] text-white' : 'text-slate-650 hover:text-slate-900'}`}
+              className={`px-2.5 py-1 rounded font-bold transition-colors ${filterConf === 'ALL' ? 'bg-[#245B84] text-white' : 'text-slate-650 hover:text-slate-900'}`}
             >
               ALL
             </button>
             <button
               onClick={() => setFilterConf('HIGH')}
-              className={`px-3 py-1.5 rounded font-bold transition-colors ${filterConf === 'HIGH' ? 'bg-[#DFF1E5] text-[#5E9C72] border border-[#C2E5D0]' : 'text-slate-650 hover:text-slate-900'}`}
+              className={`px-2.5 py-1 rounded font-bold transition-colors ${filterConf === 'HIGH' ? 'bg-[#DFF1E5] text-[#5E9C72] border border-[#C2E5D0]' : 'text-slate-650 hover:text-slate-900'}`}
             >
               HIGH (&gt;90%)
             </button>
             <button
               onClick={() => setFilterConf('MID')}
-              className={`px-3 py-1.5 rounded font-bold transition-colors ${filterConf === 'MID' ? 'bg-[#FFF1C9] text-[#C49A4A] border border-[#FCE1A2]' : 'text-slate-650 hover:text-slate-900'}`}
+              className={`px-2.5 py-1 rounded font-bold transition-colors ${filterConf === 'MID' ? 'bg-[#FFF1C9] text-[#C49A4A] border border-[#FCE1A2]' : 'text-slate-650 hover:text-slate-900'}`}
             >
               MID (70-90%)
             </button>
             <button
               onClick={() => setFilterConf('LOW')}
-              className={`px-3 py-1.5 rounded font-bold transition-colors ${filterConf === 'LOW' ? 'bg-[#F7DCDD] text-[#C85D5D] border border-[#F3BFC0]' : 'text-slate-650 hover:text-slate-900'}`}
+              className={`px-2.5 py-1 rounded font-bold transition-colors ${filterConf === 'LOW' ? 'bg-[#F7DCDD] text-[#C85D5D] border border-[#F3BFC0]' : 'text-slate-650 hover:text-slate-900'}`}
             >
               LOW (&lt;70%)
             </button>

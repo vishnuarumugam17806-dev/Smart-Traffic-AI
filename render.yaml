@@ -3,7 +3,8 @@ services:
   - type: web
     name: vigitra-backend
     env: docker
-    dockerfilePath: backend/Dockerfile
+    rootDir: backend
+    dockerfilePath: Dockerfile
     dockerContext: backend
     plan: free
     region: oregon
@@ -11,7 +12,7 @@ services:
       - key: PORT
         value: 8000
       - key: MONGODB_URI
-        value: mongodb+srv://vigitra_admin:VigitraAdmin2026%21@vigitra.0faq4de.mongodb.net/vigitra_db?retryWrites=true&w=majority&appName=VIGITRA
+        sync: false
       - key: MONGODB_DB_NAME
         value: vigitra_db
 
@@ -29,4 +30,5 @@ services:
       - key: VITE_API_BASE_URL
         value: https://vigitra-backend.onrender.com/api/v1
       - key: VITE_WS_URL
-        value: wss://vigitra-backend.onrender.com/ws
+        value: wss://vigitra-backend.onrender.com/ws/traffic
+
