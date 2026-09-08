@@ -60,6 +60,11 @@ export const HeatMap: React.FC = () => {
     const L = (window as any).L;
     if (!L || mapRef.current || nodes.length === 0) return;
 
+    const container = L.DomUtil.get('leaflet-heatmap-map');
+    if (container && container._leaflet_id) {
+      container._leaflet_id = null;
+    }
+
     const map = L.map('leaflet-heatmap-map', {
       zoomControl: false
     }).setView([12.9716, 77.5946], 13);

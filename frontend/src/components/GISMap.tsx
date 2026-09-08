@@ -73,6 +73,11 @@ export const GISMap: React.FC<GISMapProps> = ({
     const L = (window as any).L;
     if (!L || mapRef.current) return;
 
+    const container = L.DomUtil.get(mapContainerId);
+    if (container && container._leaflet_id) {
+      container._leaflet_id = null;
+    }
+
     // Center map around Bangalore central coordinates
     const map = L.map(mapContainerId, {
       zoomControl: false,
@@ -102,6 +107,13 @@ export const GISMap: React.FC<GISMapProps> = ({
     tileLayer.addTo(map);
 
     L.control.zoom({ position: 'bottomright' }).addTo(map);
+
+    return () => {
+      if (mapRef.current) {
+        mapRef.current.remove();
+        mapRef.current = null;
+      }
+    };
   }, []);
 
   // Re-draw all map layers on state & toggle changes

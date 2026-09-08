@@ -62,6 +62,11 @@ export const Trajectories: React.FC = () => {
     const L = (window as any).L;
     if (!L || mapRef.current) return;
 
+    const container = L.DomUtil.get('leaflet-gis-map');
+    if (container && container._leaflet_id) {
+      container._leaflet_id = null;
+    }
+
     const map = L.map('leaflet-gis-map', {
       zoomControl: false
     }).setView([12.9716, 77.5946], 13);
