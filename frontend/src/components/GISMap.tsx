@@ -18,7 +18,7 @@ export const GISMap: React.FC<GISMapProps> = ({
   showHeatmap = false,
   onSelectCameraForVideo
 }) => {
-  const mapContainerId = "gis-command-map-element";
+  const mapContainerRef = useRef<HTMLDivElement | null>(null);
   const mapRef = useRef<any>(null);
   const markersRef = useRef<any[]>([]);
   const roadLinesRef = useRef<any[]>([]);
@@ -68,49 +68,66 @@ export const GISMap: React.FC<GISMapProps> = ({
     }
   }, [activeLiveUpdate]);
 
-  // Initialize Map Provider (MapLibre / Leaflet CartoDB fallback)
+  // Initialize Map Provider safely
   useEffect(() => {
     const L = (window as any).L;
-    if (!L || mapRef.current) return;
+    if (!L || !mapContainerRef.current) return;
 
-    const container = L.DomUtil.get(mapContainerId);
-    if (container && container._leaflet_id) {
-      container._leaflet_id = null;
+    if (mapRef.current) {
+      try {
+        mapRef.current.remove();
+      } catch (e) {
+        // ignore cleanup error
+      }
+      mapRef.current = null;
     }
 
-    // Center map around Bangalore central coordinates
-    const map = L.map(mapContainerId, {
-      zoomControl: false,
-      attributionControl: false
-    }).setView([12.9716, 77.5946], 13);
+    const container = mapContainerRef.current;
+    if ((container as any)._leaflet_id) {
+      (container as any)._leaflet_id = null;
+    }
 
-    mapRef.current = map;
+    try {
+      // Center map around Bangalore central coordinates
+      const map = L.map(container, {
+        zoomControl: false,
+        attributionControl: false
+      }).setView([12.9716, 77.5946], 13);
 
-    // High quality free OpenStreetMap tile layer (0 API key required)
-    const envStyleUrl = (import.meta as any).env?.VITE_MAP_STYLE_URL;
-    const styleUrl = (envStyleUrl && !envStyleUrl.includes('cartocdn.com/light_all')) 
-      ? envStyleUrl 
-      : 'https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png';
+      mapRef.current = map;
 
-    const tileLayer = L.tileLayer(styleUrl, {
-      maxZoom: 19,
-      attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
-    });
+      // High quality free OpenStreetMap tile layer (0 API key required)
+      const envStyleUrl = (import.meta as any).env?.VITE_MAP_STYLE_URL;
+      const styleUrl = (envStyleUrl && !envStyleUrl.includes('cartocdn.com/light_all')) 
+        ? envStyleUrl 
+        : 'https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png';
 
-    tileLayer.on('tileerror', (error: any) => {
-      if (error.tile && !error.tile.dataset.retried) {
-        error.tile.dataset.retried = 'true';
-        error.tile.src = `https://tile.openstreetmap.org/${error.coords.z}/${error.coords.x}/${error.coords.y}.png`;
-      }
-    });
+      const tileLayer = L.tileLayer(styleUrl, {
+        maxZoom: 19,
+        attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
+      });
 
-    tileLayer.addTo(map);
+      tileLayer.on('tileerror', (error: any) => {
+        if (error.tile && !error.tile.dataset.retried) {
+          error.tile.dataset.retried = 'true';
+          error.tile.src = `https://tile.openstreetmap.org/${error.coords.z}/${error.coords.x}/${error.coords.y}.png`;
+        }
+      });
 
-    L.control.zoom({ position: 'bottomright' }).addTo(map);
+      tileLayer.addTo(map);
+
+      L.control.zoom({ position: 'bottomright' }).addTo(map);
+    } catch (err) {
+      console.warn('GISMap Leaflet initialization warning:', err);
+    }
 
     return () => {
       if (mapRef.current) {
-        mapRef.current.remove();
+        try {
+          mapRef.current.remove();
+        } catch (e) {
+          // ignore
+        }
         mapRef.current = null;
       }
     };
@@ -330,7 +347,7 @@ export const GISMap: React.FC<GISMapProps> = ({
   return (
     <div className="relative w-full h-full min-h-[400px] rounded-lg overflow-hidden border border-[#DCE4EA] bg-[#F6F8FA]">
       {/* Map Container */}
-      <div id={mapContainerId} className="w-full h-full min-h-[400px] z-10" />
+      <div ref={mapContainerRef} className="w-full h-full min-h-[400px] z-10" />
 
       {/* Map Header Telemetry Bar */}
       <div className="absolute top-3 left-3 z-20 bg-white/90 backdrop-blur-md px-3 py-1.5 rounded border border-[#DCE4EA] shadow-xs flex items-center gap-3 text-[10px] font-mono select-none">

@@ -15,6 +15,7 @@ import { Alerts } from '../pages/Alerts';
 import { LinkDeviceCamera } from '../pages/LinkDeviceCamera';
 import { MobileCamera } from '../pages/MobileCamera';
 import { RecordedVideo } from '../pages/RecordedVideo';
+import { TrafficForecast } from '../pages/TrafficForecast';
 import { useStore } from '../store/useStore';
 
 const ProtectedRoute: React.FC<{ children: React.ReactNode }> = ({ children }) => {
@@ -48,6 +49,7 @@ export const AppRoutes: React.FC = () => {
         <Route path="signals" element={<Signals />} />
         <Route path="alerts" element={<Alerts />} />
         <Route path="predictions" element={<Predictions />} />
+        <Route path="forecast" element={<TrafficForecast />} />
         <Route path="recordings" element={<RecordedVideo />} />
         <Route path="devices" element={<LinkDeviceCamera />} />
         <Route path="settings" element={<Settings />} />

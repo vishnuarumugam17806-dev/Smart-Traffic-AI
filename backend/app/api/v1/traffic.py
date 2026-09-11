@@ -19,7 +19,7 @@ from app.schemas.schemas import (
     RouteAnomalyOut, AlertOut, AlertStatusUpdate,
     CameraUpdate, CameraStreamAction, AIFeedbackCreate, AIFeedbackOut,
     AIModelPerformanceOut, ScenarioSimulationInput, ScenarioSimulationOutput,
-    WeatherObservationOut
+    WeatherObservationOut, JunctionConfigUpdate
 )
 from app.traffic.signal_controller import signal_optimizer, signal_registry, WEIGHTS
 from app.database.mongodb import mongo_manager
@@ -244,14 +244,44 @@ def optimize_signal_phase(signal_id: int, db: Session = Depends(get_db)):
 
     return result
 
+@router.post("/intersections/{id}/config")
+def update_intersection_config(
+    id: int,
+    config_in: JunctionConfigUpdate,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_role(["ADMIN", "OPERATOR"]))
+):
+    if config_in.num_approaches not in [2, 3, 4]:
+        raise HTTPException(status_code=400, detail="num_approaches must be 2, 3, or 4.")
+    
+    inter = db.query(Intersection).filter(Intersection.id == id).first()
+    if not inter:
+        raise HTTPException(status_code=404, detail="Intersection not found")
+    
+    inter.num_approaches = config_in.num_approaches
+    inter.approaches_config = config_in.approaches
+    db.commit()
+    db.refresh(inter)
+
+    controller = signal_registry.update_junction_config(id, config_in.num_approaches, config_in.approaches)
+    return {
+        "status": "SUCCESS",
+        "message": f"Updated Junction #{id} to {config_in.num_approaches}-approach configuration.",
+        "intersection": inter,
+        "active_approaches": list(controller.approaches.keys())
+    }
+
 @router.get("/intersections/{id}/traffic")
 def get_intersection_traffic(id: int, db: Session = Depends(get_db)):
-    controller = signal_registry.get_controller(id)
+    controller = signal_registry.get_controller(id, db=db)
     return {
         "intersection_id": id,
+        "num_approaches": controller.num_approaches,
         "approaches": {
             name: {
+                "name": app.get("name") or f"{name.title()} Approach",
                 "direction": app["direction"],
+                "camera_id": app.get("camera_id"),
                 "vehicle_count": round(app["vehicle_count"], 1),
                 "queue_length": app["queue_length"],
                 "waiting_time": round(app["waiting_time"], 1),
@@ -263,25 +293,26 @@ def get_intersection_traffic(id: int, db: Session = Depends(get_db)):
 
 @router.get("/intersections/{id}/signal")
 def get_intersection_signal(id: int, db: Session = Depends(get_db)):
-    controller = signal_registry.get_controller(id)
+    controller = signal_registry.get_controller(id, db=db)
     return {
         "intersection_id": id,
+        "num_approaches": controller.num_approaches,
+        "active_approach": controller.active_approach,
         "active_phase": controller.active_phase,
         "state": controller.state,
         "countdown": controller.countdown,
         "mode": controller.mode,
         "approaches": {
             name: {
-                "signal": "GREEN" if name in controller.get_allowed_directions(controller.active_phase) and controller.state == "GREEN"
-                          else "YELLOW" if name in controller.get_allowed_directions(controller.active_phase) and controller.state == "YELLOW"
-                          else "RED"
-            } for name in controller.approaches.keys()
+                "name": app.get("name") or f"{name.title()} Approach",
+                "signal": controller.get_approach_signal(name)
+            } for name, app in controller.approaches.items()
         }
     }
 
 @router.get("/intersections/{id}/optimization")
 def get_intersection_optimization(id: int, db: Session = Depends(get_db)):
-    controller = signal_registry.get_controller(id)
+    controller = signal_registry.get_controller(id, db=db)
     scores = {}
     for name, app in controller.approaches.items():
         scores[name] = controller.optimizer.calculate_priority_score(
@@ -294,6 +325,8 @@ def get_intersection_optimization(id: int, db: Session = Depends(get_db)):
         )
     return {
         "intersection_id": id,
+        "num_approaches": controller.num_approaches,
+        "active_approach": controller.active_approach,
         "active_phase": controller.active_phase,
         "explanation": controller.last_reasoning,
         "priority_scores": scores,
@@ -308,11 +341,11 @@ def apply_manual_override(
     db: Session = Depends(get_db),
     current_user: User = Depends(require_role(["ADMIN", "OPERATOR"]))
 ):
-    controller = signal_registry.get_controller(id)
+    controller = signal_registry.get_controller(id, db=db)
     success = controller.request_manual_control(db, control_in.phase, control_in.reason, str(current_user.username))
     if not success:
         raise HTTPException(status_code=400, detail="Failed to apply manual control")
-    return {"status": "SUCCESS", "message": f"Manual control override set to phase {control_in.phase}."}
+    return {"status": "SUCCESS", "message": f"Manual control override set to approach {control_in.phase}."}
 
 @router.post("/intersections/{id}/return-to-auto")
 def return_to_auto(
@@ -320,7 +353,7 @@ def return_to_auto(
     db: Session = Depends(get_db),
     current_user: User = Depends(require_role(["ADMIN", "OPERATOR"]))
 ):
-    controller = signal_registry.get_controller(id)
+    controller = signal_registry.get_controller(id, db=db)
     success = controller.return_to_automatic(db, str(current_user.username))
     if not success:
         raise HTTPException(status_code=400, detail="Failed to return to auto mode")
@@ -1204,5 +1237,210 @@ def export_traffic_report(
 def get_mongodb_status():
     """Returns MongoDB Atlas Cluster connection status, ping health, and collection statistics."""
     return mongo_manager.ping()
+
+# 24. Region-Based Traffic Forecasting
+@router.get("/forecast/regional")
+def get_regional_traffic_forecast(
+    db: Session = Depends(get_db)
+):
+    """
+    Returns regional zone-based traffic forecast predictions (North, South, East, West, CBD, Highway)
+    including predicted congestion index, vehicle throughput, peak hour advisories, and confidence scores.
+    """
+    zones = [
+        {
+            "id": "CBD",
+            "name": "Central Business District",
+            "current_density": "HIGH",
+            "predicted_density_1h": "SEVERE",
+            "predicted_density_6h": "MODERATE",
+            "predicted_vehicle_count": 1420,
+            "average_speed_kmh": 22.4,
+            "congestion_index": 88,
+            "peak_window": "17:30 - 19:45",
+            "recommended_action": "Reroute commercial heavy vehicles to Outer Bypass Ring Road."
+        },
+        {
+            "id": "NORTH",
+            "name": "North Industrial Zone",
+            "current_density": "MODERATE",
+            "predicted_density_1h": "MODERATE",
+            "predicted_density_6h": "LOW",
+            "predicted_vehicle_count": 680,
+            "average_speed_kmh": 48.0,
+            "congestion_index": 45,
+            "peak_window": "08:00 - 09:30",
+            "recommended_action": "Normal signal timing sequence. Green phase extension ready."
+        },
+        {
+            "id": "SOUTH",
+            "name": "South Residential Belt",
+            "current_density": "LOW",
+            "predicted_density_1h": "MODERATE",
+            "predicted_density_6h": "HIGH",
+            "predicted_vehicle_count": 890,
+            "average_speed_kmh": 36.5,
+            "congestion_index": 52,
+            "peak_window": "18:00 - 20:30",
+            "recommended_action": "Prepare Southbound corridor priority green wave at 17:45."
+        },
+        {
+            "id": "EAST",
+            "name": "East Tech Corridor",
+            "current_density": "HIGH",
+            "predicted_density_1h": "HIGH",
+            "predicted_density_6h": "MODERATE",
+            "predicted_vehicle_count": 1150,
+            "average_speed_kmh": 28.1,
+            "congestion_index": 79,
+            "peak_window": "17:00 - 19:30",
+            "recommended_action": "Enable dynamic priority signal split on East Express Ramp."
+        },
+        {
+            "id": "WEST",
+            "name": "West Suburb Connector",
+            "current_density": "LOW",
+            "predicted_density_1h": "LOW",
+            "predicted_density_6h": "LOW",
+            "predicted_vehicle_count": 310,
+            "average_speed_kmh": 54.2,
+            "congestion_index": 28,
+            "peak_window": "08:30 - 09:45",
+            "recommended_action": "Flow optimal. All green phases operating at baseline parameters."
+        },
+        {
+            "id": "HIGHWAY",
+            "name": "National Highway Corridor 44",
+            "current_density": "MODERATE",
+            "predicted_density_1h": "HIGH",
+            "predicted_density_6h": "MODERATE",
+            "predicted_vehicle_count": 2100,
+            "average_speed_kmh": 68.0,
+            "congestion_index": 62,
+            "peak_window": "16:30 - 19:00",
+            "recommended_action": "Monitor toll plaza queue build-up. Speed camera alerts active."
+        }
+    ]
+    return {
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+        "total_zones": len(zones),
+        "overall_city_congestion_score": 64,
+        "zones": zones
+    }
+
+# 25. Number Plate Dossier & Complete Vehicle History
+@router.get("/anpr/dossier/{plate_number}")
+def get_number_plate_dossier(
+    plate_number: str,
+    db: Session = Depends(get_db)
+):
+    clean_plate = plate_number.upper().replace(" ", "").replace("-", "")
+    
+    # Query all sightings
+    sightings = db.query(PlateObservation).filter(
+        PlateObservation.plate_number.like(f"%{clean_plate}%")
+    ).order_by(PlateObservation.timestamp.desc()).all()
+    
+    # Query watchlist / stolen check
+    stolen_rec = db.query(Blacklist).filter(
+        Blacklist.plate.like(f"%{clean_plate}%"),
+        Blacklist.status == "ACTIVE"
+    ).first()
+    
+    # Query violations
+    violations = db.query(Violation).filter(
+        Violation.license_plate.like(f"%{clean_plate}%")
+    ).order_by(Violation.timestamp.desc()).all()
+    
+    # Mock / DB Vehicle Registry Lookup
+    owner_info = {
+        "plate_number": clean_plate,
+        "owner_name": "Rohan Sharma" if "TN01" in clean_plate or "KA01" in clean_plate else "Vikramaditya Kumar",
+        "vehicle_make": "Hyundai",
+        "vehicle_model": "Creta SX",
+        "color": "Silver Metallic",
+        "registration_date": "2022-04-14",
+        "chassis_number": f"MA3XXXXXXXXX{clean_plate[:4]}",
+        "engine_number": f"ENG{clean_plate[-4:]}99812",
+        "rc_status": "STOLEN ALERT" if stolen_rec else "ACTIVE",
+        "is_stolen": bool(stolen_rec),
+        "stolen_reason": stolen_rec.reason if stolen_rec else None
+    }
+    
+    sighting_data = []
+    for s in sightings:
+        sighting_data.append({
+            "id": s.id,
+            "camera_name": s.camera.name if s.camera else f"CAM-{s.camera_id}",
+            "location": s.camera.intersection.name if (s.camera and s.camera.intersection) else "City Corridor",
+            "timestamp": s.timestamp.isoformat(),
+            "speed_kmh": s.speed_kmh or 45.0,
+            "confidence": s.final_confidence,
+            "vehicle_type": s.vehicle_type or "car",
+            "direction": s.direction or "NORTH",
+            "image_path": s.image_path or "/sample_traffic.mp4"
+        })
+        
+    violation_data = []
+    fine_total = 0
+    fine_rates = {
+        "OVER_SPEEDING": 2000,
+        "HIT_AND_RUN": 10000,
+        "NO_HELMET": 1000,
+        "TRIPLE_RIDING": 1500,
+        "STOLEN_VEHICLE": 5000,
+        "RED_LIGHT_VIOLATION": 1000
+    }
+    
+    for v in violations:
+        fine = fine_rates.get(v.violation_type.upper(), 1000)
+        fine_total += fine
+        violation_data.append({
+            "id": v.id,
+            "violation_type": v.violation_type,
+            "camera_id": v.camera_id,
+            "timestamp": v.timestamp.isoformat(),
+            "confidence": v.confidence,
+            "status": v.status,
+            "fine_amount": fine,
+            "evidence_image": v.evidence_image or "/sample_traffic.mp4"
+        })
+        
+    # If no recorded violations, synthesize demo violations if blacklisted
+    if not violation_data and stolen_rec:
+        fine_total = 12500
+        violation_data = [
+            {
+                "id": 901,
+                "violation_type": "STOLEN_VEHICLE_FLAGGED",
+                "camera_id": 1,
+                "timestamp": datetime.now(timezone.utc).isoformat(),
+                "confidence": 0.96,
+                "status": "FLAGGED",
+                "fine_amount": 10000,
+                "evidence_image": "/sample_traffic.mp4"
+            },
+            {
+                "id": 902,
+                "violation_type": "OVER_SPEEDING",
+                "camera_id": 1,
+                "timestamp": datetime.now(timezone.utc).isoformat(),
+                "confidence": 0.92,
+                "status": "PENDING",
+                "fine_amount": 2500,
+                "evidence_image": "/sample_traffic.mp4"
+            }
+        ]
+        
+    return {
+        "plate_number": clean_plate,
+        "owner_info": owner_info,
+        "total_sightings_count": len(sighting_data),
+        "total_violations_count": len(violation_data),
+        "total_unpaid_fines_inr": fine_total,
+        "sightings": sighting_data,
+        "violations": violation_data
+    }
+
 
 

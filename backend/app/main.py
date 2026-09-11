@@ -27,8 +27,30 @@ from app.traffic.signal_controller import signal_optimizer, signal_registry
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("VIGITRA")
 
+from sqlalchemy import text
+
 # Create database tables automatically on startup
 Base.metadata.create_all(bind=engine)
+
+# Migration helper for newly added columns on SQLite
+try:
+    with engine.connect() as conn:
+        for col_def in [
+            "ALTER TABLE intersections ADD COLUMN num_approaches INTEGER DEFAULT 4;",
+            "ALTER TABLE intersections ADD COLUMN approaches_config JSON;",
+            "ALTER TABLE users ADD COLUMN area_jurisdiction VARCHAR(100);",
+            "ALTER TABLE users ADD COLUMN police_id VARCHAR(50);",
+            "ALTER TABLE users ADD COLUMN mobile_number VARCHAR(20);",
+            "ALTER TABLE users ADD COLUMN is_approved BOOLEAN DEFAULT 1;"
+        ]:
+            try:
+                conn.execute(text(col_def))
+                conn.commit()
+            except Exception:
+                pass
+except Exception as e:
+    logger.warning(f"Column migration check notice: {e}")
+
 
 cv_processor = TrafficVisionProcessor()
 
@@ -236,7 +258,7 @@ async def background_video_processing_loop():
 
                     # 3. Dynamic Signal Controller Optimization Tick
                     if cam.intersection_id:
-                        controller = signal_registry.get_controller(cast(int, cam.intersection_id))
+                        controller = signal_registry.get_controller(cast(int, cam.intersection_id), db=db)
 
                         has_emergency = len(res["emergency_detected"]) > 0
                         if has_emergency:
@@ -256,6 +278,8 @@ async def background_video_processing_loop():
                         await ws_manager.broadcast({
                             "event": "SIGNAL_STATE_CHANGED",
                             "intersection_id": cam.intersection_id,
+                            "num_approaches": controller.num_approaches,
+                            "active_approach": controller.active_approach,
                             "active_phase": controller.active_phase,
                             "state": controller.state,
                             "countdown": controller.countdown,
@@ -263,13 +287,12 @@ async def background_video_processing_loop():
                             "reasoning": controller.last_reasoning,
                             "approaches": {
                                 name: {
+                                    "name": app.get("name") or f"{name.title()} Approach",
                                     "direction": app["direction"],
                                     "vehicle_count": round(app["vehicle_count"], 1),
                                     "queue_length": app["queue_length"],
                                     "waiting_time": round(app["waiting_time"], 1),
-                                    "signal": "GREEN" if name in controller.get_allowed_directions(controller.active_phase) and controller.state == "GREEN"
-                                              else "YELLOW" if name in controller.get_allowed_directions(controller.active_phase) and controller.state == "YELLOW"
-                                              else "RED"
+                                    "signal": controller.get_approach_signal(name)
                                 } for name, app in controller.approaches.items()
                             }
                         })
@@ -306,7 +329,7 @@ async def lifespan(app: FastAPI):
     # Seed default admin and operator users if missing
     try:
         from app.core import security
-        from app.models.models import User, RoleEnum
+        from app.models.models import User, RoleEnum, Intersection, Signal
         db_seed: Session = SessionLocal()
         try:
             if not db_seed.query(User).filter(User.username == "admin").first():
@@ -329,6 +352,60 @@ async def lifespan(app: FastAPI):
                 db_seed.add_all([admin_user, operator_user])
                 db_seed.commit()
                 logger.info("Seeded default users: 'admin' and 'operator'.")
+
+            # Seed Default Test Junctions (4-side, 3-side, 2-side)
+            if db_seed.query(Intersection).count() == 0:
+                j1 = Intersection(
+                    id=1,
+                    name="Central Plaza Junction (4-Side)",
+                    location="MG Road & Park Street Cross",
+                    latitude=12.9716,
+                    longitude=77.5946,
+                    total_lanes=4,
+                    num_approaches=4,
+                    approaches_config=[
+                        {"id": "NORTH", "name": "North Approach", "direction": "NORTH"},
+                        {"id": "EAST", "name": "East Approach", "direction": "EAST"},
+                        {"id": "SOUTH", "name": "South Approach", "direction": "SOUTH"},
+                        {"id": "WEST", "name": "West Approach", "direction": "WEST"}
+                    ]
+                )
+                j2 = Intersection(
+                    id=2,
+                    name="Expressway Merge T-Junction (3-Side)",
+                    location="Outer Ring Road Interchange",
+                    latitude=12.9780,
+                    longitude=77.6010,
+                    total_lanes=3,
+                    num_approaches=3,
+                    approaches_config=[
+                        {"id": "NORTH", "name": "North Main Approach", "direction": "NORTH"},
+                        {"id": "EAST", "name": "East Ramp Approach", "direction": "EAST"},
+                        {"id": "WEST", "name": "West Express Approach", "direction": "WEST"}
+                    ]
+                )
+                j3 = Intersection(
+                    id=3,
+                    name="River Bridge Access Junction (2-Side)",
+                    location="North Corridor Bridge Toll Gate",
+                    latitude=12.9850,
+                    longitude=77.6100,
+                    total_lanes=2,
+                    num_approaches=2,
+                    approaches_config=[
+                        {"id": "NORTH", "name": "Northbound Bridge Approach", "direction": "NORTH"},
+                        {"id": "SOUTH", "name": "Southbound Bridge Approach", "direction": "SOUTH"}
+                    ]
+                )
+                db_seed.add_all([j1, j2, j3])
+                db_seed.commit()
+
+                s1 = Signal(intersection_id=1, current_phase="NORTH", green_duration=35, red_duration=35)
+                s2 = Signal(intersection_id=2, current_phase="NORTH", green_duration=30, red_duration=30)
+                s3 = Signal(intersection_id=3, current_phase="NORTH", green_duration=25, red_duration=25)
+                db_seed.add_all([s1, s2, s3])
+                db_seed.commit()
+                logger.info("Seeded default 4-Side, 3-Side, and 2-Side test junctions.")
         finally:
             db_seed.close()
     except Exception as seed_err:

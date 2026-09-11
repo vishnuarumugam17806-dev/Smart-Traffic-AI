@@ -22,8 +22,6 @@ export const AndroidDrawer: React.FC<AndroidDrawerProps> = ({ isOpen, onClose })
   useEffect(() => {
     if (!isOpen) return;
 
-    window.history.pushState({ drawerOpen: true }, '');
-
     const handlePopState = () => {
       onClose();
     };
@@ -43,6 +41,7 @@ export const AndroidDrawer: React.FC<AndroidDrawerProps> = ({ isOpen, onClose })
     { name: 'Signal Control', path: '/signals', icon: TrafficCone, category: 'CORE' },
     { name: 'Alerts', path: '/alerts', icon: Bell, badge: 'LIVE', category: 'AI' },
     { name: 'Traffic Forecast', path: '/predictions', icon: TrendingUp, category: 'ANALYTICS' },
+    { name: 'Region Forecast', path: '/forecast', icon: TrendingUp, category: 'ANALYTICS' },
     { name: 'Recorded Video', path: '/recordings', icon: Film, category: 'CORE' },
     { name: 'Link Mobile Device', path: '/devices', icon: Smartphone, category: 'CORE' },
   ];
@@ -65,7 +64,7 @@ export const AndroidDrawer: React.FC<AndroidDrawerProps> = ({ isOpen, onClose })
       />
 
       {/* Slide-Out Drawer Content (85% Phone Width) */}
-      <div className="relative w-[85%] max-w-[340px] bg-[#EEF4F8] h-full flex flex-col justify-between shadow-2xl z-50 overflow-hidden">
+      <div className="relative w-[85vw] max-w-[340px] min-w-[280px] bg-[#EEF4F8] h-full flex flex-col justify-between z-50 overflow-hidden">
         
         {/* Drawer Header */}
         <div className="p-3.5 bg-[#E5EFF6] border-b border-[#DCE4EA] flex items-center justify-between shrink-0">

@@ -1,5 +1,5 @@
 from datetime import datetime
-from typing import Optional, List, Any
+from typing import Optional, List, Any, Dict
 from pydantic import BaseModel, EmailStr
 from app.models.models import RoleEnum, CongestionLevelEnum, IncidentStatusEnum, CameraStatusEnum
 
@@ -14,14 +14,19 @@ class TokenData(BaseModel):
 
 # User
 class UserCreate(BaseModel):
-    username: str
-    email: str
+    username: Optional[str] = None
+    email: Optional[str] = None
     password: str
     full_name: Optional[str] = None
     role: Optional[RoleEnum] = RoleEnum.OPERATOR
+    police_id: Optional[str] = None
+    area_jurisdiction: Optional[str] = None
+    mobile_number: Optional[str] = None
 
 class UserLogin(BaseModel):
-    username: str
+    username: Optional[str] = None
+    police_id: Optional[str] = None
+    mobile_number: Optional[str] = None
     password: str
 
 class UserOut(BaseModel):
@@ -31,10 +36,18 @@ class UserOut(BaseModel):
     full_name: Optional[str]
     role: RoleEnum
     is_active: bool
+    police_id: Optional[str] = None
+    area_jurisdiction: Optional[str] = None
+    mobile_number: Optional[str] = None
+    is_approved: bool = True
     created_at: datetime
 
     class Config:
         from_attributes = True
+
+class UserApprove(BaseModel):
+    is_approved: bool
+
 
 # Intersection
 class IntersectionCreate(BaseModel):
@@ -43,6 +56,8 @@ class IntersectionCreate(BaseModel):
     latitude: Optional[float] = None
     longitude: Optional[float] = None
     total_lanes: int = 4
+    num_approaches: int = 4
+    approaches_config: Optional[List[Dict[str, Any]]] = None
 
 class IntersectionOut(BaseModel):
     id: int
@@ -52,10 +67,17 @@ class IntersectionOut(BaseModel):
     longitude: Optional[float]
     current_status: CongestionLevelEnum
     total_lanes: int
+    num_approaches: int = 4
+    approaches_config: Optional[List[Dict[str, Any]]] = None
     created_at: datetime
 
     class Config:
         from_attributes = True
+
+class JunctionConfigUpdate(BaseModel):
+    num_approaches: int
+    approaches: List[Dict[str, Any]]
+
 
 # Camera
 class CameraCreate(BaseModel):

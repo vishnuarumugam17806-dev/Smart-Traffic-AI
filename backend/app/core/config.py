@@ -1,7 +1,16 @@
 import os
 from typing import List, Optional
+from dotenv import load_dotenv
 # pyrefly: ignore [missing-import]
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+_env_backend_path = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", ".env"))
+_env_root_path = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "..", ".env"))
+
+if os.path.exists(_env_backend_path):
+    load_dotenv(_env_backend_path)
+if os.path.exists(_env_root_path):
+    load_dotenv(_env_root_path)
 
 class Settings(BaseSettings):
     PROJECT_NAME: str = "VIGITRA"
@@ -11,26 +20,26 @@ class Settings(BaseSettings):
     ACCESS_TOKEN_EXPIRE_MINUTES: int = 60 * 24  # 24 hours
     
     # Domain & Base URLs
-    FRONTEND_BASE_URL: str = os.getenv("FRONTEND_BASE_URL", "http://localhost:5173")
-    BACKEND_BASE_URL: str = os.getenv("BACKEND_BASE_URL", "http://localhost:8000")
-    WEBSOCKET_BASE_URL: str = os.getenv("WEBSOCKET_BASE_URL", "ws://localhost:8000/ws")
+    FRONTEND_BASE_URL: str = "http://localhost:5173"
+    BACKEND_BASE_URL: str = "http://localhost:8000"
+    WEBSOCKET_BASE_URL: str = "ws://localhost:8000/ws"
     
     # WebRTC STUN/TURN Server Configuration
-    TURN_SERVER_URL: str = os.getenv("TURN_SERVER_URL", "stun:stun.l.google.com:19302")
-    TURN_USERNAME: Optional[str] = os.getenv("TURN_USERNAME", None)
-    TURN_CREDENTIAL: Optional[str] = os.getenv("TURN_CREDENTIAL", None)
+    TURN_SERVER_URL: str = "stun:stun.l.google.com:19302"
+    TURN_USERNAME: Optional[str] = None
+    TURN_CREDENTIAL: Optional[str] = None
 
     # Database
-    POSTGRES_SERVER: str = os.getenv("POSTGRES_SERVER", "localhost")
-    POSTGRES_USER: str = os.getenv("POSTGRES_USER", "postgres")
-    POSTGRES_PASSWORD: str = os.getenv("POSTGRES_PASSWORD", "postgres")
-    POSTGRES_DB: str = os.getenv("POSTGRES_DB", "vigitra_db")
-    POSTGRES_PORT: str = os.getenv("POSTGRES_PORT", "5432")
+    POSTGRES_SERVER: str = "localhost"
+    POSTGRES_USER: str = "postgres"
+    POSTGRES_PASSWORD: str = "postgres"
+    POSTGRES_DB: str = "vigitra_db"
+    POSTGRES_PORT: str = "5432"
     DATABASE_URL: Optional[str] = None
 
     # MongoDB Atlas
-    MONGODB_URI: str = os.getenv("MONGODB_URI", "")
-    MONGODB_DB_NAME: str = os.getenv("MONGODB_DB_NAME", "vigitra_db")
+    MONGODB_URI: str = ""
+    MONGODB_DB_NAME: str = "vigitra_db"
 
 
     # Fallback to local SQLite if Postgres is unavailable
@@ -38,8 +47,8 @@ class Settings(BaseSettings):
     SQLITE_URL: str = f"sqlite:///{os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..', '..', 'vigitra.db'))}"
 
     # Redis & RabbitMQ
-    REDIS_URL: str = os.getenv("REDIS_URL", "redis://localhost:6379/0")
-    RABBITMQ_URL: str = os.getenv("RABBITMQ_URL", "amqp://guest:guest@localhost:5672/")
+    REDIS_URL: str = "redis://localhost:6379/0"
+    RABBITMQ_URL: str = "amqp://guest:guest@localhost:5672/"
 
     # CORS
     BACKEND_CORS_ORIGINS: List[str] = [
@@ -48,6 +57,7 @@ class Settings(BaseSettings):
         "http://localhost:5173",
         "http://127.0.0.1:3000",
         "http://127.0.0.1:5173",
+        "https://vigitra-frontend.onrender.com",
         "*"
     ]
 
@@ -63,12 +73,16 @@ class Settings(BaseSettings):
     CONFIDENCE_THRESHOLD: float = 0.45
 
     # GIS Map Provider Configuration
-    MAP_PROVIDER: str = os.getenv("MAP_PROVIDER", "CartoDB")
-    MAP_API_KEY: Optional[str] = os.getenv("MAP_API_KEY", None)
-    GEOCODING_API_KEY: Optional[str] = os.getenv("GEOCODING_API_KEY", None)
-    ROUTING_API_KEY: Optional[str] = os.getenv("ROUTING_API_KEY", None)
+    MAP_PROVIDER: str = "CartoDB"
+    MAP_API_KEY: Optional[str] = None
+    GEOCODING_API_KEY: Optional[str] = None
+    ROUTING_API_KEY: Optional[str] = None
 
-    model_config = SettingsConfigDict(case_sensitive=True, env_file=".env", extra="ignore")
+    model_config = SettingsConfigDict(
+        case_sensitive=True,
+        env_file=(_env_backend_path, _env_root_path, ".env"),
+        extra="ignore"
+    )
 
     def get_db_url(self) -> str:
         if self.DATABASE_URL:
@@ -76,3 +90,4 @@ class Settings(BaseSettings):
         return f"postgresql://{self.POSTGRES_USER}:{self.POSTGRES_PASSWORD}@{self.POSTGRES_SERVER}:{self.POSTGRES_PORT}/{self.POSTGRES_DB}"
 
 settings = Settings()
+

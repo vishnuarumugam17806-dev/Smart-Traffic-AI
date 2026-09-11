@@ -34,6 +34,7 @@ export const Trajectories: React.FC = () => {
   const [speed, setSpeed] = useState<number>(0);
   const [distance, setDistance] = useState<number>(0);
 
+  const mapContainerRef = useRef<HTMLDivElement | null>(null);
   const mapRef = useRef<any>(null);
   const pathLayerRef = useRef<any>(null);
   const markersRef = useRef<any>({});
@@ -52,7 +53,9 @@ export const Trajectories: React.FC = () => {
     fetchGraph();
     return () => {
       if (mapRef.current) {
-        mapRef.current.remove();
+        try {
+          mapRef.current.remove();
+        } catch (e) {}
         mapRef.current = null;
       }
     };
@@ -60,69 +63,80 @@ export const Trajectories: React.FC = () => {
 
   const initMap = (nodes: GraphNode[], edges: GraphEdge[]) => {
     const L = (window as any).L;
-    if (!L || mapRef.current) return;
+    if (!L || !mapContainerRef.current) return;
 
-    const container = L.DomUtil.get('leaflet-gis-map');
-    if (container && container._leaflet_id) {
-      container._leaflet_id = null;
+    if (mapRef.current) {
+      try {
+        mapRef.current.remove();
+      } catch (e) {}
+      mapRef.current = null;
     }
 
-    const map = L.map('leaflet-gis-map', {
-      zoomControl: false
-    }).setView([12.9716, 77.5946], 13);
-    mapRef.current = map;
+    const container = mapContainerRef.current;
+    if ((container as any)._leaflet_id) {
+      (container as any)._leaflet_id = null;
+    }
 
-    const tileLayer = L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-      attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors',
-      maxZoom: 19
-    });
+    try {
+      const map = L.map(container, {
+        zoomControl: false
+      }).setView([12.9716, 77.5946], 13);
+      mapRef.current = map;
 
-    tileLayer.on('tileerror', (error: any) => {
-      if (error.tile && !error.tile.dataset.retried) {
-        error.tile.dataset.retried = 'true';
-        error.tile.src = `https://tile.openstreetmap.org/${error.coords.z}/${error.coords.x}/${error.coords.y}.png`;
-      }
-    });
-
-    tileLayer.addTo(map);
-
-    L.control.zoom({ position: 'bottomright' }).addTo(map);
-
-    nodes.forEach((node) => {
-      let color = '#2E7D5B';
-      if (node.status === 'OFFLINE') color = '#C85D5D';
-      else if (node.status === 'DEGRADED') color = '#B7791F';
-
-      const htmlIcon = L.divIcon({
-        className: 'custom-div-icon',
-        html: `<div style="background-color: ${color}; width: 14px; height: 14px; border: 2px solid #ffffff; border-radius: 50%; box-shadow: 0 1px 3px rgba(0,0,0,0.3);"></div>`,
-        iconSize: [14, 14],
-        iconAnchor: [7, 7]
+      const tileLayer = L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+        attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors',
+        maxZoom: 19
       });
 
-      const marker = L.marker([node.lat, node.lng], { icon: htmlIcon })
-        .addTo(map)
-        .on('click', () => {
-          setSelectedCamera(node);
+      tileLayer.on('tileerror', (error: any) => {
+        if (error.tile && !error.tile.dataset.retried) {
+          error.tile.dataset.retried = 'true';
+          error.tile.src = `https://tile.openstreetmap.org/${error.coords.z}/${error.coords.x}/${error.coords.y}.png`;
+        }
+      });
+
+      tileLayer.addTo(map);
+
+      L.control.zoom({ position: 'bottomright' }).addTo(map);
+
+      nodes.forEach((node) => {
+        let color = '#2E7D5B';
+        if (node.status === 'OFFLINE') color = '#C85D5D';
+        else if (node.status === 'DEGRADED') color = '#B7791F';
+
+        const htmlIcon = L.divIcon({
+          className: 'custom-div-icon',
+          html: `<div style="background-color: ${color}; width: 14px; height: 14px; border: 2px solid #ffffff; border-radius: 50%; box-shadow: 0 1px 3px rgba(0,0,0,0.3);"></div>`,
+          iconSize: [14, 14],
+          iconAnchor: [7, 7]
         });
 
-      marker.bindTooltip(`<b>${node.name}</b>`, { direction: 'top', offset: [0, -5] });
-      markersRef.current[node.id] = node;
-    });
+        const marker = L.marker([node.lat, node.lng], { icon: htmlIcon })
+          .addTo(map)
+          .on('click', () => {
+            setSelectedCamera(node);
+          });
 
-    edges.forEach((edge) => {
-      const sourceNode = nodes.find(n => n.id === edge.source);
-      const targetNode = nodes.find(n => n.id === edge.target);
+        marker.bindTooltip(`<b>${node.name}</b>`, { direction: 'top', offset: [0, -5] });
+        markersRef.current[node.id] = node;
+      });
 
-      if (sourceNode && targetNode) {
-        L.polyline([[sourceNode.lat, sourceNode.lng], [targetNode.lat, targetNode.lng]], {
-          color: '#CBD5E1',
-          weight: 3,
-          opacity: 0.6,
-          dashArray: '4, 6'
-        }).addTo(map);
-      }
-    });
+      edges.forEach((edge) => {
+        const sourceNode = nodes.find(n => n.id === edge.source);
+        const targetNode = nodes.find(n => n.id === edge.target);
+
+        if (sourceNode && targetNode) {
+          L.polyline([[sourceNode.lat, sourceNode.lng], [targetNode.lat, targetNode.lng]], {
+            color: '#CBD5E1',
+            weight: 3,
+            opacity: 0.6,
+            dashArray: '4, 6'
+          }).addTo(map);
+        }
+      });
+    } catch (err) {
+      console.warn("Trajectories Leaflet map init warning:", err);
+    }
   };
 
   const handleSearch = async (e?: React.FormEvent) => {
@@ -306,7 +320,7 @@ export const Trajectories: React.FC = () => {
 
       {/* Main Interactive Map */}
       <div className="flex-1 h-[360px] sm:h-[480px] lg:h-full relative min-h-[300px]">
-        <div id="leaflet-gis-map" className="w-full h-full z-10" />
+        <div ref={mapContainerRef} className="w-full h-full z-10" />
 
         <div className="absolute top-3 left-3 z-20 pointer-events-none">
           <div className="p-2 sm:p-3 bg-white/90 border border-[#DCE4EA] rounded shadow-xs flex items-center gap-2">

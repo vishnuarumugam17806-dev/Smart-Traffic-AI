@@ -15,13 +15,16 @@ services:
         sync: false
       - key: MONGODB_DB_NAME
         value: vigitra_db
+      - key: FRONTEND_BASE_URL
+        value: https://vigitra-frontend.onrender.com
 
   # 2. React Vite Frontend Static SPA Service
   - type: web
     name: vigitra-frontend
     env: static
-    buildCommand: cd frontend && npm install && npm run build
-    staticPublishPath: frontend/dist
+    rootDir: frontend
+    buildCommand: npm install && npm run build
+    staticPublishPath: dist
     routes:
       - type: rewrite
         source: /*
@@ -31,4 +34,7 @@ services:
         value: https://vigitra-backend.onrender.com/api/v1
       - key: VITE_WS_URL
         value: wss://vigitra-backend.onrender.com/ws/traffic
+      - key: VITE_FRONTEND_BASE_URL
+        value: https://vigitra-frontend.onrender.com
+
 

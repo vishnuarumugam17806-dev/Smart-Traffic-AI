@@ -1,5 +1,5 @@
-import React, { useState, useEffect } from 'react';
-import { Outlet } from 'react-router-dom';
+import React, { useState, useEffect, useRef } from 'react';
+import { Outlet, useLocation } from 'react-router-dom';
 import { Sidebar } from '../components/Sidebar';
 import { Header } from '../components/Header';
 import { AndroidHeader } from '../components/AndroidHeader';
@@ -10,9 +10,18 @@ import { useViewportScaler } from '../hooks/useViewportScaler';
 
 export const Layout: React.FC = () => {
   useViewportScaler();
+  const location = useLocation();
+  const mainRef = useRef<HTMLDivElement | null>(null);
+  const mobileMainRef = useRef<HTMLDivElement | null>(null);
   const { setIsConnected, setActiveLiveUpdate } = useStore();
   const [drawerOpen, setDrawerOpen] = useState<boolean>(false);
 
+  // Reset scroll position on route navigation
+  useEffect(() => {
+    if (mainRef.current) mainRef.current.scrollTop = 0;
+    if (mobileMainRef.current) mobileMainRef.current.scrollTop = 0;
+    window.scrollTo(0, 0);
+  }, [location.pathname]);
 
   useEffect(() => {
     const envWsUrl = import.meta.env.VITE_WS_URL;
@@ -56,8 +65,8 @@ export const Layout: React.FC = () => {
         <Sidebar />
         <div className="flex-1 flex flex-col min-w-0 w-full overflow-x-hidden">
           <Header />
-          <main className="flex-1 overflow-y-auto w-full max-w-full overflow-x-hidden">
-            <Outlet />
+          <main ref={mainRef} className="flex-1 overflow-y-auto w-full max-w-full overflow-x-hidden">
+            <Outlet key={location.pathname} />
           </main>
         </div>
       </div>
@@ -74,8 +83,8 @@ export const Layout: React.FC = () => {
         <AndroidBottomNav onOpenDrawer={() => setDrawerOpen(true)} />
 
         {/* Mobile Page Content Area */}
-        <main className="flex-1 w-full max-w-full overflow-x-hidden">
-          <Outlet />
+        <main ref={mobileMainRef} className="flex-1 w-full max-w-full overflow-x-hidden">
+          <Outlet key={location.pathname} />
         </main>
       </div>
     </div>

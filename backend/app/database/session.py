@@ -26,8 +26,27 @@ def get_engine():
     logger.info(f"Using SQLite database engine at {sqlite_url}")
     return engine
 
+from sqlalchemy import text
+
 engine = get_engine()
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
+
+# Auto-create tables & migration helper for new SQLite columns
+Base.metadata.create_all(bind=engine)
+try:
+    with engine.connect() as conn:
+        try:
+            conn.execute(text("ALTER TABLE intersections ADD COLUMN num_approaches INTEGER DEFAULT 4;"))
+            conn.commit()
+        except Exception:
+            pass
+        try:
+            conn.execute(text("ALTER TABLE intersections ADD COLUMN approaches_config JSON;"))
+            conn.commit()
+        except Exception:
+            pass
+except Exception:
+    pass
 
 def get_db():
     db = SessionLocal()

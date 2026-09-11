@@ -126,53 +126,96 @@ class AdaptiveSignalOptimizer:
 
 class SignalController:
     """
-    Intersection Signal Controller enforcing a strict state machine:
-    GREEN -> YELLOW (3s) -> RED_CLEARANCE (2s) -> RED -> NEXT PHASE GREEN.
-    Supports Automatic Adaptive Mode, Manual Override, Emergency Preemption, and Anti-Starvation Fairness.
+    Dynamic Multi-Side Intersection Signal Controller supporting 2, 3, or 4 approach junctions.
+    Enforces safe state machine: GREEN -> YELLOW (3s) -> RED_CLEARANCE (2s) -> RED -> NEXT APPROACH GREEN.
+    Supports Automatic Adaptive Priority Optimization, Manual Override per Approach, Emergency Preemption, and Anti-Starvation Fairness.
     """
 
-    def __init__(self, intersection_id: int):
+    def __init__(self, intersection_id: int, num_approaches: int = 4, approaches_config: Optional[List[Dict[str, Any]]] = None):
         self.intersection_id = intersection_id
-        self.active_phase = "NORTH_SOUTH"  # NORTH_SOUTH, EAST_WEST
+        self.num_approaches = num_approaches
         self.state = "GREEN"  # GREEN, YELLOW, RED_CLEARANCE
         self.countdown = 30
         self.mode = "AUTOMATIC"  # AUTOMATIC, MANUAL, EMERGENCY, FAILSAFE
 
-        self.manual_target_phase = None
+        self.manual_target_approach = None
         self.manual_reason = None
         self.manual_user = None
 
-        self.approaches = {
-            "NORTH": self._init_approach("NORTH"),
-            "SOUTH": self._init_approach("SOUTH"),
-            "EAST": self._init_approach("EAST"),
-            "WEST": self._init_approach("WEST")
-        }
-
         self.optimizer = AdaptiveSignalOptimizer()
         self.last_decision_time = datetime.utcnow()
-        self.last_reasoning = "System initialized in Automatic mode."
+        self.last_reasoning = f"System initialized in Automatic mode ({self.num_approaches}-approach junction)."
         self.elapsed_green_time = 0.0
 
-    def _init_approach(self, direction: str) -> Dict[str, Any]:
+        self.approaches: Dict[str, Dict[str, Any]] = {}
+        self.configure_approaches(num_approaches, approaches_config)
+
+        self.active_approach = list(self.approaches.keys())[0] if self.approaches else "NORTH"
+        self.active_phase = self.active_approach
+
+    @property
+    def manual_target_phase(self):
+        return getattr(self, '_manual_raw_phase', None) or self.manual_target_approach
+
+    @manual_target_phase.setter
+    def manual_target_phase(self, val):
+        self._manual_raw_phase = val
+        self.manual_target_approach = val
+
+    def configure_approaches(self, num_approaches: int, approaches_config: Optional[List[Dict[str, Any]]] = None):
+        self.num_approaches = num_approaches
+        self.approaches = {}
+
+        if approaches_config and len(approaches_config) > 0:
+            for item in approaches_config[:num_approaches]:
+                key = str(item.get("direction") or item.get("name") or f"APPROACH_{len(self.approaches)+1}").upper()
+                self.approaches[key] = self._init_approach(
+                    direction=key,
+                    name=item.get("name") or f"{key.title()} Approach",
+                    camera_id=item.get("camera_id")
+                )
+        else:
+            default_keys = ["NORTH", "SOUTH"] if num_approaches == 2 else (["NORTH", "EAST", "WEST"] if num_approaches == 3 else ["NORTH", "EAST", "SOUTH", "WEST"])
+            for k in default_keys:
+                self.approaches[k] = self._init_approach(direction=k, name=f"{k.title()} Approach")
+
+        if not hasattr(self, 'active_approach') or self.active_approach not in self.approaches:
+            self.active_approach = list(self.approaches.keys())[0] if self.approaches else "NORTH"
+            self.active_phase = self.active_approach
+
+    def _init_approach(self, direction: str, name: str = "", camera_id: Optional[int] = None) -> Dict[str, Any]:
         return {
             "direction": direction,
-            "vehicle_count": 8,
-            "queue_length": 3,
+            "name": name or f"{direction.title()} Approach",
+            "camera_id": camera_id,
+            "vehicle_count": 12.0,
+            "queue_length": 5,
             "waiting_time": 0.0,
             "queue_growth_rate": 0.15,
             "flow_rate": 0.6,
             "time_since_last_green": 0.0,
-            "pedestrian_waiting": 1,
+            "pedestrian_waiting": 0,
             "emergency_detected": False,
             "emergency_type": None
         }
 
     def get_allowed_directions(self, phase: str) -> List[str]:
+        if phase in self.approaches:
+            return [phase]
         if phase == "NORTH_SOUTH":
-            return ["NORTH", "SOUTH"]
-        else:
-            return ["EAST", "WEST"]
+            return [k for k in ["NORTH", "SOUTH"] if k in self.approaches]
+        elif phase == "EAST_WEST":
+            return [k for k in ["EAST", "WEST"] if k in self.approaches]
+        return [list(self.approaches.keys())[0]] if self.approaches else []
+
+    def get_approach_signal(self, approach_key: str) -> str:
+        allowed = self.get_allowed_directions(self.active_phase)
+        if approach_key in allowed:
+            if self.state == "GREEN":
+                return "GREEN"
+            elif self.state == "YELLOW":
+                return "YELLOW"
+        return "RED"
 
     def tick(self, db: Session, dt: float = 1.5):
         """State machine tick executed every processing cycle (1.5s)."""
@@ -217,7 +260,7 @@ class SignalController:
         if self.state == "GREEN":
             self.state = "YELLOW"
             self.countdown = settings.YELLOW_TIME
-            logger.info(f"Intersection #{self.intersection_id} phase {self.active_phase} transitioning to YELLOW.")
+            logger.info(f"Intersection #{self.intersection_id} approach {self.active_approach} transitioning to YELLOW.")
         elif self.state == "YELLOW":
             self.state = "RED_CLEARANCE"
             self.countdown = settings.ALL_RED_TIME
@@ -226,33 +269,37 @@ class SignalController:
             self.state = "GREEN"
             self.elapsed_green_time = 0.0
 
-            if self.mode == "MANUAL" and self.manual_target_phase:
-                self.active_phase = self.manual_target_phase
+            if self.mode == "MANUAL" and self.manual_target_approach:
+                self.active_approach = self.manual_target_approach
+                self.active_phase = self.manual_target_approach
                 self.countdown = 30
-                self.last_reasoning = f"Manual override active: Phase forced to {self.active_phase}."
+                self.last_reasoning = f"Manual override active: Forced green to {self.active_approach} Approach."
             else:
                 self._run_optimization(db)
 
     def _reassess_green_phase(self, db: Session):
         """Continuously checks if waiting approach queue or starvation priority mandates early phase transition."""
         current_dirs = self.get_allowed_directions(self.active_phase)
-        waiting_phase = "EAST_WEST" if self.active_phase == "NORTH_SOUTH" else "NORTH_SOUTH"
-        waiting_dirs = self.get_allowed_directions(waiting_phase)
+        waiting_dirs = [k for k in self.approaches.keys() if k not in current_dirs]
 
         current_queue = sum(self.approaches[d]["queue_length"] for d in current_dirs)
-        waiting_priority_score = sum(
-            self.optimizer.calculate_priority_score(
-                self.approaches[d]["vehicle_count"],
-                self.approaches[d]["queue_length"],
-                self.approaches[d]["waiting_time"],
-                self.approaches[d]["queue_growth_rate"],
-                self.approaches[d]["time_since_last_green"],
-                self.approaches[d]["emergency_detected"],
-                self.approaches[d].get("pedestrian_waiting", 0)
-            ) for d in waiting_dirs
-        )
+        
+        waiting_scores = {}
+        for d in waiting_dirs:
+            app = self.approaches[d]
+            waiting_scores[d] = self.optimizer.calculate_priority_score(
+                app["vehicle_count"],
+                app["queue_length"],
+                app["waiting_time"],
+                app["queue_growth_rate"],
+                app["time_since_last_green"],
+                app["emergency_detected"],
+                app.get("pedestrian_waiting", 0)
+            )
 
-        current_priority_score = sum(
+        max_waiting_score = max(waiting_scores.values()) if waiting_scores else 0.0
+
+        current_scores = [
             self.optimizer.calculate_priority_score(
                 self.approaches[d]["vehicle_count"],
                 self.approaches[d]["queue_length"],
@@ -262,61 +309,57 @@ class SignalController:
                 self.approaches[d]["emergency_detected"],
                 self.approaches[d].get("pedestrian_waiting", 0)
             ) for d in current_dirs
-        )
+        ]
+        current_score = sum(current_scores) if current_scores else 0.0
 
-        if (current_queue == 0) or (waiting_priority_score > current_priority_score + 80.0):
+        if (current_queue == 0) or (max_waiting_score > current_score + 80.0):
             self.state = "YELLOW"
             self.countdown = settings.YELLOW_TIME
             self.last_reasoning = (
-                f"Continuous Reassessment: Queue cleared ({current_queue == 0}) or "
-                f"waiting priority score ({waiting_priority_score:.1f}) exceeded current ({current_priority_score:.1f}). Transitioning safely."
+                f"Continuous Reassessment: Current approach queue cleared ({current_queue == 0}) or "
+                f"waiting approach priority ({max_waiting_score:.1f}) exceeded current ({current_score:.1f}). Transitioning safely."
             )
             logger.info(f"Reassessment triggered phase transition for Intersection #{self.intersection_id}.")
 
     def _run_optimization(self, db: Session):
-        ns_dirs = ["NORTH", "SOUTH"]
-        ew_dirs = ["EAST", "WEST"]
+        """Dynamic Priority Optimization across ALL active approaches (2, 3, or 4 sides)."""
+        scores: Dict[str, float] = {}
+        for name, app in self.approaches.items():
+            scores[name] = self.optimizer.calculate_priority_score(
+                app["vehicle_count"],
+                app["queue_length"],
+                app["waiting_time"],
+                app["queue_growth_rate"],
+                app["time_since_last_green"],
+                app["emergency_detected"],
+                app.get("pedestrian_waiting", 0)
+            )
 
-        ns_score = sum(
-            self.optimizer.calculate_priority_score(
-                self.approaches[d]["vehicle_count"],
-                self.approaches[d]["queue_length"],
-                self.approaches[d]["waiting_time"],
-                self.approaches[d]["queue_growth_rate"],
-                self.approaches[d]["time_since_last_green"],
-                self.approaches[d]["emergency_detected"],
-                self.approaches[d].get("pedestrian_waiting", 0)
-            ) for d in ns_dirs
-        )
+        # Emergency override check
+        emergency_approach = next((name for name, app in self.approaches.items() if app["emergency_detected"]), None)
+        if emergency_approach:
+            best_approach = emergency_approach
+            highest_score = scores[best_approach]
+        else:
+            # Sort approaches by score descending
+            sorted_approaches = sorted(scores.items(), key=lambda x: x[1], reverse=True)
+            best_approach, highest_score = sorted_approaches[0]
 
-        ew_score = sum(
-            self.optimizer.calculate_priority_score(
-                self.approaches[d]["vehicle_count"],
-                self.approaches[d]["queue_length"],
-                self.approaches[d]["waiting_time"],
-                self.approaches[d]["queue_growth_rate"],
-                self.approaches[d]["time_since_last_green"],
-                self.approaches[d]["emergency_detected"],
-                self.approaches[d].get("pedestrian_waiting", 0)
-            ) for d in ew_dirs
-        )
+        app_data = self.approaches[best_approach]
+        queue_len = app_data["queue_length"]
+        veh_count = int(app_data["vehicle_count"])
+        density = "LOW" if queue_len < 3 else ("MODERATE" if queue_len < 10 else "HIGH")
+        green_time = self.optimizer.calculate_dynamic_green(queue_len, veh_count, density)
 
-        selected_phase = "NORTH_SOUTH" if ns_score >= ew_score else "EAST_WEST"
-        selected_dirs = ns_dirs if selected_phase == "NORTH_SOUTH" else ew_dirs
-
-        max_queue = max(self.approaches[d]["queue_length"] for d in selected_dirs)
-        tot_count = sum(self.approaches[d]["vehicle_count"] for d in selected_dirs)
-
-        density = "LOW" if max_queue < 3 else ("MODERATE" if max_queue < 10 else "HIGH")
-        green_time = self.optimizer.calculate_dynamic_green(max_queue, int(tot_count), density)
-
-        self.active_phase = selected_phase
+        self.active_approach = best_approach
+        self.active_phase = best_approach
         self.countdown = green_time
 
+        scores_summary = ", ".join([f"{k}: {v:.1f}pts" for k, v in scores.items()])
         self.last_reasoning = (
-            f"AI Decision: Phase {selected_phase} awarded green for {green_time}s. "
-            f"Priority Score: {max(ns_score, ew_score):.1f} vs {min(ns_score, ew_score):.1f}. "
-            f"Queue: {max_queue} vehicles, average arrival rate: {sum(self.approaches[d]['queue_growth_rate'] for d in selected_dirs)/2.0:.2f} veh/s."
+            f"AI Decision: {best_approach} Approach awarded green for {green_time}s. "
+            f"Highest Priority Score: {highest_score:.1f}pts (Scores: {scores_summary}). "
+            f"Queue: {queue_len} vehicles, Count: {veh_count}."
         )
 
         self._log_decision(db, green_time)
@@ -347,31 +390,42 @@ class SignalController:
             logger.error(f"Error logging signal decision: {e}")
             db.rollback()
 
-    def request_manual_control(self, db: Session, phase: str, reason: str, username: str) -> bool:
-        if phase not in ["NORTH_SOUTH", "EAST_WEST"]:
-            return False
+    def request_manual_control(self, db: Session, target: Optional[str] = None, reason: str = "", username: str = "SYSTEM", phase: Optional[str] = None) -> bool:
+        raw_key = phase or target or "NORTH"
+        target_key = raw_key.upper()
+        self._manual_raw_phase = raw_key
+
+        # If legacy phase, map to an approach
+        if target_key not in self.approaches:
+            if target_key == "NORTH_SOUTH":
+                target_key = "NORTH" if "NORTH" in self.approaches else list(self.approaches.keys())[0]
+            elif target_key == "EAST_WEST":
+                target_key = "EAST" if "EAST" in self.approaches else list(self.approaches.keys())[0]
+            else:
+                return False
 
         self.mode = "MANUAL"
-        self.manual_target_phase = phase
+        self.manual_target_approach = target_key
         self.manual_reason = reason
         self.manual_user = username
 
-        if self.active_phase != phase and self.state == "GREEN":
+        if self.active_approach != target_key and self.state == "GREEN":
             self.state = "YELLOW"
             self.countdown = settings.YELLOW_TIME
         else:
-            self.active_phase = phase
+            self.active_approach = target_key
+            self.active_phase = target_key
             self.state = "GREEN"
             self.countdown = 30
             self.elapsed_green_time = 0.0
 
-        self.last_reasoning = f"MANUAL OVERRIDE applied by User {username}. Reason: {reason}. Forced Phase: {phase}."
+        self.last_reasoning = f"MANUAL OVERRIDE applied by User {username}. Reason: {reason}. Forced Phase: {raw_key} ({target_key})."
 
         try:
             log = AuditLog(
                 username=username,
                 action="MANUAL_SIGNAL_OVERRIDE",
-                details=f"Intersection #{self.intersection_id} forced to phase {phase}. Reason: {reason}."
+                details=f"Intersection #{self.intersection_id} forced to phase {raw_key} ({target_key}). Reason: {reason}."
             )
             db.add(log)
             db.commit()
@@ -383,7 +437,7 @@ class SignalController:
 
     def return_to_automatic(self, db: Session, username: str) -> bool:
         self.mode = "AUTOMATIC"
-        self.manual_target_phase = None
+        self.manual_target_approach = None
         self.manual_reason = None
         self.manual_user = None
 
@@ -408,10 +462,29 @@ class IntersectionsRegistry:
     def __init__(self):
         self.controllers: Dict[int, SignalController] = {}
 
-    def get_controller(self, intersection_id: int) -> SignalController:
+    def get_controller(self, intersection_id: int, db: Optional[Session] = None) -> SignalController:
         if intersection_id not in self.controllers:
-            self.controllers[intersection_id] = SignalController(intersection_id)
+            num_approaches = 4
+            approaches_config = None
+            if db:
+                from app.models.models import Intersection
+                inter = db.query(Intersection).filter(Intersection.id == intersection_id).first()
+                if inter:
+                    num_approaches = inter.num_approaches or 4
+                    approaches_config = inter.approaches_config
+
+            self.controllers[intersection_id] = SignalController(
+                intersection_id=intersection_id,
+                num_approaches=num_approaches,
+                approaches_config=approaches_config
+            )
         return self.controllers[intersection_id]
+
+    def update_junction_config(self, intersection_id: int, num_approaches: int, approaches_config: Optional[List[Dict[str, Any]]] = None):
+        controller = self.get_controller(intersection_id)
+        controller.configure_approaches(num_approaches, approaches_config)
+        return controller
 
 signal_registry = IntersectionsRegistry()
 signal_optimizer = AdaptiveSignalOptimizer()
+

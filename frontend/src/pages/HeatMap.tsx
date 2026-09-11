@@ -16,6 +16,7 @@ export const HeatMap: React.FC = () => {
   const [measurements, setMeasurements] = useState<any>({});
   const { activeLiveUpdate } = useStore();
   
+  const mapContainerRef = useRef<HTMLDivElement | null>(null);
   const mapRef = useRef<any>(null);
   const circlesRef = useRef<any[]>([]);
 
@@ -33,8 +34,6 @@ export const HeatMap: React.FC = () => {
         }
       });
       setMeasurements(measureMap);
-
-      updateHeatmap(nodesData, measureMap);
     } catch (err) {
       console.error('Error loading heatmap metrics:', err);
     }
@@ -44,7 +43,9 @@ export const HeatMap: React.FC = () => {
     fetchMetrics();
     return () => {
       if (mapRef.current) {
-        mapRef.current.remove();
+        try {
+          mapRef.current.remove();
+        } catch (e) {}
         mapRef.current = null;
       }
     };
@@ -58,42 +59,59 @@ export const HeatMap: React.FC = () => {
 
   useEffect(() => {
     const L = (window as any).L;
-    if (!L || mapRef.current || nodes.length === 0) return;
+    if (!L || !mapContainerRef.current) return;
 
-    const container = L.DomUtil.get('leaflet-heatmap-map');
-    if (container && container._leaflet_id) {
-      container._leaflet_id = null;
+    if (mapRef.current) {
+      try {
+        mapRef.current.remove();
+      } catch (e) {}
+      mapRef.current = null;
     }
 
-    const map = L.map('leaflet-heatmap-map', {
-      zoomControl: false
-    }).setView([12.9716, 77.5946], 13);
-    mapRef.current = map;
+    const container = mapContainerRef.current;
+    if ((container as any)._leaflet_id) {
+      (container as any)._leaflet_id = null;
+    }
 
-    const tileLayer = L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-      attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors',
-      maxZoom: 19
-    });
+    try {
+      const map = L.map(container, {
+        zoomControl: false
+      }).setView([12.9716, 77.5946], 13);
+      mapRef.current = map;
 
-    tileLayer.on('tileerror', (error: any) => {
-      if (error.tile && !error.tile.dataset.retried) {
-        error.tile.dataset.retried = 'true';
-        error.tile.src = `https://tile.openstreetmap.org/${error.coords.z}/${error.coords.x}/${error.coords.y}.png`;
+      const tileLayer = L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+        attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors',
+        maxZoom: 19
+      });
+
+      tileLayer.on('tileerror', (error: any) => {
+        if (error.tile && !error.tile.dataset.retried) {
+          error.tile.dataset.retried = 'true';
+          error.tile.src = `https://tile.openstreetmap.org/${error.coords.z}/${error.coords.x}/${error.coords.y}.png`;
+        }
+      });
+
+      tileLayer.addTo(map);
+
+      L.control.zoom({ position: 'bottomright' }).addTo(map);
+
+      if (nodes.length > 0) {
+        updateHeatmap(nodes, measurements);
       }
-    });
-
-    tileLayer.addTo(map);
-
-    L.control.zoom({ position: 'bottomright' }).addTo(map);
-
-    updateHeatmap(nodes, measurements);
-  }, [nodes]);
+    } catch (err) {
+      console.warn("HeatMap Leaflet initialization warning:", err);
+    }
+  }, [nodes, measurements]);
 
   const updateHeatmap = (nodesList: GraphNode[], measureMap: any) => {
     const L = (window as any).L;
     if (!L || !mapRef.current) return;
 
-    circlesRef.current.forEach(c => mapRef.current.removeLayer(c));
+    circlesRef.current.forEach(c => {
+      try {
+        mapRef.current.removeLayer(c);
+      } catch (e) {}
+    });
     circlesRef.current = [];
 
     nodesList.forEach((node) => {
@@ -147,7 +165,7 @@ export const HeatMap: React.FC = () => {
           <Flame className="w-4 h-4 text-accent-teal animate-pulse" />
           <span className="text-[10px] font-mono font-bold text-slate-700 uppercase tracking-wider">Spatial density overlay active</span>
         </div>
-        <div id="leaflet-heatmap-map" className="w-full h-full z-10" />
+        <div ref={mapContainerRef} className="w-full h-full z-10" />
       </div>
     </div>
   );

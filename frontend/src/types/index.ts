@@ -13,6 +13,10 @@ export interface User {
   full_name?: string;
   role: Role;
   is_active: boolean;
+  police_id?: string;
+  area_jurisdiction?: string;
+  mobile_number?: string;
+  is_approved?: boolean;
   created_at: string;
 }
 
@@ -24,6 +28,8 @@ export interface Intersection {
   longitude?: number;
   current_status: CongestionLevel;
   total_lanes: number;
+  num_approaches?: number;
+  approaches_config?: any[];
   created_at: string;
 }
 

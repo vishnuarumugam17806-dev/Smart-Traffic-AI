@@ -3,6 +3,7 @@ import { Plus, Video, Play, Square, RefreshCw, Trash2, Edit3, Wifi } from 'lucid
 import { apiClient } from '../api/client';
 import { Camera } from '../types';
 import { Link } from 'react-router-dom';
+import { CameraCanvasFeed } from '../components/CameraCanvasFeed';
 
 export const Cameras: React.FC = () => {
   const [cameras, setCameras] = useState<Camera[]>([]);
@@ -140,31 +141,31 @@ export const Cameras: React.FC = () => {
       {/* Page Header */}
       <div className="flex items-center justify-between border-b border-surfaceBorder pb-4">
         <div>
-          <h1 className="text-lg font-bold text-slate-800 tracking-tight">CAMERA STREAMS DIRECTORY</h1>
-          <p className="text-xs text-slate-500 font-mono mt-0.5">RTSP, Video File, and CCTV Source Controller</p>
+          <h1 className="text-lg font-bold text-slate-800 tracking-tight">LIVE CAMERAS CONTROL ROOM</h1>
+          <p className="text-xs text-slate-500 font-mono mt-0.5">Real-Time Multi-Camera CCTV Stream Ingestion & Analytics</p>
         </div>
         <button
           onClick={() => { resetForm(); setShowAddModal(true); }}
-          className="px-4 py-2 bg-primary-500 hover:bg-primary-600 text-white font-bold text-xs rounded-lg flex items-center gap-2 transition-colors shadow-sm select-none"
+          className="px-4 py-2 bg-[#245B84] hover:bg-[#1E4A6F] text-white font-bold text-xs rounded-lg flex items-center gap-2 transition-colors shadow-sm select-none"
         >
           <Plus className="w-4 h-4" /> Add New Camera
         </button>
       </div>
 
       {/* Grid of Cameras */}
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">
         {cameras.map((cam) => {
           let statusBadge = "bg-slate-100 text-slate-600 border-slate-200";
-          if (cam.status === 'LIVE') statusBadge = "bg-accent-success/10 text-accent-success border-accent-success/20";
-          else if (cam.status === 'SIMULATION') statusBadge = "bg-primary-50 text-primary-600 border-primary-200";
-          else if (cam.status === 'DEGRADED') statusBadge = "bg-accent-warning/10 text-accent-warning border-accent-warning/20 animate-pulse";
-          else if (cam.status === 'OFFLINE') statusBadge = "bg-accent-danger/10 text-accent-danger border-accent-danger/20";
+          if (cam.status === 'LIVE' || cam.status === 'ONLINE') statusBadge = "bg-[#EAF7EF] text-[#2E7D5B] border-[#D2EADA]";
+          else if (cam.status === 'SIMULATION') statusBadge = "bg-[#EEF6FC] text-[#245B84] border-[#DCE4EA]";
+          else if (cam.status === 'DEGRADED') statusBadge = "bg-amber-50 text-amber-700 border-amber-200 animate-pulse";
+          else if (cam.status === 'OFFLINE') statusBadge = "bg-red-50 text-red-700 border-red-200";
 
           return (
-            <div key={cam.id} className="glass-card p-5 rounded-lg border border-surfaceBorder flex flex-col justify-between space-y-4">
+            <div key={cam.id} className="bg-white p-4 rounded-lg border border-[#DCE4EA] flex flex-col justify-between space-y-3 shadow-xs">
               <div className="flex items-start justify-between">
                 <div className="flex items-center gap-2.5">
-                  <div className="p-2 rounded bg-primary-50 border border-primary-500/10 text-primary-500">
+                  <div className="p-2 rounded bg-[#EEF6FC] border border-[#DCE4EA] text-[#245B84]">
                     <Video className="w-5 h-5" />
                   </div>
                   <div>
@@ -172,15 +173,31 @@ export const Cameras: React.FC = () => {
                     <p className="text-[10px] font-mono text-slate-500">ID: #{cam.id} | Direction: {cam.direction}</p>
                   </div>
                 </div>
-                <span className={`px-2 py-0.5 text-[9px] font-mono font-bold rounded border ${statusBadge}`}>
-                  {cam.status}
-                </span>
+                <div className="flex flex-col items-end gap-1">
+                  <span className={`px-2 py-0.5 text-[9px] font-mono font-bold rounded border ${statusBadge}`}>
+                    {cam.status}
+                  </span>
+                  <span className="px-1.5 py-0.5 text-[8px] font-mono font-extrabold rounded bg-amber-50 text-amber-700 border border-amber-200">
+                    {cam.source_type === 'FILE' ? 'DEMO STREAM' : cam.source_type}
+                  </span>
+                </div>
               </div>
 
-              <div className="p-3 bg-slate-50 rounded border border-surfaceBorder text-xs font-mono space-y-1 text-slate-650 select-none">
-                <p>Type: <span className="text-primary-600 font-bold">{cam.source_type}</span></p>
-                <p className="truncate">URL: <span className="text-slate-500 font-semibold">{cam.source_url}</span></p>
-                <p>FPS: <span className="text-accent-success font-bold">{cam.fps} FPS</span></p>
+              {/* Embedded Camera Canvas Stream */}
+              <div className="rounded overflow-hidden border border-[#DCE4EA]">
+                <CameraCanvasFeed
+                  cameraName={cam.name}
+                  sourceType={cam.source_type}
+                  vehicleCount={12 + (cam.id * 3) % 15}
+                  densityState={(cam.id % 2 === 0) ? 'MODERATE' : 'HIGH'}
+                  queueLength={3 + (cam.id % 6)}
+                  occupancyPct={42.0 + (cam.id * 5) % 35}
+                />
+              </div>
+
+              <div className="p-2.5 bg-slate-50 rounded border border-[#DCE4EA] text-xs font-mono space-y-1 text-slate-650 select-none">
+                <p className="truncate">URL/Source: <span className="text-slate-700 font-semibold">{cam.source_url}</span></p>
+                <p>Frame Rate: <span className="text-[#2E7D5B] font-bold">{cam.fps || 30.0} FPS</span></p>
               </div>
 
               {/* Stream Actions */}

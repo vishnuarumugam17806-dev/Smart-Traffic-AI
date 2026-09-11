@@ -42,6 +42,10 @@ class User(Base):
     full_name: Mapped[Optional[str]] = Column(String(100), nullable=True) # type: ignore
     role: Mapped[RoleEnum] = Column(Enum(RoleEnum), default=RoleEnum.OPERATOR, nullable=False) # type: ignore
     is_active: Mapped[bool] = Column(Boolean, default=True) # type: ignore
+    area_jurisdiction: Mapped[Optional[str]] = Column(String(100), nullable=True) # type: ignore
+    police_id: Mapped[Optional[str]] = Column(String(50), unique=True, index=True, nullable=True) # type: ignore
+    mobile_number: Mapped[Optional[str]] = Column(String(20), nullable=True) # type: ignore
+    is_approved: Mapped[bool] = Column(Boolean, default=True) # type: ignore # Admin/Operator defaults True, Field registration defaults False
     created_at: Mapped[datetime] = Column(DateTime, default=datetime.utcnow) # type: ignore
     updated_at: Mapped[datetime] = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow) # type: ignore
 
@@ -55,6 +59,8 @@ class Intersection(Base):
     longitude: Mapped[Optional[float]] = Column(Float, nullable=True) # type: ignore
     current_status: Mapped[CongestionLevelEnum] = Column(Enum(CongestionLevelEnum), default=CongestionLevelEnum.LOW) # type: ignore
     total_lanes: Mapped[int] = Column(Integer, default=4) # type: ignore
+    num_approaches: Mapped[int] = Column(Integer, default=4) # type: ignore # 2, 3, or 4
+    approaches_config: Mapped[Optional[Any]] = Column(JSON, nullable=True) # type: ignore # List of dicts: [{id, name, direction, camera_id}]
     created_at: Mapped[datetime] = Column(DateTime, default=datetime.utcnow) # type: ignore
 
     cameras = relationship("Camera", back_populates="intersection")
