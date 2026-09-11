@@ -76,7 +76,7 @@ export const HeatMap: React.FC = () => {
     try {
       const map = L.map(container, {
         zoomControl: false
-      }).setView([12.9716, 77.5946], 13);
+      }).setView([13.0604, 80.2496], 13);
       mapRef.current = map;
 
       const tileLayer = L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {

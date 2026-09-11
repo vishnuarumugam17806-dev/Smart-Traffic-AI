@@ -13,7 +13,7 @@ interface SignalControllerCardProps {
 
 export const SignalControllerCard: React.FC<SignalControllerCardProps> = ({
   signalId,
-  intersectionName = 'Central Plaza Junction',
+  intersectionName = 'Anna Salai - Spencers Junction',
   initialPhase = 'GREEN',
   initialGreen = 45,
   initialRed = 45,

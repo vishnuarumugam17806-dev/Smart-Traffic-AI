@@ -21,7 +21,7 @@ def test_register_device_session():
 
 def test_push_frame_base64_valid():
     manager = MobileDeviceManager()
-    manager.register_device_session("device_cam_02", 2, "op_02", "Indiranagar 100ft Rd")
+    manager.register_device_session("device_cam_02", 2, "op_02", "Anna Salai Road")
 
     # Create synthetic frame and convert to base64 JPEG string
     img = np.zeros((100, 100, 3), dtype=np.uint8)
@@ -45,7 +45,7 @@ def test_push_frame_unregistered_device():
 
 def test_disconnect_device():
     manager = MobileDeviceManager()
-    manager.register_device_session("device_cam_03", 3, "op_03", "Koramangala")
+    manager.register_device_session("device_cam_03", 3, "op_03", "T. Nagar")
     manager.disconnect_device("device_cam_03")
 
     session = manager.active_sessions.get("device_cam_03")

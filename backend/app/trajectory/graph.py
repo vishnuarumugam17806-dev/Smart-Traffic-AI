@@ -47,8 +47,8 @@ class TrajectoryGraphEngine:
                 "name": cam.name,
                 "direction": cam.direction,
                 "status": cam.status.value if hasattr(cam.status, 'value') else cam.status,
-                "lat": cam.intersection.latitude if cam.intersection else 12.97,
-                "lng": cam.intersection.longitude if cam.intersection else 77.59
+                "lat": cam.intersection.latitude if cam.intersection else 13.0604,
+                "lng": cam.intersection.longitude if cam.intersection else 80.2496
             })
             
         edges = []
@@ -106,8 +106,8 @@ class TrajectoryGraphEngine:
         for idx, obs in enumerate(obs_list):
             camera_name = obs.camera.name if obs.camera else f"CAM-{obs.camera_id}"
             location = obs.camera.intersection.name if (obs.camera and obs.camera.intersection) else "City Intersection"
-            lat = obs.camera.intersection.latitude if (obs.camera and obs.camera.intersection) else 12.97
-            lng = obs.camera.intersection.longitude if (obs.camera and obs.camera.intersection) else 77.59
+            lat = obs.camera.intersection.latitude if (obs.camera and obs.camera.intersection) else 13.0604
+            lng = obs.camera.intersection.longitude if (obs.camera and obs.camera.intersection) else 80.2496
             
             transition_speed = 0.0
             anomaly_flag = False

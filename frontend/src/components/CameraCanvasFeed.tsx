@@ -15,7 +15,7 @@ interface CameraCanvasFeedProps {
 export type AspectRatioMode = 'AUTO' | '16:9' | '4:3' | '16:10' | '3:4';
 
 export const CameraCanvasFeed: React.FC<CameraCanvasFeedProps> = ({
-  cameraName = 'CCTV-01 Central Plaza North',
+  cameraName = 'CCTV-01 Anna Salai North',
   sourceType = 'DEMO',
   vehicleCount = 14,
   densityState = 'MODERATE',

@@ -80,7 +80,7 @@ export const Trajectories: React.FC = () => {
     try {
       const map = L.map(container, {
         zoomControl: false
-      }).setView([12.9716, 77.5946], 13);
+      }).setView([13.0604, 80.2496], 13);
       mapRef.current = map;
 
       const tileLayer = L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
@@ -173,7 +173,7 @@ export const Trajectories: React.FC = () => {
           if (node) {
             coordinates.push([node.lat, node.lng]);
           } else {
-            coordinates.push([item.latitude || 12.9716, item.longitude || 77.5946]);
+            coordinates.push([item.latitude || 13.0604, item.longitude || 80.2496]);
           }
         });
 

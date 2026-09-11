@@ -94,11 +94,195 @@ def create_camera(
     elif url == "" or url == "offline":
         camera.status = CameraStatusEnum.OFFLINE
     else:
-        camera.status = CameraStatusEnum.SIMULATION
+        camera.status = CameraStatusEnum.LIVE
     db.add(camera)
     db.commit()
     db.refresh(camera)
     return camera
+
+CAMERA_PRESETS = [
+    {
+        "id": "urban_arterial",
+        "name": "CCTV-01 North (Anna Salai - Spencers Junction)",
+        "category": "Urban Hub",
+        "description": "Dense city center 4-way intersection with pedestrian crossings and steady vehicular flow.",
+        "source_url": "sample_traffic_urban.mp4",
+        "source_type": "FILE",
+        "direction": "NORTH",
+        "intersection_id": 1,
+        "badge": "URBAN",
+        "badge_color": "#245B84"
+    },
+    {
+        "id": "congested_cross",
+        "name": "CCTV-02 South (Anna Salai - Spencers Junction)",
+        "category": "Bottleneck & Congestion",
+        "description": "High traffic density queueing corridor during peak morning commute.",
+        "source_url": "sample_traffic_congested.mp4",
+        "source_type": "FILE",
+        "direction": "SOUTH",
+        "intersection_id": 1,
+        "badge": "CONGESTED",
+        "badge_color": "#B84A4A"
+    },
+    {
+        "id": "emergency_corridor",
+        "name": "CCTV-03 East (Chennai Central - Ripon Cross)",
+        "category": "Priority Transit",
+        "description": "Dedicated emergency vehicle transit path with rapid green corridor preemption.",
+        "source_url": "sample_traffic_emergency.mp4",
+        "source_type": "FILE",
+        "direction": "EAST",
+        "intersection_id": 2,
+        "badge": "EMERGENCY",
+        "badge_color": "#E65100"
+    },
+    {
+        "id": "highway_expressway",
+        "name": "CCTV-04 West (Chennai Central - Ripon Cross)",
+        "category": "Expressway / Highway",
+        "description": "Multi-lane high-speed expressway segment with FastTag and radar speed tracking.",
+        "source_url": "sample_traffic_highway.mp4",
+        "source_type": "FILE",
+        "direction": "WEST",
+        "intersection_id": 2,
+        "badge": "HIGHWAY",
+        "badge_color": "#2E7D5B"
+    },
+    {
+        "id": "rainy_weather",
+        "name": "CCTV-05 North (Gemini Flyover Circle)",
+        "category": "Weather Stress Test",
+        "description": "Monsoon downpour low-visibility camera stream with headlight glare reflection.",
+        "source_url": "sample_traffic_rainy.mp4",
+        "source_type": "FILE",
+        "direction": "NORTH",
+        "intersection_id": 3,
+        "badge": "RAINY/WEATHER",
+        "badge_color": "#4A6FA5"
+    },
+    {
+        "id": "junction_diamond",
+        "name": "CCTV-06 South (Gemini Flyover Circle)",
+        "category": "Multi-Lane Junction",
+        "description": "Complex 6-lane elevated flyover interchange with divergent traffic streams.",
+        "source_url": "sample_traffic_junction.mp4",
+        "source_type": "FILE",
+        "direction": "SOUTH",
+        "intersection_id": 3,
+        "badge": "JUNCTION",
+        "badge_color": "#6A5ACD"
+    },
+    {
+        "id": "rtsp_public_stream",
+        "name": "CCTV-07 RTSP Test Stream (Network Video Feed)",
+        "category": "RTSP Protocol Test",
+        "description": "Public RTSP video protocol stream for validating network camera pipelines.",
+        "source_url": "rtsp://wowzaec2demo.streamlock.net/vod/mp4:BigBuckBunny_115k.mp4",
+        "source_type": "RTSP",
+        "direction": "NORTH",
+        "intersection_id": 1,
+        "badge": "LIVE RTSP",
+        "badge_color": "#008080"
+    },
+    {
+        "id": "usb_webcam_feed",
+        "name": "CCTV-08 Operator USB Webcam (Field Device)",
+        "category": "Hardware Webcam",
+        "description": "Local USB capture device / operator workstation camera for on-site live testing.",
+        "source_url": "0",
+        "source_type": "WEBCAM",
+        "direction": "SOUTH",
+        "intersection_id": 1,
+        "badge": "LOCAL WEBCAM",
+        "badge_color": "#800080"
+    }
+]
+
+@router.get("/cameras/presets")
+def get_camera_presets():
+    """Returns curated example camera presets for quick deployment and testing."""
+    return CAMERA_PRESETS
+
+@router.post("/cameras/seed-examples")
+def seed_example_cameras(db: Session = Depends(get_db)):
+    """Populates/refreshes 12 realistic city CCTV example cameras across major intersections and ensures LIVE status."""
+    example_cams = [
+        ("CCTV-01 North (Anna Salai - Spencers Junction)", "sample_traffic_urban.mp4", "FILE", 1, "NORTH"),
+        ("CCTV-02 South (Anna Salai - Spencers Junction)", "sample_traffic_congested.mp4", "FILE", 1, "SOUTH"),
+        ("CCTV-03 East (Chennai Central - Ripon Cross)", "sample_traffic_emergency.mp4", "FILE", 2, "EAST"),
+        ("CCTV-04 West (Chennai Central - Ripon Cross)", "sample_traffic_highway.mp4", "FILE", 2, "WEST"),
+        ("CCTV-05 North (Gemini Flyover Circle)", "sample_traffic_rainy.mp4", "FILE", 3, "NORTH"),
+        ("CCTV-06 South (Gemini Flyover Circle)", "sample_traffic_junction.mp4", "FILE", 3, "SOUTH"),
+        ("CCTV-07 East (T. Nagar - Panagal Park)", "sample_traffic_highway.mp4", "FILE", 4, "EAST"),
+        ("CCTV-08 West (T. Nagar - Panagal Park)", "sample_traffic_urban.mp4", "FILE", 4, "WEST"),
+        ("CCTV-09 North (Kathipara Cloverleaf Interchange)", "sample_traffic_emergency.mp4", "FILE", 5, "NORTH"),
+        ("CCTV-10 South (Tidel Park - OMR IT Expressway)", "sample_traffic_congested.mp4", "FILE", 6, "SOUTH"),
+        ("CCTV-11 East (Velachery Vijayanagar Junction)", "sample_traffic_highway.mp4", "FILE", 9, "EAST"),
+        ("CCTV-12 West (Madhavaram Roundabout Interchange)", "sample_traffic_junction.mp4", "FILE", 10, "WEST"),
+    ]
+
+    added = []
+    updated = []
+    now_utc = datetime.now(timezone.utc).replace(tzinfo=None)
+
+    for name, url, stype, inter_id, direction in example_cams:
+        cam = db.query(Camera).filter(Camera.name == name).first()
+        if not cam:
+            cam = Camera(
+                name=name,
+                source_url=url,
+                source_type=stype,
+                intersection_id=inter_id,
+                direction=direction,
+                status=CameraStatusEnum.LIVE,
+                fps=30.0
+            )
+            db.add(cam)
+            db.flush()
+            added.append(name)
+        else:
+            cam.status = CameraStatusEnum.LIVE
+            cam.source_url = url
+            cam.source_type = stype
+            updated.append(name)
+
+        # Ensure initial fresh traffic measurement exists
+        meas = db.query(TrafficMeasurement).filter(TrafficMeasurement.camera_id == cam.id).first()
+        if not meas:
+            m = TrafficMeasurement(
+                camera_id=cam.id,
+                intersection_id=inter_id,
+                vehicle_count=18 + (cam.id * 4) % 20,
+                queue_length=3 + (cam.id * 2) % 10,
+                occupancy_percentage=35.0 + (cam.id * 6.0) % 50,
+                average_speed_kmh=48.0 - (cam.id * 3.0) % 25,
+                congestion_level=CongestionLevelEnum.MODERATE,
+                timestamp=now_utc
+            )
+            db.add(m)
+
+    db.commit()
+    return {
+        "status": "SUCCESS",
+        "message": f"Successfully seeded {len(added)} new cameras and activated {len(updated)} existing cameras.",
+        "added_cameras": added,
+        "updated_cameras": updated,
+        "total_cameras": db.query(Camera).count()
+    }
+
+@router.post("/cameras/reset-status")
+def reset_all_camera_statuses(db: Session = Depends(get_db)):
+    """Resets all cameras in the database to LIVE active status."""
+    cams = db.query(Camera).all()
+    for c in cams:
+        c.status = CameraStatusEnum.LIVE
+    db.commit()
+    return {
+        "status": "SUCCESS",
+        "message": f"All {len(cams)} camera streams have been reset to LIVE status.",
+        "total_active": len(cams)
+    }
 
 @router.put("/cameras/{camera_id}", response_model=CameraOut)
 def update_camera(
@@ -458,17 +642,17 @@ def search_vehicles(
             "location_source": loc_src,
             "association_confidence": conf_level,
             "location_type": "LAST OBSERVED LOCATION",
-            "latitude": r.camera.intersection.latitude if (r.camera and r.camera.intersection) else 12.9716,
-            "longitude": r.camera.intersection.longitude if (r.camera and r.camera.intersection) else 77.5946
+            "latitude": r.camera.intersection.latitude if (r.camera and r.camera.intersection) else 13.0604,
+            "longitude": r.camera.intersection.longitude if (r.camera and r.camera.intersection) else 80.2496
         })
     return output
 
 @router.get("/map/viewport")
 def get_map_viewport_data(
-    min_lat: float = 12.80,
-    min_lng: float = 77.40,
-    max_lat: float = 13.15,
-    max_lng: float = 77.75,
+    min_lat: float = 12.85,
+    min_lng: float = 80.05,
+    max_lat: float = 13.25,
+    max_lng: float = 80.35,
     db: Session = Depends(get_db)
 ):
     """Spatial bounding box query returning intersections, cameras, and roads inside active viewport."""
@@ -517,6 +701,91 @@ def get_violations(db: Session = Depends(get_db)):
 def get_anpr_observations(db: Session = Depends(get_db)):
     return db.query(PlateObservation).order_by(PlateObservation.timestamp.desc()).all()
 
+@router.post("/anpr/seed-examples")
+def seed_example_anpr_observations(db: Session = Depends(get_db)):
+    """Seeds 25+ realistic Indian license plate observations across state formats and vehicle types."""
+    import random
+    from datetime import datetime, timedelta, timezone
+
+    sample_plates = [
+        ("TN01AB1234", "car", 1, "NORTH", 0.96, 0.98, 0.95, 42.5),
+        ("KA05MN3821", "motorcycle", 2, "EAST", 0.98, 0.99, 0.97, 35.0),
+        ("DL02CP9012", "car", 1, "NORTH", 0.92, 0.95, 0.90, 432.0),
+        ("KA01TR9999", "truck", 3, "WEST", 0.94, 0.96, 0.93, 62.0),
+        ("MH12DE5678", "suv", 2, "SOUTH", 0.97, 0.98, 0.96, 58.4),
+        ("HR26BC9999", "car", 1, "NORTH", 0.95, 0.97, 0.94, 71.2),
+        ("KL07BF5566", "bus", 2, "EAST", 0.93, 0.95, 0.92, 45.0),
+        ("AP09CC1122", "truck", 4, "WEST", 0.91, 0.93, 0.89, 52.8),
+        ("TS08EE8899", "car", 3, "SOUTH", 0.96, 0.98, 0.95, 48.0),
+        ("GJ01AB5555", "van", 1, "NORTH", 0.94, 0.95, 0.92, 38.5),
+        ("WB02EF7777", "car", 2, "EAST", 0.92, 0.94, 0.90, 50.0),
+        ("UP32CD8888", "bus", 3, "SOUTH", 0.95, 0.96, 0.93, 44.2),
+        ("RJ14PQ1234", "motorcycle", 1, "WEST", 0.97, 0.98, 0.96, 32.0),
+        ("PB65AB9876", "suv", 2, "NORTH", 0.93, 0.95, 0.91, 64.5),
+        ("OR02XY4321", "auto_rickshaw", 4, "SOUTH", 0.96, 0.97, 0.94, 28.0),
+        ("MP09AB3456", "truck", 1, "EAST", 0.90, 0.92, 0.88, 40.0),
+        ("TN09XY1111", "car", 2, "NORTH", 0.95, 0.96, 0.93, 22.0),
+        ("KA03AB2222", "bus", 3, "SOUTH", 0.94, 0.95, 0.92, 18.5),
+        ("KL07CD3333", "car", 1, "EAST", 0.96, 0.97, 0.94, 25.0),
+        ("MH04EV4040", "car", 2, "WEST", 0.96, 0.97, 0.95, 38.0),
+        ("TN01EM9999", "police_cruiser", 1, "NORTH", 0.99, 0.99, 0.98, 85.0),
+        ("KA01AM1080", "ambulance", 2, "EAST", 0.98, 0.99, 0.97, 78.0),
+        ("DL03CC4455", "car", 3, "SOUTH", 0.92, 0.94, 0.90, 48.0),
+        ("GA01C8888", "car", 1, "WEST", 0.97, 0.98, 0.96, 45.0),
+        ("CH01AB3333", "car", 2, "NORTH", 0.96, 0.97, 0.95, 52.0),
+        ("KA04MH7007", "car", 3, "EAST", 0.93, 0.95, 0.92, 40.0),
+        ("KA51Z1234", "scooter", 1, "SOUTH", 0.95, 0.96, 0.94, 30.0),
+        ("TN22AA4567", "bus", 2, "WEST", 0.97, 0.98, 0.96, 35.0),
+        ("MH01CP1001", "police_cruiser", 1, "NORTH", 0.98, 0.99, 0.97, 72.0),
+        ("KL11BH2020", "car", 3, "SOUTH", 0.90, 0.93, 0.89, 44.0),
+        ("KA02MB8080", "truck", 2, "EAST", 0.99, 0.99, 0.98, 65.0),
+        ("TS09FA9999", "suv", 1, "WEST", 0.96, 0.97, 0.95, 92.0),
+        ("HR51AU2345", "truck", 4, "NORTH", 0.89, 0.92, 0.88, 55.0),
+        ("DL01ZA0001", "car", 1, "SOUTH", 0.99, 0.99, 0.98, 60.0),
+        ("KA03NC5555", "car", 2, "EAST", 0.95, 0.96, 0.94, 38.0),
+        ("TN07CK7788", "motorcycle", 3, "NORTH", 0.97, 0.98, 0.96, 32.0),
+        ("MH14GH9000", "van", 1, "WEST", 0.94, 0.95, 0.92, 42.0)
+    ]
+
+    base_t = datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(hours=2)
+    added_count = 0
+
+    for i, (plate, vtype, lane, dir_name, ocr_c, det_c, fin_c, speed) in enumerate(sample_plates):
+        obs_t = base_t + timedelta(minutes=i * 3)
+        obs = PlateObservation(
+            plate_number=plate,
+            camera_id=(i % 12) + 1,
+            timestamp=obs_t,
+            ocr_confidence=ocr_c,
+            plate_detection_confidence=det_c,
+            final_confidence=fin_c,
+            vehicle_type=vtype,
+            lane=lane,
+            direction=dir_name,
+            global_vehicle_id=f"VEH-{1000+i:04d}",
+            speed_kmh=speed
+        )
+        db.add(obs)
+        added_count += 1
+
+    # Ensure watchlist records exist
+    watchlists = [
+        ("KA05MN3821", "Stolen Vehicle Alert", "operator", "Blue Yamaha FZ motorcycle reported stolen."),
+        ("TN01AB1234", "Unpaid Traffic Fines", "admin", "White Swift DZire sedan with 14 outstanding red-light violations."),
+        ("MH12PQ9999", "Security Watchlist", "admin", "Black SUV flagged for perimeter access."),
+        ("DL03CC4455", "Hit and Run Suspect", "operator", "Silver sedan involved in Anna Salai hit-and-run.")
+    ]
+    for w_plate, w_reason, w_by, w_notes in watchlists:
+        if not db.query(Blacklist).filter(Blacklist.plate == w_plate).first():
+            db.add(Blacklist(plate=w_plate, reason=w_reason, created_by=w_by, notes=w_notes))
+
+    db.commit()
+    return {
+        "status": "SUCCESS",
+        "message": f"Successfully seeded {added_count} example license plate observations with active watchlist sync.",
+        "total_observations": db.query(PlateObservation).count()
+    }
+
 @router.get("/anpr", response_model=List[NumberPlateOut])
 def get_legacy_plates(db: Session = Depends(get_db)):
     return db.query(NumberPlate).order_by(NumberPlate.timestamp.desc()).all()
@@ -544,8 +813,8 @@ def get_origin_destination_matrix(db: Session = Depends(get_db)):
         if len(sightings) >= 2:
             start = sightings[0]
             end = sightings[-1]
-            origin = start.camera.intersection.name if (start.camera and start.camera.intersection) else "Central Plaza Junction"
-            destination = end.camera.intersection.name if (end.camera and end.camera.intersection) else "Metro Station Cross"
+            origin = start.camera.intersection.name if (start.camera and start.camera.intersection) else "Anna Salai - Spencers Junction"
+            destination = end.camera.intersection.name if (end.camera and end.camera.intersection) else "Chennai Central - Ripon Cross"
             
             if origin != destination:
                 time_sec = (end.timestamp - start.timestamp).total_seconds()
@@ -567,8 +836,8 @@ def get_origin_destination_matrix(db: Session = Depends(get_db)):
     if not result:
         # Fallback seeder matrix mapping
         result = [
-            {"origin": "Central Plaza Junction", "destination": "Metro Station Cross", "vehicle_count": 12, "average_travel_time": "2.4 min", "average_speed": "36 km/h"},
-            {"origin": "Metro Station Cross", "destination": "North Corridor Flyover", "vehicle_count": 8, "average_travel_time": "3.8 min", "average_speed": "41 km/h"}
+            {"origin": "Anna Salai - Spencers Junction", "destination": "Chennai Central - Ripon Cross", "vehicle_count": 12, "average_travel_time": "2.4 min", "average_speed": "36 km/h"},
+            {"origin": "Chennai Central - Ripon Cross", "destination": "Gemini Flyover Circle", "vehicle_count": 8, "average_travel_time": "3.8 min", "average_speed": "41 km/h"}
         ]
         
     return result
@@ -842,7 +1111,7 @@ def search_recorded_videos(
                 "record_id": "REC-20260901-001",
                 "camera_id": 1,
                 "device_id": "FIXED-CAM-001",
-                "location": "Central Plaza Junction",
+                "location": "Anna Salai - Spencers Junction",
                 "start_time": datetime.utcnow().isoformat(),
                 "end_time": datetime.utcnow().isoformat(),
                 "duration_sec": 120.0,
@@ -875,6 +1144,113 @@ def search_recorded_videos(
             ]
         } for r in recs
     ]
+
+@router.post("/recordings/seed-examples")
+def seed_example_recordings(db: Session = Depends(get_db)):
+    """Seeds realistic archive video recordings with timeline event markers."""
+    from datetime import datetime, timedelta, timezone
+    base_t = datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(hours=3)
+
+    sample_recs = [
+        {
+            "record_id": "REC-20260911-001",
+            "camera_id": 1,
+            "device_id": "CCTV-FIXED-01",
+            "location": "Anna Salai - Spencers Junction",
+            "start_time": base_t,
+            "end_time": base_t + timedelta(minutes=2),
+            "duration_sec": 120.0,
+            "file_size_mb": 14.5,
+            "file_reference": "sample_traffic_urban.mp4",
+            "recording_type": "CONTINUOUS"
+        },
+        {
+            "record_id": "REC-20260911-002",
+            "camera_id": 3,
+            "device_id": "CCTV-FIXED-03",
+            "location": "Chennai Central - Ripon Cross",
+            "start_time": base_t + timedelta(minutes=15),
+            "end_time": base_t + timedelta(minutes=17),
+            "duration_sec": 120.0,
+            "file_size_mb": 12.8,
+            "file_reference": "sample_traffic_emergency.mp4",
+            "recording_type": "EVENT_TRIGGERED"
+        },
+        {
+            "record_id": "REC-20260911-003",
+            "camera_id": 4,
+            "device_id": "CCTV-FIXED-04",
+            "location": "T. Nagar - Panagal Park",
+            "start_time": base_t + timedelta(minutes=30),
+            "end_time": base_t + timedelta(minutes=33),
+            "duration_sec": 180.0,
+            "file_size_mb": 18.2,
+            "file_reference": "sample_traffic_highway.mp4",
+            "recording_type": "SCHEDULED"
+        },
+        {
+            "record_id": "REC-20260911-004",
+            "camera_id": 5,
+            "device_id": "CCTV-FIXED-05",
+            "location": "Gemini Flyover Circle",
+            "start_time": base_t + timedelta(minutes=45),
+            "end_time": base_t + timedelta(minutes=48),
+            "duration_sec": 180.0,
+            "file_size_mb": 21.4,
+            "file_reference": "sample_traffic_rainy.mp4",
+            "recording_type": "CONTINUOUS"
+        },
+        {
+            "record_id": "REC-20260911-005",
+            "camera_id": 2,
+            "device_id": "CCTV-FIXED-02",
+            "location": "Anna Salai - Spencers Junction",
+            "start_time": base_t + timedelta(minutes=60),
+            "end_time": base_t + timedelta(minutes=62),
+            "duration_sec": 120.0,
+            "file_size_mb": 13.6,
+            "file_reference": "sample_traffic_congested.mp4",
+            "recording_type": "EVENT_TRIGGERED"
+        },
+        {
+            "record_id": "REC-20260911-006",
+            "camera_id": 6,
+            "device_id": "CCTV-FIXED-06",
+            "location": "Tidel Park - OMR IT Expressway",
+            "start_time": base_t + timedelta(minutes=75),
+            "end_time": base_t + timedelta(minutes=77),
+            "duration_sec": 120.0,
+            "file_size_mb": 14.1,
+            "file_reference": "sample_traffic_junction.mp4",
+            "recording_type": "SCHEDULED"
+        }
+    ]
+
+    added = 0
+    for r in sample_recs:
+        existing = db.query(VideoRecording).filter(VideoRecording.record_id == r["record_id"]).first()
+        if not existing:
+            rec = VideoRecording(
+                record_id=r["record_id"],
+                camera_id=r["camera_id"],
+                device_id=r["device_id"],
+                location=r["location"],
+                start_time=r["start_time"],
+                end_time=r["end_time"],
+                duration_sec=r["duration_sec"],
+                file_size_mb=r["file_size_mb"],
+                file_reference=r["file_reference"],
+                recording_type=r["recording_type"]
+            )
+            db.add(rec)
+            added += 1
+
+    db.commit()
+    return {
+        "status": "SUCCESS",
+        "message": f"Successfully seeded {added} archive video recordings.",
+        "total_recordings": db.query(VideoRecording).count()
+    }
 
 # 9. Alerts Center
 @router.get("/alerts", response_model=List[AlertOut])

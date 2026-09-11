@@ -111,7 +111,7 @@ export const RecordedVideo: React.FC = () => {
                 type="text"
                 value={locationFilter}
                 onChange={(e) => setLocationFilter(e.target.value)}
-                placeholder="e.g. Central Plaza"
+                placeholder="e.g. Anna Salai"
                 className="w-full bg-white border border-[#DCE4EA] rounded p-2 text-slate-800 focus:outline-none"
               />
             </div>

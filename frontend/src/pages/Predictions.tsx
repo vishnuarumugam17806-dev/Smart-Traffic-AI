@@ -25,7 +25,7 @@ export const Predictions: React.FC = () => {
       } else {
         // Provide clean forecast fallback based on live measurements
         setPredictionData({
-          region: "Central Plaza Junction",
+          region: "Anna Salai - Spencers Junction",
           current_density: "MODERATE",
           predicted_density: "HIGH",
           current_volume: 24,

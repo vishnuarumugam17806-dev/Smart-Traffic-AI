@@ -48,8 +48,8 @@ def test_create_intersection(setup_test_db):
     payload = {
         "name": f"Test Intersection Hub {uuid.uuid4().hex[:4]}",
         "location": "North Sector",
-        "latitude": 12.9716,
-        "longitude": 77.5946,
+        "latitude": 13.0604,
+        "longitude": 80.2605,
         "active_status": "ACTIVE"
     }
     response = client.post("/api/v1/intersections", json=payload, headers=headers)

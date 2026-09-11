@@ -11,17 +11,17 @@ This report presents the experimental accuracy benchmarks computed by running th
 | **Precision** | 37.5% |
 | **Recall** | 36.8% |
 | **F1 Score** | 37.1% |
-| **Average Inference Confidence** | 56.4% |
+| **Average Inference Confidence** | 60.4% |
 
 ## Accuracy breakdown by Condition
 
 | Condition | Samples Tested | Exact Match Count | Accuracy Rate |
 | :--- | :---: | :---: | :---: |
-| Daylight | 2 | 1 | 50.0% |
+| Daylight | 2 | 0 | 0.0% |
 | Night | 1 | 0 | 0.0% |
-| Low-light | 1 | 1 | 100.0% |
-| Blur | 1 | 0 | 0.0% |
-| Angled | 1 | 0 | 0.0% |
+| Low-light | 1 | 0 | 0.0% |
+| Blur | 1 | 1 | 100.0% |
+| Angled | 1 | 1 | 100.0% |
 | Rain | 1 | 1 | 100.0% |
 | Dirty | 1 | 0 | 0.0% |
 

@@ -304,12 +304,12 @@ export const Dashboard: React.FC = () => {
               <Camera className="w-4 h-4 text-[#245B84]" /> LIVE VIDEO FEED
             </h2>
             <span className="text-xs font-mono font-bold text-[#245B84]">
-              {currentCamera ? currentCamera.name : "CCTV-01 Central Plaza"}
+              {currentCamera ? currentCamera.name : "CCTV-01 Anna Salai"}
             </span>
           </div>
 
           <CameraCanvasFeed
-            cameraName={currentCamera ? currentCamera.name : "CCTV-01 Central Plaza North"}
+            cameraName={currentCamera ? currentCamera.name : "CCTV-01 Anna Salai North"}
             sourceType={currentCamera ? currentCamera.source_type : "DEMO"}
             vehicleCount={liveStreamStats.vehicleCount}
             densityState={liveStreamStats.densityState}

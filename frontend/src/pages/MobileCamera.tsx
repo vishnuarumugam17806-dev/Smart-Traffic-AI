@@ -13,8 +13,8 @@ export const MobileCamera: React.FC = () => {
   const [capturingPhoto, setCapturingPhoto] = useState<boolean>(false);
   
   const [deviceId] = useState<string>('MOBILE-CAM-001');
-  const [locationName, setLocationName] = useState<string>('Central Junction Approach');
-  const [gpsCoords, setGpsCoords] = useState<{ lat: number; lng: number }>({ lat: 12.9716, lng: 77.5946 });
+  const [locationName, setLocationName] = useState<string>('Anna Salai Junction Approach');
+  const [gpsCoords, setGpsCoords] = useState<{ lat: number; lng: number }>({ lat: 13.0604, lng: 80.2496 });
 
   const videoRef = useRef<HTMLVideoElement>(null);
   const streamRef = useRef<MediaStream | null>(null);

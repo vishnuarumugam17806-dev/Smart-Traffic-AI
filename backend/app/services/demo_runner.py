@@ -179,7 +179,7 @@ class DemoScenarioRunner:
                 type="EMERGENCY_VEHICLE",
                 severity="CRITICAL",
                 camera_id=2,
-                location="Central Plaza Junction - East Approach",
+                location="Anna Salai - Spencers Junction - East Approach",
                 message="EMERGENCY PREEMPTION: Ambulance detected. Preemption corridor active.",
                 status="NEW",
                 confidence=1.0

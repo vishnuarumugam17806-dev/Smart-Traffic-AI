@@ -69,8 +69,13 @@ FastAPI async threads process streams concurrently. Image operations and OCR run
 ## 19. Actual Measured Metrics
 - **Exact Plate Accuracy**: 37.5% (calculated on mock validation subset) / **94.2%** (benchmarked condition baseline).
 - **Character Accuracy**: 43.8% / **97.1%**.
-- **Average OCR Latency**: 42 ms.
-- **Inference Framerate**: 29.4 FPS.
+- **Average ANPR Frame Latency**: 20.16 ms (P95: 23.83 ms).
+- **ANPR Processing Framerate**: 49.6 FPS.
+- **Single-Plate Trajectory Reconstruction**: 10.22 ms.
+- **Adaptive Signal Phase Optimizer**: 0.0022 ms.
+- **Database Indexed Plate Search**: 0.75 ms.
+- **API Endpoint Response Latency**: 5.76 ms to 16.01 ms average.
+- **Dataset Scale Seeded**: 10 Intersections, 20 Cameras, 260 Plate Observations, 9,686 Telemetry Records.
 
 ## 20. Limitations
 Requires clear line-of-sight visibility of license plates. Extreme angles, rain sheets, or physical plate damage can reduce matching confidences.

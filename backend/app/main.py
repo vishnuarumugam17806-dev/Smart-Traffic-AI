@@ -357,10 +357,10 @@ async def lifespan(app: FastAPI):
             if db_seed.query(Intersection).count() == 0:
                 j1 = Intersection(
                     id=1,
-                    name="Central Plaza Junction (4-Side)",
-                    location="MG Road & Park Street Cross",
-                    latitude=12.9716,
-                    longitude=77.5946,
+                    name="Anna Salai Spencers Junction (4-Side)",
+                    location="Downtown Thousand Lights, Anna Salai",
+                    latitude=13.0604,
+                    longitude=80.2605,
                     total_lanes=4,
                     num_approaches=4,
                     approaches_config=[
@@ -372,10 +372,10 @@ async def lifespan(app: FastAPI):
                 )
                 j2 = Intersection(
                     id=2,
-                    name="Expressway Merge T-Junction (3-Side)",
-                    location="Outer Ring Road Interchange",
-                    latitude=12.9780,
-                    longitude=77.6010,
+                    name="Chennai Central Ripon Cross (3-Side)",
+                    location="EVR Periyar Salai & Wall Tax Rd",
+                    latitude=13.0827,
+                    longitude=80.2755,
                     total_lanes=3,
                     num_approaches=3,
                     approaches_config=[
@@ -386,10 +386,10 @@ async def lifespan(app: FastAPI):
                 )
                 j3 = Intersection(
                     id=3,
-                    name="River Bridge Access Junction (2-Side)",
-                    location="North Corridor Bridge Toll Gate",
-                    latitude=12.9850,
-                    longitude=77.6100,
+                    name="Gemini Flyover Access (2-Side)",
+                    location="Cathedral Road & Anna Salai Flyover",
+                    latitude=13.0531,
+                    longitude=80.2514,
                     total_lanes=2,
                     num_approaches=2,
                     approaches_config=[

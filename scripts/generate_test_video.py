@@ -44,11 +44,11 @@ def create_urban_traffic_video(output_path: str = "sample_traffic_urban.mp4", du
         cv2.putText(frame, "DL02CP9012", (502, v3_y + 128), cv2.FONT_HERSHEY_SIMPLEX, 0.32, (0, 0, 0), 1)
 
         # Header
-        cv2.putText(frame, "CAM-01 URBAN INTERSECTION", (20, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 255), 2)
+        cv2.putText(frame, "CAM-01 URBAN DOWNTOWN JUNCTION", (20, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.55, (0, 255, 255), 2)
         out.write(frame)
 
     out.release()
-    print(f"Urban traffic video generated successfully.")
+    print("Urban traffic video generated successfully.")
 
 def create_highway_traffic_video(output_path: str = "sample_traffic_highway.mp4", duration_sec: int = 12, fps: int = 30):
     print(f"Generating Highway Traffic Test Video: {output_path}...")
@@ -61,32 +61,28 @@ def create_highway_traffic_video(output_path: str = "sample_traffic_highway.mp4"
         frame = np.zeros((height, width, 3), dtype=np.uint8)
         frame[:] = (35, 35, 35)
 
-        # 4 Expressway Lanes
         for x in [160, 320, 480]:
             cv2.line(frame, (x, 0), (x, height), (255, 255, 255), 2)
 
-        # Fast Truck (KA01TR9999)
         t_y = (frame_idx * 7) % height
         cv2.rectangle(frame, (40, t_y), (140, t_y + 150), (180, 80, 40), -1)
         cv2.putText(frame, "TRUCK", (55, t_y + 70), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1)
         cv2.rectangle(frame, (50, t_y + 120), (130, t_y + 140), (255, 255, 255), -1)
         cv2.putText(frame, "KA01TR9999", (52, t_y + 135), cv2.FONT_HERSHEY_SIMPLEX, 0.3, (0, 0, 0), 1)
 
-        # Fast Car (HR26BC9999)
         c_y = (frame_idx * 9 + 50) % height
         cv2.rectangle(frame, (200, c_y), (280, c_y + 90), (40, 180, 220), -1)
         cv2.putText(frame, "CAR", (215, c_y + 45), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1)
         cv2.rectangle(frame, (210, c_y + 65), (270, c_y + 85), (255, 255, 255), -1)
         cv2.putText(frame, "HR26BC9999", (212, c_y + 80), cv2.FONT_HERSHEY_SIMPLEX, 0.3, (0, 0, 0), 1)
 
-        # Fast SUV (MH12DE5678)
         s_y = height - ((frame_idx * 8 + 120) % height)
         cv2.rectangle(frame, (350, s_y), (440, s_y + 100), (90, 90, 90), -1)
         cv2.putText(frame, "SUV", (370, s_y + 50), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1)
         cv2.rectangle(frame, (365, s_y + 75), (425, s_y + 95), (255, 255, 255), -1)
         cv2.putText(frame, "MH12DE5678", (367, s_y + 90), cv2.FONT_HERSHEY_SIMPLEX, 0.3, (0, 0, 0), 1)
 
-        cv2.putText(frame, "CAM-04 EXPRESSWAY HIGHWAY", (20, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 0), 2)
+        cv2.putText(frame, "CAM-04 EXPRESSWAY HIGHWAY TOLL", (20, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.55, (0, 255, 0), 2)
         out.write(frame)
 
     out.release()
@@ -103,7 +99,6 @@ def create_congested_traffic_video(output_path: str = "sample_traffic_congested.
         frame = np.zeros((height, width, 3), dtype=np.uint8)
         frame[:] = (50, 50, 50)
 
-        # Stopped / Crawling Vehicles in Lanes
         v_positions = [
             (80, 50, "TN09XY1111", (30, 30, 200), "CAR"),
             (80, 160, "KA03AB2222", (200, 100, 30), "BUS"),
@@ -116,7 +111,6 @@ def create_congested_traffic_video(output_path: str = "sample_traffic_congested.
         ]
 
         for vx, vy_base, plate, color, vtype in v_positions:
-            # Slow crawl (1px per 4 frames)
             vy = vy_base + (frame_idx // 4) % 30
             vh = 110 if vtype == "BUS" else 80
             vw = 70
@@ -125,7 +119,7 @@ def create_congested_traffic_video(output_path: str = "sample_traffic_congested.
             cv2.rectangle(frame, (vx + 5, vy + vh - 22), (vx + vw - 5, vy + vh - 4), (255, 255, 255), -1)
             cv2.putText(frame, plate, (vx + 7, vy + vh - 9), cv2.FONT_HERSHEY_SIMPLEX, 0.26, (0, 0, 0), 1)
 
-        cv2.putText(frame, "CAM-02 BOTTLENECK CONGESTION", (20, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 0, 255), 2)
+        cv2.putText(frame, "CAM-02 HEAVY BOTTLENECK CONGESTION", (20, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.55, (0, 0, 255), 2)
         out.write(frame)
 
     out.release()
@@ -145,7 +139,6 @@ def create_emergency_traffic_video(output_path: str = "sample_traffic_emergency.
         cv2.line(frame, (213, 0), (213, height), (0, 255, 0), 3) # Green Wave Lane
         cv2.line(frame, (426, 0), (426, height), (255, 255, 255), 2)
 
-        # Rapid Emergency Ambulance (KA05MN3821)
         a_y = (frame_idx * 8) % height
         cv2.rectangle(frame, (80, a_y), (180, a_y + 120), (40, 40, 230), -1)
         cv2.rectangle(frame, (100, a_y + 10), (160, a_y + 45), (255, 255, 255), -1)
@@ -155,7 +148,6 @@ def create_emergency_traffic_video(output_path: str = "sample_traffic_emergency.
         cv2.rectangle(frame, (90, a_y + 90), (170, a_y + 112), (255, 255, 255), -1)
         cv2.putText(frame, "KA05MN3821", (93, a_y + 106), cv2.FONT_HERSHEY_SIMPLEX, 0.32, (0, 0, 0), 1)
 
-        # Police Escort Cruiser (TN01EM9999)
         p_y = (a_y + 160) % height
         cv2.rectangle(frame, (90, p_y), (170, p_y + 85), (200, 30, 30), -1)
         light_p = (255, 0, 0) if (frame_idx // 3) % 2 == 0 else (0, 0, 255)
@@ -170,15 +162,81 @@ def create_emergency_traffic_video(output_path: str = "sample_traffic_emergency.
     out.release()
     print("Emergency green wave traffic video generated successfully.")
 
+def create_rainy_night_video(output_path: str = "sample_traffic_rainy.mp4", duration_sec: int = 12, fps: int = 30):
+    print(f"Generating Night/Rain ANPR Test Video: {output_path}...")
+    width, height = 640, 480
+    fourcc = cv2.VideoWriter.fourcc(*'mp4v')
+    out = cv2.VideoWriter(output_path, fourcc, fps, (width, height))
+    total_frames = duration_sec * fps
+
+    for frame_idx in range(total_frames):
+        frame = np.zeros((height, width, 3), dtype=np.uint8)
+        frame[:] = (15, 15, 25) # Dark rainy asphalt
+
+        # Rain streaks
+        np.random.seed(frame_idx)
+        for _ in range(30):
+            rx = np.random.randint(0, width)
+            ry = np.random.randint(0, height)
+            cv2.line(frame, (rx, ry), (rx - 5, ry + 15), (100, 100, 120), 1)
+
+        # Vehicle under headlight glare (KA05MN3821)
+        v_y = (frame_idx * 5) % height
+        cv2.rectangle(frame, (240, v_y), (340, v_y + 100), (40, 40, 50), -1)
+        # Bright headlights with glare
+        cv2.circle(frame, (260, v_y + 15), 14, (200, 255, 255), -1)
+        cv2.circle(frame, (320, v_y + 15), 14, (200, 255, 255), -1)
+        # Illuminated High-Contrast License Plate
+        cv2.rectangle(frame, (265, v_y + 70), (335, v_y + 92), (255, 255, 255), -1)
+        cv2.putText(frame, "KA05MN3821", (268, v_y + 86), cv2.FONT_HERSHEY_SIMPLEX, 0.35, (0, 0, 0), 2)
+
+        cv2.putText(frame, "CAM-05 LOW-VISIBILITY NIGHT/RAIN ANPR", (20, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (180, 255, 255), 2)
+        out.write(frame)
+
+    out.release()
+    print("Night/Rain ANPR video generated successfully.")
+
+def create_junction_4way_video(output_path: str = "sample_traffic_junction.mp4", duration_sec: int = 12, fps: int = 30):
+    print(f"Generating 4-Way Signal Junction Test Video: {output_path}...")
+    width, height = 640, 480
+    fourcc = cv2.VideoWriter.fourcc(*'mp4v')
+    out = cv2.VideoWriter(output_path, fourcc, fps, (width, height))
+    total_frames = duration_sec * fps
+
+    for frame_idx in range(total_frames):
+        frame = np.zeros((height, width, 3), dtype=np.uint8)
+        frame[:] = (40, 40, 40)
+
+        # Draw 4-way crossroad
+        cv2.rectangle(frame, (220, 0), (420, height), (60, 60, 60), -1)
+        cv2.rectangle(frame, (0, 160), (width, 320), (60, 60, 60), -1)
+
+        # Traffic Signal Light Status (Green on North-South, Red on East-West)
+        phase_color = (0, 255, 0) if (frame_idx // 90) % 2 == 0 else (0, 0, 255)
+        cv2.circle(frame, (200, 140), 12, phase_color, -1)
+        cv2.circle(frame, (440, 340), 12, phase_color, -1)
+
+        # Vehicles queueing
+        v1_y = (frame_idx * 4) % 150
+        cv2.rectangle(frame, (240, v1_y), (310, v1_y + 70), (220, 120, 40), -1)
+        cv2.rectangle(frame, (248, v1_y + 50), (302, v1_y + 66), (255, 255, 255), -1)
+        cv2.putText(frame, "TN01AB1234", (250, v1_y + 62), cv2.FONT_HERSHEY_SIMPLEX, 0.28, (0, 0, 0), 1)
+
+        cv2.putText(frame, "CAM-06 4-WAY ADAPTIVE SIGNAL JUNCTION", (20, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 255), 2)
+        out.write(frame)
+
+    out.release()
+    print("4-Way Signal Junction video generated successfully.")
+
 def generate_all_sample_videos():
     create_urban_traffic_video("sample_traffic_urban.mp4")
     create_highway_traffic_video("sample_traffic_highway.mp4")
     create_congested_traffic_video("sample_traffic_congested.mp4")
     create_emergency_traffic_video("sample_traffic_emergency.mp4")
+    create_rainy_night_video("sample_traffic_rainy.mp4")
+    create_junction_4way_video("sample_traffic_junction.mp4")
     
-    # Legacy default compatibility file
     create_urban_traffic_video("sample_traffic.mp4")
 
 if __name__ == "__main__":
     generate_all_sample_videos()
-

@@ -20,7 +20,7 @@ def test_create_and_query_alerts(db_session: Session):
     alert = Alert(
         type="BLACKLIST_MATCH",
         severity="CRITICAL",
-        location="MG Road Junction",
+        location="Anna Salai Spencers Junction",
         vehicle_plate="KA05MN3821",
         message="Watchlisted Stolen Vehicle Detected",
         status="NEW",

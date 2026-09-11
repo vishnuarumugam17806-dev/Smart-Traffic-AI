@@ -88,11 +88,11 @@ export const GISMap: React.FC<GISMapProps> = ({
     }
 
     try {
-      // Center map around Bangalore central coordinates
+      // Center map around Chennai central coordinates (Anna Salai / Spencers Junction)
       const map = L.map(container, {
         zoomControl: false,
         attributionControl: false
-      }).setView([12.9716, 77.5946], 13);
+      }).setView([13.0604, 80.2496], 13);
 
       mapRef.current = map;
 
