@@ -21,7 +21,14 @@ export const CameraDetails: React.FC = () => {
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         <div className="lg:col-span-2">
-          <CameraCanvasFeed cameraName={`CCTV-Camera-#${id}`} vehicleCount={19} densityState="HIGH" queueLength={6} occupancyPct={58.2} />
+          <CameraCanvasFeed
+            cameraName={`CCTV-Camera-#${id}`}
+            sourceUrl={`/videos/sample_traffic_${id === '2' ? 'congested' : id === '3' ? 'highway' : id === '4' ? 'emergency' : 'urban'}.mp4`}
+            vehicleCount={19}
+            densityState="HIGH"
+            queueLength={6}
+            occupancyPct={58.2}
+          />
         </div>
 
         <div className="glass-card p-5 rounded-lg border border-surfaceBorder space-y-4">

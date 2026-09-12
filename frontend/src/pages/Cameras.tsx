@@ -506,6 +506,7 @@ export const Cameras: React.FC = () => {
                   <div className="rounded overflow-hidden border border-[#DCE4EA]">
                     <CameraCanvasFeed
                       cameraName={cam.name}
+                      sourceUrl={cam.source_url}
                       sourceType={cam.source_type}
                       vehicleCount={14 + (cam.id * 3) % 22}
                       densityState={(cam.id % 2 === 0) ? 'MODERATE' : 'HIGH'}

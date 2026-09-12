@@ -310,6 +310,7 @@ export const Dashboard: React.FC = () => {
 
           <CameraCanvasFeed
             cameraName={currentCamera ? currentCamera.name : "CCTV-01 Anna Salai North"}
+            sourceUrl={currentCamera ? currentCamera.source_url : undefined}
             sourceType={currentCamera ? currentCamera.source_type : "DEMO"}
             vehicleCount={liveStreamStats.vehicleCount}
             densityState={liveStreamStats.densityState}
