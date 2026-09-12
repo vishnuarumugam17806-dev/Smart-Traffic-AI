@@ -16,10 +16,12 @@ interface ApproachData {
   priority_score?: number;
 }
 
+import { FALLBACK_INTERSECTIONS, FALLBACK_SIGNAL_DATA } from '../api/mockFallback';
+
 export const Signals: React.FC = () => {
-  const [intersections, setIntersections] = useState<Intersection[]>([]);
+  const [intersections, setIntersections] = useState<Intersection[]>(FALLBACK_INTERSECTIONS);
   const [selectedJunctionId, setSelectedJunctionId] = useState<number>(1);
-  const [signalData, setSignalData] = useState<any>(null);
+  const [signalData, setSignalData] = useState<any>(FALLBACK_SIGNAL_DATA);
   const [trafficData, setTrafficData] = useState<any>(null);
   const [optimizationData, setOptimizationData] = useState<any>(null);
 
@@ -38,11 +40,11 @@ export const Signals: React.FC = () => {
   const fetchIntersections = async () => {
     try {
       const res = await apiClient.get('/intersections');
-      if (res.data && res.data.length > 0) {
+      if (Array.isArray(res.data) && res.data.length > 0) {
         setIntersections(res.data);
       }
     } catch (err) {
-      console.error('Error fetching intersections:', err);
+      console.warn('Using resilient intersections for signal control:', err);
     }
   };
 

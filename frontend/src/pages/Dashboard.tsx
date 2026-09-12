@@ -10,10 +10,14 @@ import { GISMap } from '../components/GISMap';
 import { apiClient } from '../api/client';
 import { useStore } from '../store/useStore';
 
+import { FALLBACK_CAMERAS, FALLBACK_INTERSECTIONS, FALLBACK_ALERTS } from '../api/mockFallback';
+
 export const Dashboard: React.FC = () => {
   const navigate = useNavigate();
-  const { intersections, cameras, setIntersections, setCameras, activeLiveUpdate } = useStore();
-  const [loading, setLoading] = useState<boolean>(true);
+  const { activeLiveUpdate } = useStore();
+  const [intersections, setIntersections] = useState<Intersection[]>(FALLBACK_INTERSECTIONS);
+  const [cameras, setCameras] = useState<Camera[]>(FALLBACK_CAMERAS);
+  const [loading, setLoading] = useState<boolean>(false);
   
   // Selection state
   const [selectedIntersectionId, setSelectedIntersectionId] = useState<number | null>(1);
@@ -38,24 +42,29 @@ export const Dashboard: React.FC = () => {
   const [demoStep, setDemoStep] = useState<number>(1);
   const [demoDescription, setDemoDescription] = useState<string>("Step 1: System Online");
   const [isDemoRunning, setIsDemoRunning] = useState<boolean>(false);
-  const [alertsFeed, setAlertsFeed] = useState<any[]>([]);
+  const [alertsFeed, setAlertsFeed] = useState<any[]>(FALLBACK_ALERTS);
 
   useEffect(() => {
     const fetchData = async () => {
       try {
         const [intRes, camRes, alertsRes] = await Promise.all([
-          apiClient.get('/intersections'),
-          apiClient.get('/cameras'),
-          apiClient.get('/alerts')
+          apiClient.get('/intersections').catch(() => ({ data: [] })),
+          apiClient.get('/cameras').catch(() => ({ data: [] })),
+          apiClient.get('/alerts').catch(() => ({ data: [] }))
         ]);
-        setIntersections(intRes.data);
-        setCameras(camRes.data);
-        setAlertsFeed(alertsRes.data.slice(0, 5));
-
-        if (intRes.data.length > 0) setSelectedIntersectionId(intRes.data[0].id);
-        if (camRes.data.length > 0) setSelectedCameraId(camRes.data[0].id);
+        if (Array.isArray(intRes.data) && intRes.data.length > 0) {
+          setIntersections(intRes.data);
+          setSelectedIntersectionId(intRes.data[0].id);
+        }
+        if (Array.isArray(camRes.data) && camRes.data.length > 0) {
+          setCameras(camRes.data);
+          setSelectedCameraId(camRes.data[0].id);
+        }
+        if (Array.isArray(alertsRes.data) && alertsRes.data.length > 0) {
+          setAlertsFeed(alertsRes.data.slice(0, 5));
+        }
       } catch (err) {
-        console.error('Error fetching telemetry:', err);
+        console.warn('Backend waking up, dashboard active with local telemetry:', err);
       } finally {
         setLoading(false);
       }

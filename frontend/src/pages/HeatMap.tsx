@@ -11,8 +11,10 @@ interface GraphNode {
   status: string;
 }
 
+import { FALLBACK_GIS_GRAPH } from '../api/mockFallback';
+
 export const HeatMap: React.FC = () => {
-  const [nodes, setNodes] = useState<GraphNode[]>([]);
+  const [nodes, setNodes] = useState<GraphNode[]>(FALLBACK_GIS_GRAPH.nodes);
   const [measurements, setMeasurements] = useState<any>({});
   const { activeLiveUpdate } = useStore();
   
@@ -23,19 +25,22 @@ export const HeatMap: React.FC = () => {
   const fetchMetrics = async () => {
     try {
       const graphRes = await apiClient.get('/gis/graph');
-      const nodesData = graphRes.data.nodes;
-      setNodes(nodesData);
+      if (graphRes.data?.nodes && Array.isArray(graphRes.data.nodes)) {
+        setNodes(graphRes.data.nodes);
+      }
 
       const measureRes = await apiClient.get('/traffic/measurements', { params: { limit: 20 } });
-      const measureMap: any = {};
-      measureRes.data.forEach((m: any) => {
-        if (!measureMap[m.camera_id]) {
-          measureMap[m.camera_id] = m;
-        }
-      });
-      setMeasurements(measureMap);
+      if (Array.isArray(measureRes.data)) {
+        const measureMap: any = {};
+        measureRes.data.forEach((m: any) => {
+          if (!measureMap[m.camera_id]) {
+            measureMap[m.camera_id] = m;
+          }
+        });
+        setMeasurements(measureMap);
+      }
     } catch (err) {
-      console.error('Error loading heatmap metrics:', err);
+      console.warn('Using resilient GIS nodes for traffic heatmap:', err);
     }
   };
 

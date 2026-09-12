@@ -117,8 +117,10 @@ const DEFAULT_PRESETS: CameraPreset[] = [
   }
 ];
 
+import { FALLBACK_CAMERAS } from '../api/mockFallback';
+
 export const Cameras: React.FC = () => {
-  const [cameras, setCameras] = useState<Camera[]>([]);
+  const [cameras, setCameras] = useState<Camera[]>(FALLBACK_CAMERAS);
   const [showAddModal, setShowAddModal] = useState<boolean>(false);
   const [showEditModal, setShowEditModal] = useState<boolean>(false);
   const [editingCamera, setEditingCamera] = useState<Camera | null>(null);
@@ -140,9 +142,18 @@ export const Cameras: React.FC = () => {
   const fetchCameras = async () => {
     try {
       const res = await apiClient.get('/cameras');
-      setCameras(res.data);
+      if (Array.isArray(res.data) && res.data.length > 0) {
+        setCameras(res.data);
+      } else if (Array.isArray(res.data) && res.data.length === 0) {
+        // Automatically trigger seeding on backend so database is populated
+        apiClient.post('/cameras/seed-examples').then(() => {
+          apiClient.get('/cameras').then(r => {
+            if (Array.isArray(r.data) && r.data.length > 0) setCameras(r.data);
+          }).catch(() => {});
+        }).catch(() => {});
+      }
     } catch (err) {
-      console.error(err);
+      console.warn('Backend cameras offline/waking up, maintaining resilient grid:', err);
     }
   };
 

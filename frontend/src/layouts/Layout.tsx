@@ -24,10 +24,13 @@ export const Layout: React.FC = () => {
   }, [location.pathname]);
 
   useEffect(() => {
+    const isRenderProd = typeof window !== 'undefined' && window.location.hostname.includes('onrender.com');
+    const defaultWsUrl = isRenderProd
+      ? 'wss://vigitra-backend.onrender.com/ws/traffic'
+      : 'ws://localhost:8000/ws/traffic';
+
     const envWsUrl = import.meta.env.VITE_WS_URL;
-    const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-    const fallbackWsUrl = `${protocol}//${window.location.host}/ws/traffic`;
-    const wsUrl = envWsUrl || fallbackWsUrl;
+    const wsUrl = (envWsUrl && !envWsUrl.startsWith('/')) ? envWsUrl : defaultWsUrl;
 
     let ws: WebSocket | null = null;
     try {
