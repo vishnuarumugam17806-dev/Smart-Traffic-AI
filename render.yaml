@@ -6,7 +6,7 @@ services:
     env: docker
     rootDir: backend
     dockerfilePath: Dockerfile
-    dockerContext: backend
+    dockerContext: .
     plan: free
     region: oregon
     envVars:
