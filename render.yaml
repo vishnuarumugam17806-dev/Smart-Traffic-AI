@@ -2,6 +2,7 @@ services:
   # 1. FastAPI + YOLOv8 Backend Docker Container
   - type: web
     name: vigitra-backend
+    autoDeploy: true
     env: docker
     rootDir: backend
     dockerfilePath: Dockerfile
@@ -21,6 +22,7 @@ services:
   # 2. React Vite Frontend Static SPA Service
   - type: web
     name: vigitra-frontend
+    autoDeploy: true
     env: static
     rootDir: frontend
     buildCommand: npm install && npm run build

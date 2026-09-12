@@ -44,7 +44,12 @@ class Settings(BaseSettings):
 
     # Fallback to local SQLite if Postgres is unavailable
     USE_SQLITE_FALLBACK: bool = True
-    SQLITE_URL: str = f"sqlite:///{os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..', '..', 'vigitra.db'))}"
+    SQLITE_URL: str = os.getenv(
+        "SQLITE_URL",
+        f"sqlite:///{os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..', 'vigitra.db'))}"
+        if not os.path.exists(os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..', '..', 'vigitra.db')))
+        else f"sqlite:///{os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..', '..', 'vigitra.db'))}"
+    )
 
     # Redis & RabbitMQ
     REDIS_URL: str = "redis://localhost:6379/0"
