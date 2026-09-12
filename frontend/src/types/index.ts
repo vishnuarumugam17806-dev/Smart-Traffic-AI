@@ -30,7 +30,7 @@ export interface Intersection {
   total_lanes: number;
   num_approaches?: number;
   approaches_config?: any[];
-  created_at: string;
+  created_at?: string;
 }
 
 export interface Camera {
@@ -42,7 +42,7 @@ export interface Camera {
   direction: string;
   status: CameraStatus;
   fps: number;
-  created_at: string;
+  created_at?: string;
 }
 
 export interface Signal {

@@ -5,7 +5,7 @@ import { apiClient } from '../api/client';
 interface GraphNode {
   id: number;
   name: string;
-  direction: string;
+  direction?: string;
   status: string;
   lat: number;
   lng: number;

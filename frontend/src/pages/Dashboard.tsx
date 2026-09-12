@@ -11,12 +11,13 @@ import { apiClient } from '../api/client';
 import { useStore } from '../store/useStore';
 
 import { FALLBACK_CAMERAS, FALLBACK_INTERSECTIONS, FALLBACK_ALERTS } from '../api/mockFallback';
+import type { Camera as CameraType, Intersection } from '../types';
 
 export const Dashboard: React.FC = () => {
   const navigate = useNavigate();
   const { activeLiveUpdate } = useStore();
   const [intersections, setIntersections] = useState<Intersection[]>(FALLBACK_INTERSECTIONS);
-  const [cameras, setCameras] = useState<Camera[]>(FALLBACK_CAMERAS);
+  const [cameras, setCameras] = useState<CameraType[]>(FALLBACK_CAMERAS);
   const [loading, setLoading] = useState<boolean>(false);
   
   // Selection state
