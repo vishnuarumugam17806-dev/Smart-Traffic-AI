@@ -62,20 +62,25 @@ async def background_video_processing_loop():
     Adaptive Signal Optimization -> WebSocket Broadcasting.
     """
     logger.info("VIGITRA Real-Time Camera & Traffic AI Processing Pipeline Initialized.")
+    cam_cursor = 0
 
     while True:
         try:
-            await asyncio.sleep(1.5)  # 1.5s interval per processing tick
+            await asyncio.sleep(2.0)  # 2.0s tick interval to keep CPU light
             db: Session = SessionLocal()
             try:
                 cameras = db.query(Camera).filter(Camera.status != "OFFLINE").all()
                 if not cameras:
-                    # If no cameras found, pull all cameras
                     cameras = db.query(Camera).all()
                     if not cameras:
                         continue
 
-                for cam in cameras:
+                # Process 1-2 cameras per cycle round-robin to ensure non-blocking high-throughput server responsiveness
+                batch_size = min(2, len(cameras))
+                active_batch = [cameras[(cam_cursor + i) % len(cameras)] for i in range(batch_size)]
+                cam_cursor = (cam_cursor + batch_size) % len(cameras)
+
+                for cam in active_batch:
                     # Ingest frame via CameraStreamManager
                     frame, stream_meta = stream_manager.get_frame(cast(int, cam.id), cast(str, cam.source_url), cast(str, cam.source_type))
 
@@ -126,8 +131,8 @@ async def background_video_processing_loop():
                         cv2.rectangle(frame, (115, 235), (165, 255), (255, 255, 255), -1)
                         cv2.putText(frame, "TN01AB1234", (116, 248), cv2.FONT_HERSHEY_SIMPLEX, 0.28, (0, 0, 0), 1)
 
-                    # Process frame through CV + Tracker + ANPR Pipeline
-                    res = cv_processor.process_frame(frame)
+                    # Offload CV + Tracker + ANPR Pipeline to thread pool (never blocks event loop)
+                    res = await asyncio.to_thread(cv_processor.process_frame, frame)
                     density_enum = CongestionLevelEnum[res["density_state"]]
 
                     # 1. Log Traffic Measurement to DB
@@ -313,6 +318,8 @@ async def background_video_processing_loop():
                         "latency_ms": stream_meta["latency_ms"],
                         "camera_health": stream_meta["status"]
                     })
+
+                    await asyncio.sleep(0.05)  # Yield to event loop between camera inferences
 
                 db.commit()
             except Exception as e:
