@@ -7,6 +7,7 @@ from typing import cast
 from datetime import datetime, timezone
 from contextlib import asynccontextmanager
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
+from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy.orm import Session
 
@@ -369,6 +370,11 @@ app.add_middleware(
 # Mount Routers
 app.include_router(auth_router, prefix=f"{settings.API_V1_STR}/auth", tags=["Auth"])
 app.include_router(traffic_router, prefix=settings.API_V1_STR, tags=["Traffic & AI"])
+
+# Ensure persistent video recordings storage directory exists
+RECORDINGS_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "storage", "recordings"))
+os.makedirs(RECORDINGS_DIR, exist_ok=True)
+app.mount("/storage/recordings", StaticFiles(directory=RECORDINGS_DIR), name="recordings")
 
 @app.get("/")
 def root():

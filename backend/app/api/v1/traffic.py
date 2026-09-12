@@ -1,6 +1,9 @@
+import os
+import hashlib
+import random
 from datetime import datetime, timezone
 from typing import List, Optional, Any, Dict
-from fastapi import APIRouter, Depends, HTTPException, status, Response
+from fastapi import APIRouter, Depends, HTTPException, status, Response, UploadFile, File, Form
 from sqlalchemy.orm import Session
 from app.database.session import get_db
 from app.models.models import (
@@ -1085,7 +1088,7 @@ def review_evidence_record(evidence_id: int, review_status: str, db: Session = D
     db.refresh(evd)
     return evd
 
-# --- RECORDED VIDEO SEARCH & PLAYBACK MODULE ---
+# --- RECORDED VIDEO SEARCH, UPLOAD & PLAYBACK MODULE ---
 @router.get("/recordings")
 def search_recorded_videos(
     camera_id: Optional[int] = None,
@@ -1116,8 +1119,10 @@ def search_recorded_videos(
                 "end_time": datetime.utcnow().isoformat(),
                 "duration_sec": 120.0,
                 "file_size_mb": 14.5,
-                "file_reference": "sample_traffic.mp4",
+                "file_reference": "/videos/sample_traffic_urban.mp4",
+                "file_url": "/videos/sample_traffic_urban.mp4",
                 "recording_type": "CONTINUOUS",
+                "sha256_hash": "a4b2c8901234567890abcdef1234567890abcdef1234567890abcdef12345678",
                 "event_markers": [
                     {"time_sec": 15.0, "type": "ANPR_EVENT", "description": "Plate TN01AB1234 sighted"},
                     {"time_sec": 48.0, "type": "ANOMALY", "description": "Stopped vehicle slowdown"}
@@ -1137,13 +1142,126 @@ def search_recorded_videos(
             "duration_sec": r.duration_sec,
             "file_size_mb": r.file_size_mb,
             "file_reference": r.file_reference,
+            "file_url": r.file_reference if (r.file_reference and (r.file_reference.startswith('/') or r.file_reference.startswith('http'))) else f"/videos/{r.file_reference}" if r.file_reference else "/videos/sample_traffic_urban.mp4",
             "recording_type": r.recording_type,
+            "sha256_hash": r.sha256_hash or "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
             "event_markers": [
+                {"time_sec": 5.0, "type": "RECORD_START", "description": "Feed Ingestion Stream Active"},
                 {"time_sec": 15.0, "type": "ANPR_EVENT", "description": "Plate Sighted"},
-                {"time_sec": 48.0, "type": "ANOMALY", "description": "Traffic Queue Slowdown"}
+                {"time_sec": 48.0, "type": "ANOMALY", "description": "Traffic Flow Slowdown"}
             ]
         } for r in recs
     ]
+
+@router.post("/recordings/upload")
+async def upload_mobile_recording(
+    video_file: UploadFile = File(...),
+    device_id: str = Form("MOBILE-CAM-001"),
+    location: str = Form("Anna Salai Junction Approach"),
+    operator_name: Optional[str] = Form(None),
+    duration_sec: float = Form(15.0),
+    recording_type: str = Form("MOBILE_FIELD"),
+    db: Session = Depends(get_db)
+):
+    """
+    Accepts, stores, and registers video recorded by mobile patrol devices.
+    Computes cryptographic SHA-256 evidence integrity hash and saves video file to persistent storage.
+    """
+    recordings_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "..", "storage", "recordings"))
+    os.makedirs(recordings_dir, exist_ok=True)
+
+    contents = await video_file.read()
+    file_size_mb = round(len(contents) / (1024 * 1024), 2)
+    sha256 = hashlib.sha256(contents).hexdigest()
+
+    orig_ext = os.path.splitext(video_file.filename or "")[1]
+    if not orig_ext:
+        orig_ext = ".webm" if "webm" in (video_file.content_type or "") else ".mp4"
+
+    timestamp_str = datetime.utcnow().strftime("%Y%m%d_%H%M%S")
+    record_id = f"REC-MOB-{timestamp_str}-{random.randint(100, 999)}"
+    filename = f"{record_id}{orig_ext}"
+    dest_path = os.path.join(recordings_dir, filename)
+
+    with open(dest_path, "wb") as f:
+        f.write(contents)
+
+    now_t = datetime.utcnow()
+    rec = VideoRecording(
+        record_id=record_id,
+        camera_id=None,
+        device_id=device_id,
+        location=location,
+        start_time=now_t,
+        end_time=now_t,
+        duration_sec=duration_sec,
+        file_size_mb=max(0.1, file_size_mb),
+        file_reference=f"/storage/recordings/{filename}",
+        recording_type=recording_type,
+        sha256_hash=sha256
+    )
+    db.add(rec)
+    db.commit()
+    db.refresh(rec)
+
+    # Broadcast real-time notification
+    try:
+        from app.websocket.manager import ws_manager
+        await ws_manager.broadcast({
+            "event": "RECORDING_SAVED",
+            "record_id": rec.record_id,
+            "device_id": rec.device_id,
+            "location": rec.location,
+            "file_url": f"/storage/recordings/{filename}",
+            "duration_sec": rec.duration_sec,
+            "timestamp": rec.start_time.isoformat()
+        })
+    except Exception:
+        pass
+
+    return {
+        "status": "SUCCESS",
+        "message": f"Mobile video recording successfully stored and indexed as {record_id}",
+        "recording": {
+            "id": rec.id,
+            "record_id": rec.record_id,
+            "device_id": rec.device_id,
+            "location": rec.location,
+            "duration_sec": rec.duration_sec,
+            "file_size_mb": rec.file_size_mb,
+            "file_url": f"/storage/recordings/{filename}",
+            "file_reference": f"/storage/recordings/{filename}",
+            "sha256_hash": rec.sha256_hash,
+            "recording_type": rec.recording_type,
+            "start_time": rec.start_time.isoformat(),
+            "event_markers": [
+                {"time_sec": 0.0, "type": "MOBILE_START", "description": f"Field recording started by {operator_name or 'Field Officer'}"},
+                {"time_sec": round(duration_sec / 2, 1), "type": "FIELD_SIGHTING", "description": f"Mobile video captured at {location}"}
+            ]
+        }
+    }
+
+@router.delete("/recordings/{recording_id}")
+def delete_recording(recording_id: int, db: Session = Depends(get_db)):
+    """Deletes a recording record and removes its physical file."""
+    rec = db.query(VideoRecording).filter(VideoRecording.id == recording_id).first()
+    if not rec:
+        raise HTTPException(status_code=404, detail="Recording not found")
+    
+    # Attempt to remove file if in storage
+    if rec.file_reference and rec.file_reference.startswith("/storage/recordings/"):
+        filename = rec.file_reference.replace("/storage/recordings/", "")
+        fpath = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "..", "storage", "recordings", filename))
+        if os.path.exists(fpath):
+            try:
+                os.remove(fpath)
+            except Exception:
+                pass
+
+    db.delete(rec)
+    db.commit()
+    return {"status": "SUCCESS", "message": f"Recording {rec.record_id} deleted."}
+
 
 @router.post("/recordings/seed-examples")
 def seed_example_recordings(db: Session = Depends(get_db)):

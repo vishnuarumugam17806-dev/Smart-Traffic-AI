@@ -12,6 +12,18 @@ if (!rawBase || rawBase === '/api/v1' || rawBase.startsWith('/')) {
 }
 
 export const API_BASE_URL = rawBase;
+export const BACKEND_URL = API_BASE_URL.replace(/\/api\/v1\/?$/, '');
+
+export const resolveVideoUrl = (url?: string): string => {
+  if (!url) return '/videos/sample_traffic_urban.mp4';
+  if (url.startsWith('blob:') || url.startsWith('data:') || url.startsWith('http://') || url.startsWith('https://')) {
+    return url;
+  }
+  if (url.startsWith('/storage/')) {
+    return `${BACKEND_URL}${url}`;
+  }
+  return url;
+};
 
 export const apiClient = axios.create({
   baseURL: API_BASE_URL,
