@@ -25,6 +25,8 @@ backend/vigitra.db
 
 # Media & Generated videos
 *.mp4
+!sample_traffic_*.mp4
+!backend/sample_traffic_*.mp4
 frontend/dist/
 
 # Environment local files
