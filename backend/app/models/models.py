@@ -284,7 +284,7 @@ class VideoRecording(Base):
 
     id = Column(Integer, primary_key=True, index=True)
     record_id = Column(String(100), unique=True, index=True, nullable=False) # e.g. REC-20260901-001
-    camera_id = Column(Integer, ForeignKey("cameras.id"), nullable=False)
+    camera_id = Column(Integer, ForeignKey("cameras.id"), nullable=True)
     device_id = Column(String(100), nullable=True)
     start_time = Column(DateTime, default=datetime.utcnow, index=True)
     end_time = Column(DateTime, nullable=True)
@@ -292,12 +292,20 @@ class VideoRecording(Base):
     file_size_mb = Column(Float, default=14.5)
     duration_sec = Column(Float, default=120.0)
     location = Column(String(255), nullable=False)
-    recording_type = Column(String(50), default="CONTINUOUS") # CONTINUOUS, EVENT, OPERATOR
+    recording_type = Column(String(50), default="CONTINUOUS") # CONTINUOUS, EVENT, OPERATOR, MOBILE_FIELD
     created_by = Column(String(100), default="SYSTEM")
     retention_expiry = Column(DateTime, nullable=True)
     file_hash = Column(String(64), nullable=True) # sha256 checksum
 
     camera = relationship("Camera")
+
+    @property
+    def sha256_hash(self):
+        return self.file_hash
+
+    @sha256_hash.setter
+    def sha256_hash(self, value):
+        self.file_hash = value
 
 class EvidenceRecord(Base):
     __tablename__ = "evidence_records"
