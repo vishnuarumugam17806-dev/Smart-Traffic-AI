@@ -12,13 +12,15 @@ interface GraphNode {
 }
 
 interface GraphEdge {
-  id: number;
-  name: string;
+  id?: number;
+  name?: string;
+  road_name?: string;
   source: number;
   target: number;
-  distance_km: number;
-  expected_time_sec: number;
-  direction: string;
+  distance_km?: number;
+  length_km?: number;
+  expected_time_sec?: number;
+  direction?: string;
 }
 
 import { FALLBACK_GIS_GRAPH } from '../api/mockFallback';
