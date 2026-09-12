@@ -326,90 +326,16 @@ async def background_video_processing_loop():
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     logger.info("Starting VIGITRA AI Platform Engine...")
-    # Seed default admin and operator users if missing
+    # Automatically seed all test data (Users, Chennai Intersections, 12 Cameras, Signals, Watchlist, ANPR Observations)
     try:
-        from app.core import security
-        from app.models.models import User, RoleEnum, Intersection, Signal
+        from app.core.seeder import auto_seed_database
         db_seed: Session = SessionLocal()
         try:
-            if not db_seed.query(User).filter(User.username == "admin").first():
-                admin_user = User(
-                    username="admin",
-                    email="admin@vigitra.ai",
-                    hashed_password=security.get_password_hash("admin123"),
-                    full_name="System Administrator",
-                    role=RoleEnum.ADMIN,
-                    is_active=True
-                )
-                operator_user = User(
-                    username="operator",
-                    email="operator@vigitra.ai",
-                    hashed_password=security.get_password_hash("operator123"),
-                    full_name="Traffic Operator",
-                    role=RoleEnum.OPERATOR,
-                    is_active=True
-                )
-                db_seed.add_all([admin_user, operator_user])
-                db_seed.commit()
-                logger.info("Seeded default users: 'admin' and 'operator'.")
-
-            # Seed Default Test Junctions (4-side, 3-side, 2-side)
-            if db_seed.query(Intersection).count() == 0:
-                j1 = Intersection(
-                    id=1,
-                    name="Anna Salai Spencers Junction (4-Side)",
-                    location="Downtown Thousand Lights, Anna Salai",
-                    latitude=13.0604,
-                    longitude=80.2605,
-                    total_lanes=4,
-                    num_approaches=4,
-                    approaches_config=[
-                        {"id": "NORTH", "name": "North Approach", "direction": "NORTH"},
-                        {"id": "EAST", "name": "East Approach", "direction": "EAST"},
-                        {"id": "SOUTH", "name": "South Approach", "direction": "SOUTH"},
-                        {"id": "WEST", "name": "West Approach", "direction": "WEST"}
-                    ]
-                )
-                j2 = Intersection(
-                    id=2,
-                    name="Chennai Central Ripon Cross (3-Side)",
-                    location="EVR Periyar Salai & Wall Tax Rd",
-                    latitude=13.0827,
-                    longitude=80.2755,
-                    total_lanes=3,
-                    num_approaches=3,
-                    approaches_config=[
-                        {"id": "NORTH", "name": "North Main Approach", "direction": "NORTH"},
-                        {"id": "EAST", "name": "East Ramp Approach", "direction": "EAST"},
-                        {"id": "WEST", "name": "West Express Approach", "direction": "WEST"}
-                    ]
-                )
-                j3 = Intersection(
-                    id=3,
-                    name="Gemini Flyover Access (2-Side)",
-                    location="Cathedral Road & Anna Salai Flyover",
-                    latitude=13.0531,
-                    longitude=80.2514,
-                    total_lanes=2,
-                    num_approaches=2,
-                    approaches_config=[
-                        {"id": "NORTH", "name": "Northbound Bridge Approach", "direction": "NORTH"},
-                        {"id": "SOUTH", "name": "Southbound Bridge Approach", "direction": "SOUTH"}
-                    ]
-                )
-                db_seed.add_all([j1, j2, j3])
-                db_seed.commit()
-
-                s1 = Signal(intersection_id=1, current_phase="NORTH", green_duration=35, red_duration=35)
-                s2 = Signal(intersection_id=2, current_phase="NORTH", green_duration=30, red_duration=30)
-                s3 = Signal(intersection_id=3, current_phase="NORTH", green_duration=25, red_duration=25)
-                db_seed.add_all([s1, s2, s3])
-                db_seed.commit()
-                logger.info("Seeded default 4-Side, 3-Side, and 2-Side test junctions.")
+            auto_seed_database(db_seed)
         finally:
             db_seed.close()
     except Exception as seed_err:
-        logger.error(f"Error seeding default users: {seed_err}")
+        logger.error(f"Error during auto-seeding: {seed_err}")
 
     bg_task = asyncio.create_task(background_video_processing_loop())
     yield

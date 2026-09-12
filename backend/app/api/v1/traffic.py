@@ -1323,7 +1323,7 @@ def query_ai_assistant(req: AIQueryRequest, db: Session = Depends(get_db)):
 def get_daily_report(db: Session = Depends(get_db)):
     return report_service.generate_daily_report(db)
 
-# 15. System Health Monitoring
+# 15. System Health Monitoring & On-Demand Seeder
 @router.get("/system/health")
 def get_system_health(db: Session = Depends(get_db)):
     return {
@@ -1338,6 +1338,17 @@ def get_system_health(db: Session = Depends(get_db)):
         "system_load": "14%",
         "uptime": "99.98%"
     }
+
+@router.post("/system/seed")
+def trigger_database_seed(db: Session = Depends(get_db)):
+    """Triggers complete auto-seeding of Chennai intersections, 12 cameras, watchlist, plates, and telemetry."""
+    from app.core.seeder import auto_seed_database
+    auto_seed_database(db, force=True)
+    return {
+        "status": "SUCCESS",
+        "message": "VIGITRA Chennai Smart City test dataset seeded successfully."
+    }
+
 
 # 16. Admin Users Management
 @router.get("/users", response_model=List[UserOut])
