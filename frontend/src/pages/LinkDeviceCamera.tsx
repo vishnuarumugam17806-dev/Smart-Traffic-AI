@@ -40,6 +40,7 @@ export const LinkDeviceCamera: React.FC = () => {
   const [liveBattery, setLiveBattery] = useState<number>(94);
   const [isCapturingSnapshot, setIsCapturingSnapshot] = useState<boolean>(false);
   const [lastCapturedPlate, setLastCapturedPlate] = useState<string | null>(null);
+  const [latestPlateInfo, setLatestPlateInfo] = useState<any | null>(null);
   const [captureFeedback, setCaptureFeedback] = useState<string | null>(null);
 
   // Pairing session state
@@ -82,10 +83,14 @@ export const LinkDeviceCamera: React.FC = () => {
     const fetchLiveFrame = async () => {
       try {
         const res = await apiClient.get(`/mobile-camera/${selectedStreamDeviceId}/live-frame`);
-        if (res.data && res.data.frame_base64) {
-          setLiveFrameBase64(res.data.frame_base64);
+        if (res.data) {
+          if (res.data.frame_base64) setLiveFrameBase64(res.data.frame_base64);
           setLiveStreamFps(res.data.fps || 24);
           if (res.data.battery_pct) setLiveBattery(res.data.battery_pct);
+          if (res.data.plate_info) {
+            setLastCapturedPlate(res.data.plate_info.plate_number);
+            setLatestPlateInfo(res.data.plate_info);
+          }
         }
       } catch (err) {}
     };
@@ -326,11 +331,28 @@ export const LinkDeviceCamera: React.FC = () => {
               </span>
             </div>
 
-            {lastCapturedPlate && (
+            {latestPlateInfo ? (
+              <div className="absolute bottom-3 left-3 bg-slate-950/90 border border-slate-700 p-2 rounded-lg flex items-center gap-2 shadow-2xl backdrop-blur-xs">
+                <div className="px-2 py-0.5 bg-amber-400 text-slate-950 font-mono font-black text-xs rounded border border-amber-500">
+                  {latestPlateInfo.plate_number}
+                </div>
+                <span className={`text-[9px] font-bold px-1.5 py-0.5 rounded uppercase ${
+                  latestPlateInfo.flag === 'WATCHLIST_MATCH' ? 'bg-red-600 text-white animate-pulse' :
+                  latestPlateInfo.flag === 'COMPLIANCE_VIOLATION' ? 'bg-amber-500 text-black font-extrabold' :
+                  'bg-emerald-500 text-black font-extrabold'
+                }`}>
+                  {latestPlateInfo.flag === 'WATCHLIST_MATCH' ? '🚨 WATCHLIST MATCH' :
+                   latestPlateInfo.flag === 'COMPLIANCE_VIOLATION' ? '⚠️ EXPIRED' : '✅ COMPLIANT'}
+                </span>
+                <Link to="/recordings" className="text-[10px] text-blue-400 hover:underline font-bold flex items-center gap-0.5 ml-1">
+                  Record <ExternalLink className="w-2.5 h-2.5" />
+                </Link>
+              </div>
+            ) : lastCapturedPlate ? (
               <div className="absolute bottom-3 left-3 px-3 py-1 bg-amber-400 text-slate-950 font-mono font-black text-xs rounded shadow-lg border border-amber-500">
                 ANPR IDENTIFIED: {lastCapturedPlate}
               </div>
-            )}
+            ) : null}
 
             <div className="absolute bottom-3 right-3 px-2 py-0.5 bg-slate-900/80 text-slate-300 font-mono text-[9px] rounded">
               FPS: {liveStreamFps || 24.0} | 5G
@@ -369,6 +391,33 @@ export const LinkDeviceCamera: React.FC = () => {
                   <span className="font-bold text-[#245B84]">WebRTC / JPEG Canvas</span>
                 </div>
               </div>
+
+              {latestPlateInfo && (
+                <div className="p-2.5 bg-white border border-[#DCE4EA] rounded space-y-1 text-[10px]">
+                  <div className="flex items-center justify-between">
+                    <span className="font-bold text-[#245B84] flex items-center gap-1">
+                      <Radio className="w-2.5 h-2.5 text-emerald-600 animate-pulse" />
+                      LATEST AUTOMATIC ANPR:
+                    </span>
+                    <span className={`px-1.5 py-0.2 rounded text-[8px] font-bold uppercase ${
+                      latestPlateInfo.flag === 'WATCHLIST_MATCH' ? 'bg-red-600 text-white' :
+                      latestPlateInfo.flag === 'COMPLIANCE_VIOLATION' ? 'bg-amber-600 text-white' :
+                      'bg-emerald-600 text-white'
+                    }`}>
+                      {latestPlateInfo.flag}
+                    </span>
+                  </div>
+                  <div className="flex justify-between items-center pt-0.5">
+                    <span className="font-mono font-black text-xs text-slate-900 bg-amber-200 px-1.5 py-0.5 rounded border border-amber-300">
+                      {latestPlateInfo.plate_number}
+                    </span>
+                    <Link to="/recordings" className="text-blue-600 hover:underline font-bold flex items-center gap-0.5 text-[9px]">
+                      Open Record <ExternalLink className="w-2.5 h-2.5" />
+                    </Link>
+                  </div>
+                  <p className="text-slate-600 text-[9px] truncate">{latestPlateInfo.reason}</p>
+                </div>
+              )}
 
               <div className="p-2.5 bg-white border border-[#DCE4EA] rounded space-y-1 text-[10px]">
                 <span className="font-bold text-[#245B84] block">SUPPORTED AI EVENTS:</span>

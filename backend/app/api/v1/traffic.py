@@ -1,8 +1,12 @@
 import os
 import hashlib
 import random
+import logging
+import cv2
 from datetime import datetime, timezone
 from typing import List, Optional, Any, Dict
+
+logger = logging.getLogger(__name__)
 from fastapi import APIRouter, Depends, HTTPException, status, Response, UploadFile, File, Form
 from sqlalchemy.orm import Session
 from app.database.session import get_db
@@ -1145,23 +1149,230 @@ def revoke_mobile_device(device_id: str, reason: str = "Operator revoked access"
     return {"status": "SUCCESS", "message": f"Device {device_id} revoked successfully.", "device_uuid": dev.device_uuid}
 
 @router.post("/mobile-camera/stream-frame")
-def ingest_mobile_frame(stream_in: FrameStreamInput, db: Session = Depends(get_db)):
+async def ingest_mobile_frame(stream_in: FrameStreamInput, db: Session = Depends(get_db)):
     frame = mobile_manager.push_frame_base64(stream_in.device_id, stream_in.frame_base64)
     if frame is None:
-        raise HTTPException(status_code=400, detail="Invalid frame format or unregistered device session.")
+        raise HTTPException(status_code=400, detail="Invalid frame format or unreadable base64 image data.")
 
-    # Keep device session active in DB
+    import uuid, hashlib
+    from app.cv.anpr import anpr_engine
+    from app.websocket.manager import ws_manager
+    from app.services.compliance.providers.demo_vehicle_provider import demo_vehicle_provider
+
+    # Auto-register or keep device session active in DB
     try:
         dev = db.query(MobileDevice).filter(MobileDevice.device_id == stream_in.device_id).first()
-        if dev:
+        if not dev:
+            dev = MobileDevice(
+                device_id=stream_in.device_id,
+                device_uuid=f"VG-MOB-{uuid.uuid4().hex[:8].upper()}",
+                name=f"Field Unit ({stream_in.device_id})",
+                operator_id="PATROL-OFFICER",
+                assigned_location="Mobile Field Stream",
+                connection_status="CONNECTED",
+                stream_status="STREAMING",
+                battery_pct=94,
+                platform="Android / Chrome Mobile",
+                is_active=True
+            )
+            db.add(dev)
+            db.commit()
+            db.refresh(dev)
+        else:
             dev.connection_status = "CONNECTED"
             dev.stream_status = "STREAMING"
             dev.last_seen = datetime.now(timezone.utc).replace(tzinfo=None)
             db.commit()
-    except Exception:
-        db.rollback()
 
-    return {"status": "FRAME_ACCEPTED", "timestamp": datetime.utcnow().isoformat()}
+        if stream_in.device_id not in mobile_manager.active_sessions:
+            mobile_manager.register_device_session(
+                device_id=stream_in.device_id,
+                camera_id=dev.camera_id or 0,
+                operator_id=dev.operator_id or "PATROL-OFFICER",
+                location=dev.assigned_location or "Mobile Field Stream"
+            )
+    except Exception as dbe:
+        db.rollback()
+        logger.warning(f"Note on device sync: {dbe}")
+
+    # Run Automatic Number Plate Recognition (ANPR) on incoming mobile video frame
+    plate_detected = False
+    detected_plate = None
+    plate_confidence = 0.0
+    flag_type = "NORMAL"
+    flag_severity = "NORMAL"
+    flag_reason = "Standard vehicle flow"
+    record_id = None
+    evidence_url = None
+
+    try:
+        plate_res = anpr_engine.extract_plate(frame)
+        if plate_res and plate_res.get("plate_number"):
+            raw_plate = plate_res["plate_number"]
+            clean_plate = raw_plate.replace(" ", "").upper()
+            plate_confidence = round(plate_res.get("final_confidence", 0.92), 2)
+            detected_plate = clean_plate
+            plate_detected = True
+
+            # 1. Check against Security Watchlist / Blacklist
+            blacklist_match = db.query(Blacklist).filter(
+                Blacklist.plate == clean_plate,
+                Blacklist.status == "ACTIVE"
+            ).first()
+
+            # 2. Check against Vehicle Compliance Registry (RC, Insurance, PUC, Fitness)
+            demo_dossier = demo_vehicle_provider.get_vehicle_details(clean_plate)
+
+            if blacklist_match:
+                flag_type = "WATCHLIST_MATCH"
+                flag_severity = "CRITICAL"
+                flag_reason = f"Watchlist Match: {blacklist_match.reason}"
+            elif demo_dossier:
+                comp_status = demo_dossier.get("compliance_status")
+                if comp_status in ["ACTION_REQUIRED", "NON_COMPLIANT"]:
+                    flag_type = "COMPLIANCE_VIOLATION"
+                    flag_severity = "HIGH"
+                    doc_reasons = []
+                    for doc_k in ["insurance", "puc", "fitness", "rc"]:
+                        d = demo_dossier.get(doc_k)
+                        if isinstance(d, dict) and d.get("status") in ["EXPIRED", "ACTION_REQUIRED"]:
+                            doc_reasons.append(f"{doc_k.upper()} Expired")
+                    flag_reason = f"Compliance Violation: {', '.join(doc_reasons) if doc_reasons else 'Document Expired'}"
+                elif comp_status == "REVIEW_REQUIRED":
+                    flag_type = "REVIEW_REQUIRED"
+                    flag_severity = "MEDIUM"
+                    flag_reason = "Flagged for manual operator review"
+                else:
+                    flag_type = "VERIFIED_COMPLIANT"
+                    flag_severity = "NORMAL"
+                    flag_reason = "All documents verified and active"
+            else:
+                flag_type = "ANPR_CAPTURED"
+                flag_severity = "NORMAL"
+                flag_reason = "Field ANPR plate observation"
+
+            # 3. Store PlateObservation in Database
+            cam_id = dev.camera_id if dev and dev.camera_id else 1
+            obs = PlateObservation(
+                plate_number=clean_plate,
+                camera_id=cam_id,
+                ocr_confidence=plate_res.get("ocr_confidence", plate_confidence),
+                plate_detection_confidence=plate_res.get("plate_detection_confidence", 0.95),
+                image_quality_score=plate_res.get("image_quality_score", 0.9),
+                temporal_consistency=1.0,
+                final_confidence=plate_confidence,
+                vehicle_type=plate_res.get("vehicle_type", "car"),
+                lane=1,
+                direction="MOBILE_FIELD",
+                global_vehicle_id=f"VEH-MOB-{clean_plate[-4:]}",
+                speed_kmh=0.0
+            )
+            db.add(obs)
+            db.commit()
+            db.refresh(obs)
+
+            # 4. Save persistent photo evidence to /storage/evidence and create EvidenceRecord
+            evidence_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "..", "storage", "evidence"))
+            os.makedirs(evidence_dir, exist_ok=True)
+            timestamp_str = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
+            rec_id = f"PHO-MOB-{timestamp_str}-{obs.id:03d}"
+            filename = f"{rec_id}.jpg"
+            dest_path = os.path.join(evidence_dir, filename)
+
+            cv2.imwrite(dest_path, frame)
+            evidence_url = f"/storage/evidence/{filename}"
+            record_id = rec_id
+
+            evidence = EvidenceRecord(
+                record_id=rec_id,
+                camera_id=cam_id,
+                device_id=stream_in.device_id,
+                operator_id=(dev.operator_id if dev and dev.operator_id else "PATROL_OFFICER"),
+                location=(dev.assigned_location if dev and dev.assigned_location else f"Field Patrol Unit {stream_in.device_id}"),
+                plate_number=clean_plate,
+                vehicle_type=obs.vehicle_type,
+                timestamp=datetime.now(timezone.utc).replace(tzinfo=None),
+                original_image=evidence_url,
+                vehicle_image=evidence_url,
+                ocr_confidence=plate_confidence,
+                event_type=flag_type,
+                notes=f"Mobile Patrol ANPR: {flag_reason} (Device: {stream_in.device_id})",
+                review_status="FLAGGED" if flag_severity in ["CRITICAL", "HIGH"] else "VERIFIED"
+            )
+            db.add(evidence)
+            db.commit()
+
+            # 5. Create Alert if Critical/High
+            if flag_severity in ["CRITICAL", "HIGH"]:
+                alert = Alert(
+                    type=flag_type,
+                    severity=flag_severity,
+                    camera_id=cam_id,
+                    location=dev.assigned_location or f"Field Patrol Unit {stream_in.device_id}",
+                    vehicle_plate=clean_plate,
+                    message=f"MOBILE PATROL ANPR ALERT: Vehicle {clean_plate} identified. {flag_reason}.",
+                    status="NEW",
+                    confidence=plate_confidence
+                )
+                db.add(alert)
+                db.commit()
+
+                await ws_manager.broadcast({
+                    "event": "ALERT_CREATED",
+                    "alert": {
+                        "id": alert.id,
+                        "type": alert.type,
+                        "severity": alert.severity,
+                        "location": alert.location,
+                        "vehicle_plate": alert.vehicle_plate,
+                        "message": alert.message,
+                        "timestamp": alert.timestamp.isoformat()
+                    }
+                })
+
+            # Broadcast plate sighting to all connected dashboards
+            await ws_manager.broadcast({
+                "event": "PLATE_DETECTED",
+                "camera_id": cam_id,
+                "device_id": stream_in.device_id,
+                "global_vehicle_id": obs.global_vehicle_id,
+                "plate_number": clean_plate,
+                "confidence": plate_confidence,
+                "vehicle_type": obs.vehicle_type,
+                "flag": flag_type,
+                "severity": flag_severity,
+                "reason": flag_reason,
+                "timestamp": obs.timestamp.isoformat()
+            })
+
+            # Update latest detection in mobile_manager memory for desktop telemetry
+            mobile_manager.update_plate_detection(stream_in.device_id, {
+                "plate_number": clean_plate,
+                "confidence": plate_confidence,
+                "flag": flag_type,
+                "severity": flag_severity,
+                "reason": flag_reason,
+                "record_id": record_id,
+                "evidence_url": evidence_url
+            })
+
+    except Exception as anpr_err:
+        logger.warning(f"Mobile ANPR processing notice: {anpr_err}")
+
+    return {
+        "status": "FRAME_ACCEPTED",
+        "device_id": stream_in.device_id,
+        "fps": mobile_manager.measured_fps.get(stream_in.device_id, 24.0),
+        "plate_detected": plate_detected,
+        "plate_number": detected_plate,
+        "confidence": plate_confidence,
+        "flag": flag_type,
+        "severity": flag_severity,
+        "reason": flag_reason,
+        "record_id": record_id,
+        "evidence_url": evidence_url,
+        "timestamp": datetime.now(timezone.utc).isoformat()
+    }
 
 @router.get("/mobile-camera/{device_id}/live-frame")
 def get_mobile_live_frame(device_id: str, db: Session = Depends(get_db)):
@@ -1191,7 +1402,8 @@ def get_mobile_live_frame(device_id: str, db: Session = Depends(get_db)):
         "frame_base64": f"data:image/jpeg;base64,{b64_str}",
         "has_frame": True,
         "fps": meta.get("fps", 24.0),
-        "battery_pct": meta.get("battery_pct", 92),
+        "battery_pct": meta.get("battery_pct", 94),
+        "plate_info": meta.get("plate_info"),
         "timestamp": datetime.utcnow().isoformat()
     }
 

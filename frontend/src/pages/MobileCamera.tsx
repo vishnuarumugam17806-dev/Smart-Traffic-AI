@@ -21,6 +21,20 @@ export const MobileCamera: React.FC = () => {
   const [savedModalRecord, setSavedModalRecord] = useState<any | null>(null);
   const [recentMobileRecords, setRecentMobileRecords] = useState<any[]>([]);
 
+  // Automatic ANPR scan tracking
+  interface MobileScanResult {
+    plate_number: string;
+    confidence: number;
+    flag: string;
+    severity: string;
+    reason: string;
+    record_id?: string;
+    evidence_url?: string;
+    timestamp: string;
+  }
+  const [latestScan, setLatestScan] = useState<MobileScanResult | null>(null);
+  const [recentScans, setRecentScans] = useState<MobileScanResult[]>([]);
+
   const [deviceId] = useState<string>('MOBILE-CAM-001');
   const [locationName] = useState<string>('Anna Salai Junction Approach');
   const [gpsCoords, setGpsCoords] = useState<{ lat: number; lng: number }>({ lat: 13.0604, lng: 80.2496 });
@@ -168,10 +182,30 @@ export const MobileCamera: React.FC = () => {
       ctx.drawImage(videoRef.current, 0, 0, 640, 480);
       const base64 = canvas.toDataURL('image/jpeg', 0.6);
       try {
-        await apiClient.post('/mobile-camera/stream-frame', {
+        const res = await apiClient.post('/mobile-camera/stream-frame', {
           device_id: deviceId,
           frame_base64: base64
         });
+        if (res.data && res.data.plate_detected && res.data.plate_number) {
+          const scanItem: MobileScanResult = {
+            plate_number: res.data.plate_number,
+            confidence: res.data.confidence || 0.94,
+            flag: res.data.flag || 'ANPR_CAPTURED',
+            severity: res.data.severity || 'NORMAL',
+            reason: res.data.reason || 'Vehicle plate identified',
+            record_id: res.data.record_id,
+            evidence_url: res.data.evidence_url,
+            timestamp: new Date().toLocaleTimeString()
+          };
+          setLatestScan(scanItem);
+          setRecentScans(prev => [scanItem, ...prev.filter(p => p.plate_number !== scanItem.plate_number)].slice(0, 10));
+
+          if (scanItem.flag === 'WATCHLIST_MATCH' || scanItem.severity === 'CRITICAL') {
+            if (typeof navigator !== 'undefined' && navigator.vibrate) {
+              navigator.vibrate([200, 100, 200, 100, 300]);
+            }
+          }
+        }
       } catch (err) {}
     }
   };
@@ -439,7 +473,82 @@ export const MobileCamera: React.FC = () => {
             </div>
           </div>
         )}
+
+        {/* Real-time ANPR Recognition AR HUD Overlay */}
+        {latestScan && isStreaming && (
+          <div className="absolute bottom-2 left-2 right-2 bg-slate-950/90 border border-slate-700 backdrop-blur-md p-2.5 rounded-xl flex items-center justify-between shadow-2xl z-10 animate-fade-in">
+            <div className="flex items-center gap-2.5">
+              <div className="bg-amber-400 text-slate-950 px-2.5 py-1 rounded font-mono font-black text-xs tracking-wider border border-amber-500 shadow-xs flex items-center gap-1.5 shrink-0">
+                <span className="text-[9px] bg-blue-700 text-white px-1 py-0.2 rounded font-bold">IND</span>
+                {latestScan.plate_number}
+              </div>
+              <div className="text-left">
+                <div className="flex items-center gap-1.5">
+                  <span className={`text-[9px] font-bold px-1.5 py-0.5 rounded uppercase tracking-wider ${
+                    latestScan.flag === 'WATCHLIST_MATCH'
+                      ? 'bg-red-600 text-white animate-pulse'
+                      : latestScan.flag === 'COMPLIANCE_VIOLATION'
+                      ? 'bg-amber-500 text-black font-extrabold'
+                      : 'bg-emerald-500 text-black font-extrabold'
+                  }`}>
+                    {latestScan.flag === 'WATCHLIST_MATCH' ? '🚨 WATCHLIST MATCH' : latestScan.flag === 'COMPLIANCE_VIOLATION' ? '⚠️ EXPIRED' : '✅ COMPLIANT'}
+                  </span>
+                  <span className="text-[9px] text-slate-400 font-mono">{(latestScan.confidence * 100).toFixed(0)}% OCR</span>
+                </div>
+                <p className="text-[10px] text-slate-200 truncate max-w-[170px] sm:max-w-xs">{latestScan.reason}</p>
+              </div>
+            </div>
+
+            {latestScan.record_id && (
+              <Link
+                to="/recordings"
+                className="text-[10px] text-blue-400 hover:text-blue-300 font-bold bg-blue-950/60 border border-blue-800/60 px-2 py-1.5 rounded-lg flex items-center gap-1 shrink-0"
+              >
+                <Film className="w-3 h-3" /> Record
+              </Link>
+            )}
+          </div>
+        )}
       </div>
+
+      {/* Real-time ANPR Scans Feed */}
+      {recentScans.length > 0 && (
+        <div className="mb-3 bg-slate-900/90 border border-slate-800 rounded-xl p-3 space-y-2 shadow-xl">
+          <div className="flex items-center justify-between text-xs font-bold text-slate-300 border-b border-slate-800 pb-1.5">
+            <span className="flex items-center gap-1.5 text-blue-400">
+              <span className="w-2 h-2 rounded-full bg-emerald-400 animate-ping" />
+              LIVE AUTOMATIC ANPR SCANS ({recentScans.length})
+            </span>
+            <span className="text-[10px] text-slate-500 font-mono">AUTO-SAVED TO RECORDS</span>
+          </div>
+          <div className="space-y-1.5 max-h-32 overflow-y-auto pr-1">
+            {recentScans.map((scan, idx) => (
+              <div key={idx} className="flex items-center justify-between p-2 rounded-lg bg-slate-950/60 border border-slate-800/80 text-[11px]">
+                <div className="flex items-center gap-2">
+                  <span className="bg-amber-400/95 text-slate-950 font-black px-1.5 py-0.5 rounded font-mono text-[10px]">
+                    {scan.plate_number}
+                  </span>
+                  <span className={`px-1.5 py-0.5 text-[9px] rounded font-bold uppercase ${
+                    scan.flag === 'WATCHLIST_MATCH' ? 'bg-red-500/20 text-red-400 border border-red-500/40' :
+                    scan.flag === 'COMPLIANCE_VIOLATION' ? 'bg-amber-500/20 text-amber-300 border border-amber-500/40' :
+                    'bg-emerald-500/20 text-emerald-300 border border-emerald-500/40'
+                  }`}>
+                    {scan.flag.replace('_', ' ')}
+                  </span>
+                </div>
+                <div className="flex items-center gap-2 text-slate-400 text-[10px]">
+                  <span>{scan.timestamp}</span>
+                  {scan.record_id && (
+                    <Link to="/recordings" className="text-blue-400 hover:underline">
+                      View
+                    </Link>
+                  )}
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
 
       {/* Control Action Buttons */}
       <div className="space-y-2.5">

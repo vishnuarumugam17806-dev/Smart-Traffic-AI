@@ -28,6 +28,7 @@ backend/vigitra.db
 !sample_traffic_*.mp4
 !backend/sample_traffic_*.mp4
 frontend/dist/
+backend/storage/evidence/*.jpg
 
 # Environment local files
 .env.local
