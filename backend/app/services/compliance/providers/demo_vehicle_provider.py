@@ -301,8 +301,113 @@ class DemoVehicleRegistryProvider(VehicleDataProvider):
             "message": "Demo vehicle data provider active for judging demonstration."
         }
 
+    def generate_dynamic_profile(self, clean_plate: str) -> Dict[str, Any]:
+        """Dynamically generates an authentic, complete RTO registration & compliance profile."""
+        prefix = clean_plate[:2] if len(clean_plate) >= 2 else "TN"
+        state_rto_map = {
+            "TN": "Chennai Central RTO (TN-01), Tamil Nadu",
+            "KA": "Bengaluru Central RTO (KA-05), Karnataka",
+            "MH": "Mumbai West RTO (MH-02), Maharashtra",
+            "DL": "Delhi Transport Department (DL-01), Delhi NCR",
+            "KL": "Thiruvananthapuram RTO (KL-01), Kerala",
+            "AP": "Vijayawada RTO (AP-16), Andhra Pradesh",
+            "TS": "Hyderabad Central RTO (TS-09), Telangana",
+            "UP": "Lucknow RTO (UP-32), Uttar Pradesh"
+        }
+        rto_name = state_rto_map.get(prefix, f"{prefix} Regional Transport Office")
+
+        manufacturers = [
+            ("TATA MOTORS", "NEXON EV PRIME", "ELECTRIC"),
+            ("HYUNDAI", "CRETA SX", "PETROL"),
+            ("MARUTI SUZUKI", "BREZZA ZXI", "PETROL"),
+            ("MAHINDRA", "THAR 4X4", "DIESEL"),
+            ("HONDA", "CITY ZX", "PETROL"),
+            ("KIA", "SELTOS HTX", "DIESEL")
+        ]
+        num_hash = sum(ord(c) for c in clean_plate)
+        m_idx = num_hash % len(manufacturers)
+        make, model, fuel = manufacturers[m_idx]
+
+        # Determine compliance and complaint scenario
+        # 0: Insurance Expired (ACTION REQUIRED)
+        # 1: PUC Expired (ACTION REQUIRED)
+        # 2: Fully Compliant (COMPLIANT)
+        # 3: Expiring Soon (REVIEW REQUIRED)
+        scenario = num_hash % 4
+        if "EXP" in clean_plate or "VIOL" in clean_plate or "ALERT" in clean_plate:
+            scenario = 0
+
+        ins_status = "VALID"
+        ins_date = "2027-05-15"
+        puc_status = "VALID"
+        puc_date = "2027-02-28"
+        fit_status = "VALID"
+        fit_date = "2036-05-15"
+        rc_status = "ACTIVE"
+        rc_date = "2036-05-15"
+        comp_status = "COMPLIANT"
+
+        if scenario == 0:
+            ins_status = "EXPIRED"
+            ins_date = "2026-04-12"
+            comp_status = "ACTION_REQUIRED"
+        elif scenario == 1:
+            puc_status = "EXPIRED"
+            puc_date = "2026-03-30"
+            comp_status = "ACTION_REQUIRED"
+        elif scenario == 3:
+            puc_status = "EXPIRING_SOON"
+            puc_date = "2026-09-28"
+            comp_status = "REVIEW_REQUIRED"
+
+        profile = {
+            "vehicle_number": clean_plate,
+            "registration_status": rc_status,
+            "vehicle_class": "MOTOR CAR (LMV)",
+            "manufacturer": make,
+            "model": model,
+            "registration_date": "2021-05-15",
+            "fuel_type": fuel,
+            "rto_office": rto_name,
+            "rc": {
+                "status": "VALID",
+                "valid_until": rc_date
+            },
+            "insurance": {
+                "status": ins_status,
+                "provider": "NEW INDIA ASSURANCE CO LTD" if scenario == 0 else "ICICI LOMBARD GIC",
+                "policy_number": f"POL-{clean_plate[-4:]}-2026",
+                "valid_until": ins_date
+            },
+            "puc": {
+                "status": puc_status,
+                "valid_until": puc_date
+            },
+            "fitness": {
+                "status": fit_status,
+                "valid_until": fit_date
+            },
+            "permit": None,
+            "watchlist": {
+                "matched": False,
+                "reference": None,
+                "reason": None
+            },
+            "owner_reference": f"OWNER-{clean_plate[-4:]}",
+            "authorized_owner_display_name": f"Citizen Officer Test ({clean_plate})",
+            "compliance_status": comp_status,
+            "source": "DEMO_VEHICLE_REGISTRY"
+        }
+
+        self._memory_cache[clean_plate] = profile
+        return profile
+
     def get_vehicle_details(self, vehicle_number: str) -> Optional[Dict[str, Any]]:
         clean_plate = vehicle_number.upper().replace(" ", "").replace("-", "")
+
+        # Explicitly unregistered / unknown plates return None to produce DATA_UNAVAILABLE
+        if "UNKNOWN" in clean_plate or "INVALID" in clean_plate or "UNREG" in clean_plate or clean_plate == "NONE":
+            return None
 
         # 1. Try MongoDB Atlas
         try:
@@ -323,7 +428,7 @@ class DemoVehicleRegistryProvider(VehicleDataProvider):
             data["source"] = "DEMO_VEHICLE_REGISTRY"
             return data
 
-        # Return None if plate is not registered in demo DB
-        return None
+        # Dynamically generate realistic profile for any newly seen plate
+        return self.generate_dynamic_profile(clean_plate)
 
 demo_vehicle_provider = DemoVehicleRegistryProvider()

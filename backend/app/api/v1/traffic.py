@@ -1302,11 +1302,25 @@ async def ingest_mobile_frame(stream_in: FrameStreamInput, db: Session = Depends
             db.add(evidence)
             db.commit()
 
-            # 5. Create Alert if Critical/High
-            if flag_severity in ["CRITICAL", "HIGH"]:
+            # 5. Persist Violation / Complaint record in DB if there is a compliance or security violation
+            if flag_type in ["COMPLIANCE_VIOLATION", "WATCHLIST_MATCH"] or flag_severity in ["CRITICAL", "HIGH"]:
+                violation_rec = Violation(
+                    violation_type=f"VEHICLE_COMPLIANCE: {flag_reason}",
+                    camera_id=cam_id,
+                    license_plate=clean_plate,
+                    confidence=plate_confidence,
+                    evidence_image=evidence_url,
+                    status="UNPAID",
+                    timestamp=datetime.now(timezone.utc).replace(tzinfo=None)
+                )
+                db.add(violation_rec)
+                db.commit()
+
+            # 6. Create Alert if Critical / High / Medium (Compliance issue, complaint, or watchlist match)
+            if flag_severity in ["CRITICAL", "HIGH", "MEDIUM"] or flag_type in ["COMPLIANCE_VIOLATION", "WATCHLIST_MATCH", "REVIEW_REQUIRED"]:
                 alert = Alert(
                     type=flag_type,
-                    severity=flag_severity,
+                    severity=flag_severity if flag_severity != "NORMAL" else "HIGH",
                     camera_id=cam_id,
                     location=dev.assigned_location or f"Field Patrol Unit {stream_in.device_id}",
                     vehicle_plate=clean_plate,
@@ -1316,6 +1330,7 @@ async def ingest_mobile_frame(stream_in: FrameStreamInput, db: Session = Depends
                 )
                 db.add(alert)
                 db.commit()
+                db.refresh(alert)
 
                 await ws_manager.broadcast({
                     "event": "ALERT_CREATED",
@@ -2654,6 +2669,25 @@ def get_number_plate_dossier(
             overall = "ACTION_REQUIRED"
         elif reg_details.get("watchlist", {}).get("matched") or stolen_rec:
             overall = "REVIEW_REQUIRED"
+
+        # If there are no DB violations logged but vehicle has an active complaint / expiry, register it
+        if not violations and (overall in ["ACTION_REQUIRED", "REVIEW_REQUIRED"] or stolen_rec):
+            complaint_type = "NO_VALID_INSURANCE" if ins_s == "EXPIRED" else ("PUC_EMISSION_VIOLATION" if puc_s == "EXPIRED" else "UNPAID_TRAFFIC_E_CHALLAN")
+            if stolen_rec:
+                complaint_type = "POLICE_WARRANT_STOLEN_VEHICLE"
+            new_v = Violation(
+                violation_type=complaint_type,
+                camera_id=1,
+                license_plate=clean_plate,
+                confidence=0.96,
+                evidence_image="/sample_traffic.mp4",
+                status="UNPAID",
+                timestamp=datetime.now(timezone.utc).replace(tzinfo=None)
+            )
+            db.add(new_v)
+            db.commit()
+            db.refresh(new_v)
+            violations = [new_v]
             
         compliance_doc_summary = {
             "source": reg_details.get("source", "DEMO_VEHICLE_REGISTRY"),

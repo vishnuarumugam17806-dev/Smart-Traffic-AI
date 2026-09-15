@@ -76,10 +76,15 @@ export const Alerts: React.FC = () => {
   useEffect(() => {
     fetchAlerts();
     fetchWatchlist();
+    const interval = setInterval(fetchAlerts, 3000);
+    return () => clearInterval(interval);
   }, []);
 
   useEffect(() => {
     if (activeLiveUpdate && activeLiveUpdate.event === 'ALERT_CREATED') {
+      if (activeLiveUpdate.alert) {
+        setAlerts((prev) => [activeLiveUpdate.alert, ...prev.filter((a: any) => a.id !== activeLiveUpdate.alert.id)]);
+      }
       fetchAlerts();
     }
   }, [activeLiveUpdate]);
