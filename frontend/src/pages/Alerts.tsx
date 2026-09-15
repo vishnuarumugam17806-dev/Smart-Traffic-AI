@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from 'react';
-import { ShieldAlert, Plus, Trash2, Bell, Shield, Lock } from 'lucide-react';
+import { Link } from 'react-router-dom';
+import { ShieldAlert, Plus, Trash2, Bell, Shield, Lock, Radio, MapPin, Navigation } from 'lucide-react';
 import { apiClient } from '../api/client';
 import { useStore } from '../store/useStore';
 
@@ -24,6 +25,10 @@ interface WatchlistEntry {
   created_at: string;
   status: string;
   notes?: string;
+  total_crossings?: number;
+  last_crossing_location?: string;
+  last_crossing_time?: string;
+  sighted?: boolean;
 }
 
 import { FALLBACK_ALERTS } from '../api/mockFallback';
@@ -32,9 +37,9 @@ export const Alerts: React.FC = () => {
   const [activeTab, setActiveTab] = useState<'ALERTS' | 'WATCHLIST'>('ALERTS');
   const [alerts, setAlerts] = useState<Alert[]>(FALLBACK_ALERTS as any);
   const [watchlist, setWatchlist] = useState<WatchlistEntry[]>([
-    { id: 1, plate: "TN01AB1234", reason: "Suspected Stolen Vehicle", created_by: "Traffic Control ACP", created_at: new Date(Date.now() - 86400000).toISOString(), status: "ACTIVE", notes: "Flagged in Anna Salai FIR-2026/89" },
-    { id: 2, plate: "KA05MN3821", reason: "Hit and Run Warrant", created_by: "Central Police Station", created_at: new Date(Date.now() - 172800000).toISOString(), status: "ACTIVE", notes: "Multiple signal violations and hit-and-run incident" },
-    { id: 3, plate: "DL02CP9012", reason: "Excessive Speed Repeat Offender", created_by: "Expressway Traffic Cell", created_at: new Date(Date.now() - 259200000).toISOString(), status: "ACTIVE", notes: "Recorded speeds > 140 km/h on GST Road" }
+    { id: 1, plate: "TN01AB1234", reason: "Suspected Stolen Vehicle", created_by: "Traffic Control ACP", created_at: new Date(Date.now() - 86400000).toISOString(), status: "ACTIVE", notes: "Flagged in Anna Salai FIR-2026/89", total_crossings: 4, last_crossing_location: "Anna Salai - Spencers Junction (NORTH Approach)", last_crossing_time: new Date(Date.now() - 1800000).toISOString(), sighted: true },
+    { id: 2, plate: "KA05MN3821", reason: "Hit and Run Warrant", created_by: "Central Police Station", created_at: new Date(Date.now() - 172800000).toISOString(), status: "ACTIVE", notes: "Multiple signal violations and hit-and-run incident", total_crossings: 2, last_crossing_location: "Chennai Central - Ripon Cross (EAST Approach)", last_crossing_time: new Date(Date.now() - 7200000).toISOString(), sighted: true },
+    { id: 3, plate: "DL02CP9012", reason: "Excessive Speed Repeat Offender", created_by: "Expressway Traffic Cell", created_at: new Date(Date.now() - 259200000).toISOString(), status: "ACTIVE", notes: "Recorded speeds > 140 km/h on GST Road", total_crossings: 1, last_crossing_location: "Koyambedu Junction (SOUTH Approach)", last_crossing_time: new Date(Date.now() - 14400000).toISOString(), sighted: true }
   ]);
   const [filterSeverity, setFilterSeverity] = useState<string>('ALL');
   
@@ -101,6 +106,7 @@ export const Alerts: React.FC = () => {
       setNewPlate('');
       setNewNotes('');
       fetchWatchlist();
+      fetchAlerts();
     } catch (err: any) {
       alert(err.response?.data?.detail || 'Failed to add plate to watchlist.');
     }
@@ -315,8 +321,45 @@ export const Alerts: React.FC = () => {
                   {entry.notes && <p className="text-slate-600 text-[11px]"><span className="text-slate-400">Notes:</span> {entry.notes}</p>}
                 </div>
 
+                {/* Real-time Signal Crossing Telemetry */}
+                <div className="p-2.5 rounded border text-xs font-mono space-y-1.5 bg-[#F8FAFC] border-[#DCE4EA]">
+                  <div className="flex items-center justify-between">
+                    <span className="text-slate-500 font-bold uppercase text-[10px] flex items-center gap-1">
+                      <Radio className="w-3 h-3 text-red-500 animate-pulse" /> Signal Crossings:
+                    </span>
+                    {entry.total_crossings && entry.total_crossings > 0 ? (
+                      <span className="px-2 py-0.5 rounded text-[10px] font-extrabold bg-emerald-100 text-emerald-800 border border-emerald-300 shadow-2xs">
+                        🟢 {entry.total_crossings} Junction Crossing{entry.total_crossings > 1 ? 's' : ''}
+                      </span>
+                    ) : (
+                      <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-slate-100 text-slate-500 border border-slate-200">
+                        ⚪ No Crossings Yet
+                      </span>
+                    )}
+                  </div>
+
+                  {entry.last_crossing_location && (
+                    <div className="pt-1 text-[11px] text-slate-700">
+                      <div className="flex items-start gap-1">
+                        <MapPin className="w-3 h-3 text-slate-400 shrink-0 mt-0.5" />
+                        <span><b className="text-slate-900 font-bold">{entry.last_crossing_location}</b></span>
+                      </div>
+                      {entry.last_crossing_time && (
+                        <p className="text-[10px] text-slate-400 pl-4 font-mono">
+                          {new Date(entry.last_crossing_time).toLocaleString()}
+                        </p>
+                      )}
+                    </div>
+                  )}
+                </div>
+
                 <div className="flex items-center justify-between border-t border-[#DCE4EA] pt-2.5">
-                  <span className="text-[10px] font-mono text-slate-400">By: {entry.created_by}</span>
+                  <Link
+                    to={`/trajectories?plate=${entry.plate}`}
+                    className="text-[11px] font-mono font-bold text-[#245B84] hover:underline flex items-center gap-1"
+                  >
+                    <Navigation className="w-3 h-3" /> Track Signal Crossings →
+                  </Link>
                   <button
                     onClick={() => handleRemoveFromWatchlist(entry.id)}
                     className="p-1.5 text-slate-400 hover:text-red-600 hover:bg-red-50 rounded transition-colors"

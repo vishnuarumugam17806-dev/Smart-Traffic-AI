@@ -102,6 +102,22 @@ def auto_seed_database(db: Session, force: bool = False) -> None:
                 {"id": "EAST", "name": "East Approach", "direction": "EAST"},
                 {"id": "SOUTH", "name": "South Approach", "direction": "SOUTH"},
                 {"id": "WEST", "name": "West Approach", "direction": "WEST"}
+            ]),
+            # Dedicated Production Test Junctions (Section 25)
+            ("TEST-JUNCTION-2", "Test Lab Corridor (2 Approaches - 2 Cameras)", 13.0610, 80.2550, CongestionLevelEnum.MODERATE, 2, [
+                {"id": "NORTH", "name": "North Approach", "direction": "NORTH"},
+                {"id": "SOUTH", "name": "South Approach", "direction": "SOUTH"}
+            ]),
+            ("TEST-JUNCTION-3", "Test Lab Triangle (3 Approaches - 3 Cameras)", 13.0620, 80.2560, CongestionLevelEnum.HIGH, 3, [
+                {"id": "NORTH", "name": "North Approach", "direction": "NORTH"},
+                {"id": "EAST", "name": "East Approach", "direction": "EAST"},
+                {"id": "WEST", "name": "West Approach", "direction": "WEST"}
+            ]),
+            ("TEST-JUNCTION-4", "Test Lab Crossroads (4 Approaches - 4 Cameras)", 13.0630, 80.2570, CongestionLevelEnum.SEVERE, 4, [
+                {"id": "NORTH", "name": "North Approach", "direction": "NORTH"},
+                {"id": "EAST", "name": "East Approach", "direction": "EAST"},
+                {"id": "SOUTH", "name": "South Approach", "direction": "SOUTH"},
+                {"id": "WEST", "name": "West Approach", "direction": "WEST"}
             ])
         ]
 
@@ -124,7 +140,15 @@ def auto_seed_database(db: Session, force: bool = False) -> None:
                 db.refresh(inter)
             intersections.append(inter)
 
-        # 3. Seed 12 Realistic Example CCTV Cameras & Adaptive Signals
+        test2_inter = db.query(Intersection).filter(Intersection.name == "TEST-JUNCTION-2").first()
+        test3_inter = db.query(Intersection).filter(Intersection.name == "TEST-JUNCTION-3").first()
+        test4_inter = db.query(Intersection).filter(Intersection.name == "TEST-JUNCTION-4").first()
+
+        t2_id = test2_inter.id if test2_inter else 1
+        t3_id = test3_inter.id if test3_inter else 2
+        t4_id = test4_inter.id if test4_inter else 3
+
+        # 3. Seed Realistic Example CCTV Cameras & Adaptive Signals (including Section 25 Test Junction Cameras)
         example_cams = [
             ("CCTV-01 North (Anna Salai - Spencers Junction)", "sample_traffic_urban.mp4", "FILE", 1, "NORTH"),
             ("CCTV-02 South (Anna Salai - Spencers Junction)", "sample_traffic_congested.mp4", "FILE", 1, "SOUTH"),
@@ -137,7 +161,17 @@ def auto_seed_database(db: Session, force: bool = False) -> None:
             ("CCTV-09 North (Kathipara Cloverleaf Interchange)", "sample_traffic_emergency.mp4", "FILE", 5, "NORTH"),
             ("CCTV-10 South (Tidel Park - OMR IT Expressway)", "sample_traffic_congested.mp4", "FILE", 6, "SOUTH"),
             ("CCTV-11 East (Velachery Vijayanagar Junction)", "sample_traffic_highway.mp4", "FILE", 9, "EAST"),
-            ("CCTV-12 West (Madhavaram Roundabout Interchange)", "sample_traffic_junction.mp4", "FILE", 10, "WEST")
+            ("CCTV-12 West (Madhavaram Roundabout Interchange)", "sample_traffic_junction.mp4", "FILE", 10, "WEST"),
+            # Section 25 Test Junction Dedicated Cameras
+            ("CCTV-TEST-2A North (TEST-JUNCTION-2)", "sample_traffic_urban.mp4", "FILE", t2_id, "NORTH"),
+            ("CCTV-TEST-2B South (TEST-JUNCTION-2)", "sample_traffic_congested.mp4", "FILE", t2_id, "SOUTH"),
+            ("CCTV-TEST-3A North (TEST-JUNCTION-3)", "sample_traffic_urban.mp4", "FILE", t3_id, "NORTH"),
+            ("CCTV-TEST-3B East (TEST-JUNCTION-3)", "sample_traffic_congested.mp4", "FILE", t3_id, "EAST"),
+            ("CCTV-TEST-3C West (TEST-JUNCTION-3)", "sample_traffic_highway.mp4", "FILE", t3_id, "WEST"),
+            ("CCTV-TEST-4A North (TEST-JUNCTION-4)", "sample_traffic_urban.mp4", "FILE", t4_id, "NORTH"),
+            ("CCTV-TEST-4B East (TEST-JUNCTION-4)", "sample_traffic_congested.mp4", "FILE", t4_id, "EAST"),
+            ("CCTV-TEST-4C South (TEST-JUNCTION-4)", "sample_traffic_junction.mp4", "FILE", t4_id, "SOUTH"),
+            ("CCTV-TEST-4D West (TEST-JUNCTION-4)", "sample_traffic_rainy.mp4", "FILE", t4_id, "WEST"),
         ]
 
         cameras = []
@@ -149,7 +183,7 @@ def auto_seed_database(db: Session, force: bool = False) -> None:
                     name=cam_name,
                     source_url=video_file,
                     source_type=source_t,
-                    intersection_id=inter_id if inter_id <= len(intersections) else 1,
+                    intersection_id=inter_id,
                     direction=dir_name,
                     status=CameraStatusEnum.LIVE,
                     fps=30.0
@@ -167,7 +201,7 @@ def auto_seed_database(db: Session, force: bool = False) -> None:
             if not db.query(TrafficMeasurement).filter(TrafficMeasurement.camera_id == cam.id).first():
                 m = TrafficMeasurement(
                     camera_id=cam.id,
-                    intersection_id=inter_id if inter_id <= len(intersections) else 1,
+                    intersection_id=inter_id,
                     vehicle_count=16 + (idx * 3) % 25,
                     queue_length=2 + (idx * 2) % 10,
                     occupancy_percentage=28.0 + (idx * 5.0) % 55,
@@ -178,7 +212,7 @@ def auto_seed_database(db: Session, force: bool = False) -> None:
                 db.add(m)
 
             # Signal Controller
-            target_inter_id = inter_id if inter_id <= len(intersections) else 1
+            target_inter_id = inter_id
             if not db.query(Signal).filter(Signal.intersection_id == target_inter_id).first():
                 sig = Signal(
                     intersection_id=target_inter_id,

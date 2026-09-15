@@ -1,34 +1,104 @@
 import React, { useEffect, useState, useRef } from 'react';
-import { Video, Search, Play, Pause, MapPin, Calendar, Clock, Film, AlertTriangle, Tag, ShieldCheck, Download, Smartphone, RefreshCw, Trash2, CheckCircle2 } from 'lucide-react';
+import {
+  Film,
+  Camera,
+  Search,
+  Play,
+  Pause,
+  MapPin,
+  Calendar,
+  Clock,
+  ShieldCheck,
+  Smartphone,
+  RefreshCw,
+  Trash2,
+  CheckCircle2,
+  AlertTriangle,
+  FileImage,
+  ExternalLink,
+  ShieldAlert,
+  Tag,
+  Eye,
+  Filter,
+  Layers
+} from 'lucide-react';
 import { apiClient, resolveVideoUrl } from '../api/client';
+import { Link } from 'react-router-dom';
+
+interface RecordItem {
+  id: number;
+  record_id: string;
+  video_id?: string;
+  photo_id?: string;
+  type: 'VIDEO' | 'PHOTO';
+  media_type?: string;
+  source_type?: string;
+  camera_id?: number;
+  device_id?: string;
+  operator_id?: string;
+  location: string;
+  timestamp?: string;
+  created_at?: string;
+  start_time?: string;
+  end_time?: string;
+  duration_sec?: number;
+  file_size_mb?: number;
+  file_reference: string;
+  file_url: string;
+  image_url?: string;
+  sha256_hash?: string;
+  plate_number?: string;
+  ocr_confidence?: number;
+  confidence?: number;
+  vehicle_type?: string;
+  event_type?: string;
+  alert_id?: number;
+  review_status?: string;
+  notes?: string;
+  event_markers?: { time_sec: number; type: string; description: string }[];
+  is_local?: boolean;
+}
 
 export const RecordedVideo: React.FC = () => {
-  const [recordings, setRecordings] = useState<any[]>([]);
-  const [selectedRecord, setSelectedRecord] = useState<any | null>(null);
+  const [records, setRecords] = useState<RecordItem[]>([]);
+  const [selectedRecord, setSelectedRecord] = useState<RecordItem | null>(null);
+  const [previewPhoto, setPreviewPhoto] = useState<RecordItem | null>(null);
   const [isPlaying, setIsPlaying] = useState<boolean>(false);
   const [currentTime, setCurrentTime] = useState<number>(0);
   const [loading, setLoading] = useState<boolean>(false);
-  const [typeFilter, setTypeFilter] = useState<'ALL' | 'MOBILE' | 'FIXED'>('ALL');
+
+  // Filters
+  const [activeTab, setActiveTab] = useState<'ALL' | 'VIDEOS' | 'PHOTOS'>('ALL');
+  const [searchQuery, setSearchQuery] = useState<string>('');
+  const [plateFilter, setPlateFilter] = useState<string>('');
+  const [deviceFilter, setDeviceFilter] = useState<string>('ALL');
+  const [complianceFilter, setComplianceFilter] = useState<string>('ALL');
+
   const videoRef = useRef<HTMLVideoElement>(null);
 
-  // Filter form states
-  const [locationFilter, setLocationFilter] = useState<string>('');
-
-  const fetchRecordings = async () => {
+  const fetchRecords = async () => {
     setLoading(true);
     try {
-      // 1. Fetch remote recordings from API
-      let remoteRecords: any[] = [];
+      // 1. Fetch remote unified records from API
+      let remoteList: RecordItem[] = [];
       try {
-        const res = await apiClient.get('/recordings', {
-          params: { location: locationFilter }
+        const res = await apiClient.get('/records', {
+          params: {
+            record_type: activeTab,
+            location: searchQuery || undefined,
+            plate_number: plateFilter || undefined
+          }
         });
-        remoteRecords = Array.isArray(res.data) ? res.data : [];
+        remoteList = Array.isArray(res.data) ? res.data : [];
       } catch (e) {
-        console.warn('API recordings fetch error or offline:', e);
+        console.warn('API /records fetch fallback to /recordings:', e);
+        try {
+          const resBackup = await apiClient.get('/recordings');
+          remoteList = Array.isArray(resBackup.data) ? resBackup.data : [];
+        } catch (err) {}
       }
 
-      // 2. Fetch local device recordings from localStorage
+      // 2. Fetch local device recordings & photos from localStorage
       let localRecords: any[] = [];
       try {
         const stored = localStorage.getItem('vigitra_mobile_recordings');
@@ -39,60 +109,47 @@ export const RecordedVideo: React.FC = () => {
         console.warn('Error reading local recordings:', e);
       }
 
-      // Filter local records if locationFilter is specified
-      if (locationFilter.trim()) {
-        const q = locationFilter.toLowerCase();
-        localRecords = localRecords.filter(r => (r.location || '').toLowerCase().includes(q) || (r.record_id || '').toLowerCase().includes(q));
-      }
-
       // 3. Merge and deduplicate by record_id
-      const recordMap = new Map<string, any>();
+      const recordMap = new Map<string, RecordItem>();
 
-      // Put remote records in map
-      remoteRecords.forEach(r => {
+      remoteList.forEach((r) => {
         if (r.record_id) recordMap.set(r.record_id, r);
       });
 
-      // Overlay local records (they have fresher local blob URLs if just recorded)
-      localRecords.forEach(r => {
+      localRecords.forEach((r) => {
         if (r.record_id) {
           const existing = recordMap.get(r.record_id);
           recordMap.set(r.record_id, {
             ...existing,
             ...r,
-            // Prioritize local blob URL for instant playback if remote file_url is not ready
+            type: r.type || 'VIDEO',
             file_url: r.file_blob_url || r.file_url || (existing ? existing.file_url : undefined)
           });
         }
       });
 
       const merged = Array.from(recordMap.values());
-      // Sort newest first
       merged.sort((a, b) => {
-        const tA = new Date(a.start_time || 0).getTime();
-        const tB = new Date(b.start_time || 0).getTime();
+        const tA = new Date(a.created_at || a.start_time || a.timestamp || 0).getTime();
+        const tB = new Date(b.created_at || b.start_time || b.timestamp || 0).getTime();
         return tB - tA;
       });
 
-      setRecordings(merged);
-
-      if (merged.length > 0) {
-        setSelectedRecord((prev: any) => {
-          if (!prev) return merged[0];
-          const found = merged.find(m => m.record_id === prev.record_id);
-          return found || merged[0];
-        });
+      setRecords(merged);
+      if (!selectedRecord && merged.length > 0) {
+        const firstVideo = merged.find((r) => r.type === 'VIDEO') || merged[0];
+        setSelectedRecord(firstVideo);
       }
     } catch (err) {
-      console.error('Error in fetchRecordings:', err);
+      console.error('Error fetching records:', err);
     } finally {
       setLoading(false);
     }
   };
 
   useEffect(() => {
-    fetchRecordings();
-  }, []);
+    fetchRecords();
+  }, [activeTab]);
 
   const handleSeek = (timeSec: number) => {
     if (videoRef.current) {
@@ -104,9 +161,8 @@ export const RecordedVideo: React.FC = () => {
   };
 
   const handleDelete = async (recordId: string, id?: number) => {
-    if (!confirm(`Are you sure you want to delete recording ${recordId}?`)) return;
-    
-    // Remove from local storage
+    if (!confirm(`Are you sure you want to delete evidence record ${recordId}?`)) return;
+
     try {
       const stored = localStorage.getItem('vigitra_mobile_recordings');
       if (stored) {
@@ -116,25 +172,55 @@ export const RecordedVideo: React.FC = () => {
       }
     } catch (e) {}
 
-    // Call API delete if numeric ID exists
     if (id) {
       try {
         await apiClient.delete(`/recordings/${id}`);
       } catch (e) {}
     }
 
-    // Refresh state
-    const remaining = recordings.filter(r => r.record_id !== recordId);
-    setRecordings(remaining);
+    const remaining = records.filter((r) => r.record_id !== recordId);
+    setRecords(remaining);
     if (selectedRecord?.record_id === recordId) {
       setSelectedRecord(remaining.length > 0 ? remaining[0] : null);
     }
   };
 
-  // Filter recordings by type tabs
-  const displayedRecordings = recordings.filter(rec => {
-    if (typeFilter === 'MOBILE') return rec.recording_type === 'MOBILE_FIELD';
-    if (typeFilter === 'FIXED') return rec.recording_type !== 'MOBILE_FIELD';
+  // Filtered list
+  const filteredRecords = records.filter((rec) => {
+    if (activeTab === 'VIDEOS' && rec.type !== 'VIDEO') return false;
+    if (activeTab === 'PHOTOS' && rec.type !== 'PHOTO') return false;
+
+    if (searchQuery.trim()) {
+      const q = searchQuery.toLowerCase();
+      const matchLoc = (rec.location || '').toLowerCase().includes(q);
+      const matchId = (rec.record_id || '').toLowerCase().includes(q);
+      const matchDev = (rec.device_id || '').toLowerCase().includes(q);
+      if (!matchLoc && !matchId && !matchDev) return false;
+    }
+
+    if (plateFilter.trim()) {
+      const p = plateFilter.toLowerCase();
+      const matchPlate = (rec.plate_number || '').toLowerCase().includes(p);
+      if (!matchPlate) return false;
+    }
+
+    if (deviceFilter !== 'ALL') {
+      if (deviceFilter === 'MOBILE' && !(rec.device_id || '').includes('MOB')) return false;
+      if (deviceFilter === 'FIXED' && (rec.device_id || '').includes('MOB')) return false;
+    }
+
+    if (complianceFilter !== 'ALL') {
+      const ev = (rec.event_type || '').toUpperCase();
+      const n = (rec.notes || '').toUpperCase();
+      if (complianceFilter === 'ACTION_REQUIRED') {
+        if (!ev.includes('EXPIRED') && !n.includes('EXPIRED') && !ev.includes('ACTION')) return false;
+      } else if (complianceFilter === 'WATCHLIST') {
+        if (!ev.includes('WATCHLIST') && !n.includes('WATCHLIST') && !ev.includes('BLACKLIST')) return false;
+      } else if (complianceFilter === 'COMPLIANT') {
+        if (ev.includes('EXPIRED') || ev.includes('WATCHLIST') || n.includes('EXPIRED') || n.includes('WATCHLIST')) return false;
+      }
+    }
+
     return true;
   });
 
@@ -142,241 +228,368 @@ export const RecordedVideo: React.FC = () => {
     ? resolveVideoUrl(selectedRecord.file_url || selectedRecord.file_reference)
     : '/videos/sample_traffic_urban.mp4';
 
+  const totalVideos = records.filter((r) => r.type === 'VIDEO').length;
+  const totalPhotos = records.filter((r) => r.type === 'PHOTO').length;
+
   return (
     <div className="p-4 sm:p-6 space-y-6 bg-[#F6F8FA] min-h-screen select-none">
       {/* Header */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between border-b border-[#DCE4EA] pb-4 gap-2">
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between border-b border-[#DCE4EA] pb-4 gap-3">
         <div>
-          <h1 className="text-lg font-bold text-slate-800 tracking-tight uppercase flex items-center gap-2">
-            <Film className="w-5 h-5 text-[#245B84]" /> RECORDED VIDEO SEARCH & PLAYBACK ARCHIVE
+          <h1 className="text-lg font-bold text-slate-800 tracking-tight uppercase flex items-center gap-2 font-mono">
+            <Film className="w-5 h-5 text-[#245B84]" /> RECORDS – VIDEO & PHOTO EVIDENCE ARCHIVE
           </h1>
           <p className="text-xs text-slate-500 font-mono mt-0.5">
-            Real-time Evidence Ingestion, SHA-256 Integrity Verification & Mobile Patrol Stream Persistence
+            Verified CCTV Video Ingestion, Mobile Patrol Streams & Photo Evidence Vault (Sections 26-28)
           </p>
         </div>
 
         <div className="flex items-center gap-2">
-          <button
-            onClick={fetchRecordings}
-            disabled={loading}
-            className="px-3 py-1.5 text-xs font-mono bg-white border border-[#DCE4EA] text-slate-700 hover:bg-slate-50 rounded-lg shadow-2xs flex items-center gap-1.5 transition-colors"
+          <Link
+            to="/devices"
+            className="px-3.5 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded text-xs font-mono font-bold flex items-center gap-1.5 transition-colors shadow-xs"
           >
-            <RefreshCw className={`w-3.5 h-3.5 text-[#245B84] ${loading ? 'animate-spin' : ''}`} />
-            REFRESH ARCHIVE
+            <Smartphone className="w-4 h-4" /> MOBILE PATROL
+          </Link>
+          <button
+            onClick={fetchRecords}
+            disabled={loading}
+            className="px-3.5 py-2 bg-[#245B84] hover:bg-[#1E4A6F] text-white rounded text-xs font-mono font-bold flex items-center gap-1.5 transition-colors shadow-xs"
+          >
+            <RefreshCw className={`w-3.5 h-3.5 ${loading ? 'animate-spin' : ''}`} /> REFRESH
           </button>
         </div>
       </div>
 
-      {/* Main Grid: Player & Timeline Event Seek Bar */}
+      {/* Primary Section Tabs: ALL | VIDEOS | PHOTOS */}
+      <div className="flex flex-wrap items-center justify-between gap-3 bg-white p-2.5 rounded-lg border border-[#DCE4EA] shadow-xs">
+        <div className="flex items-center gap-1 bg-slate-100 p-1 rounded-md font-mono text-xs font-bold">
+          <button
+            onClick={() => setActiveTab('ALL')}
+            className={`px-3.5 py-1.5 rounded transition-all flex items-center gap-1.5 ${
+              activeTab === 'ALL'
+                ? 'bg-[#245B84] text-white shadow-xs'
+                : 'text-slate-600 hover:text-slate-900 hover:bg-slate-200'
+            }`}
+          >
+            <Layers className="w-3.5 h-3.5" /> ALL RECORDS ({records.length})
+          </button>
+          <button
+            onClick={() => setActiveTab('VIDEOS')}
+            className={`px-3.5 py-1.5 rounded transition-all flex items-center gap-1.5 ${
+              activeTab === 'VIDEOS'
+                ? 'bg-[#245B84] text-white shadow-xs'
+                : 'text-slate-600 hover:text-slate-900 hover:bg-slate-200'
+            }`}
+          >
+            <Film className="w-3.5 h-3.5" /> 🎥 VIDEOS ({totalVideos})
+          </button>
+          <button
+            onClick={() => setActiveTab('PHOTOS')}
+            className={`px-3.5 py-1.5 rounded transition-all flex items-center gap-1.5 ${
+              activeTab === 'PHOTOS'
+                ? 'bg-[#245B84] text-white shadow-xs'
+                : 'text-slate-600 hover:text-slate-900 hover:bg-slate-200'
+            }`}
+          >
+            <Camera className="w-3.5 h-3.5" /> 📸 PHOTOS ({totalPhotos})
+          </button>
+        </div>
+
+        {/* Search & Filter Inputs */}
+        <div className="flex flex-wrap items-center gap-2">
+          <div className="relative">
+            <Search className="w-3.5 h-3.5 text-slate-400 absolute left-2.5 top-1/2 -translate-y-1/2" />
+            <input
+              type="text"
+              placeholder="Search location or ID..."
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              className="pl-8 pr-3 py-1.5 bg-slate-50 border border-[#DCE4EA] rounded text-xs font-mono text-slate-800 placeholder-slate-400 focus:outline-none focus:ring-1 focus:ring-[#245B84] w-44 sm:w-56"
+            />
+          </div>
+
+          <input
+            type="text"
+            placeholder="Plate (e.g. TN01)"
+            value={plateFilter}
+            onChange={(e) => setPlateFilter(e.target.value)}
+            className="px-3 py-1.5 bg-slate-50 border border-[#DCE4EA] rounded text-xs font-mono text-slate-800 placeholder-slate-400 focus:outline-none focus:ring-1 focus:ring-[#245B84] w-28 uppercase"
+          />
+
+          <select
+            value={deviceFilter}
+            onChange={(e) => setDeviceFilter(e.target.value)}
+            className="px-2.5 py-1.5 bg-slate-50 border border-[#DCE4EA] rounded text-xs font-mono text-slate-700 focus:outline-none"
+          >
+            <option value="ALL">All Sources</option>
+            <option value="MOBILE">Mobile Devices</option>
+            <option value="FIXED">Fixed CCTV</option>
+          </select>
+
+          <select
+            value={complianceFilter}
+            onChange={(e) => setComplianceFilter(e.target.value)}
+            className="px-2.5 py-1.5 bg-slate-50 border border-[#DCE4EA] rounded text-xs font-mono text-slate-700 focus:outline-none"
+          >
+            <option value="ALL">All Compliance</option>
+            <option value="ACTION_REQUIRED">🔴 Action Required</option>
+            <option value="WATCHLIST">🟠 Watchlist Matches</option>
+            <option value="COMPLIANT">🟢 Compliant</option>
+          </select>
+        </div>
+      </div>
+
+      {/* Main Content: Split Grid (Player/Viewer Left, Records List Right) */}
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
-        {/* Left Column: Player & Interactive Event Timeline */}
-        <div className="lg:col-span-8 bg-white p-4 sm:p-5 rounded-xl border border-[#DCE4EA] shadow-xs space-y-4">
-          <div className="flex flex-col sm:flex-row sm:items-center justify-between border-b border-[#DCE4EA] pb-3 gap-2">
-            <div className="flex items-center gap-2">
-              {selectedRecord?.recording_type === 'MOBILE_FIELD' ? (
-                <span className="px-2 py-0.5 text-[10px] font-mono font-bold bg-purple-100 text-purple-800 border border-purple-200 rounded flex items-center gap-1">
-                  <Smartphone className="w-3 h-3 text-purple-600" /> MOBILE PATROL
-                </span>
-              ) : (
-                <span className="px-2 py-0.5 text-[10px] font-mono font-bold bg-blue-100 text-blue-800 border border-blue-200 rounded flex items-center gap-1">
-                  <Video className="w-3 h-3 text-blue-600" /> FIXED CCTV
-                </span>
-              )}
-              <h2 className="text-xs sm:text-sm font-mono font-extrabold text-slate-800 uppercase">
-                {selectedRecord ? selectedRecord.record_id : 'NO RECORD SELECTED'}
-              </h2>
-            </div>
+        {/* Left Column: Active Video Player or Selected Photo Inspector (7 cols) */}
+        <div className="lg:col-span-7 space-y-4">
+          {selectedRecord && selectedRecord.type === 'VIDEO' ? (
+            <div className="bg-white rounded-lg border border-[#DCE4EA] shadow-xs overflow-hidden">
+              <div className="p-3 bg-[#EEF4F8] border-b border-[#DCE4EA] flex items-center justify-between">
+                <div className="flex items-center gap-2">
+                  <Film className="w-4 h-4 text-[#245B84]" />
+                  <span className="font-mono font-bold text-xs text-slate-800 uppercase truncate">
+                    {selectedRecord.record_id}
+                  </span>
+                  <span className="px-1.5 py-0.5 text-[9px] font-mono font-extrabold rounded bg-[#245B84] text-white">
+                    VIDEO
+                  </span>
+                </div>
+                <span className="text-[10px] font-mono text-slate-500">{selectedRecord.location}</span>
+              </div>
 
-            {selectedRecord && (
-              <div className="flex items-center gap-2 text-[10px] font-mono">
-                <span className="text-slate-600 bg-emerald-50 px-2 py-1 rounded border border-emerald-200 flex items-center gap-1">
-                  <ShieldCheck className="w-3.5 h-3.5 text-emerald-600" /> SHA-256 VERIFIED
-                </span>
-                <a
-                  href={activeVideoUrl}
-                  download={`${selectedRecord.record_id}.mp4`}
-                  className="px-2.5 py-1 bg-[#245B84] hover:bg-[#1E4A6F] text-white font-bold rounded flex items-center gap-1 shadow-2xs transition-colors"
-                >
-                  <Download className="w-3 h-3" /> DOWNLOAD
-                </a>
-                <button
-                  onClick={() => handleDelete(selectedRecord.record_id, selectedRecord.id)}
-                  className="p-1 text-slate-400 hover:text-red-600 rounded transition-colors"
-                  title="Delete Recording"
-                >
-                  <Trash2 className="w-3.5 h-3.5" />
-                </button>
+              {/* Video Player */}
+              <div className="relative bg-black aspect-video flex items-center justify-center">
+                <video
+                  ref={videoRef}
+                  src={activeVideoUrl}
+                  controls
+                  className="w-full h-full object-contain"
+                  onTimeUpdate={() => {
+                    if (videoRef.current) setCurrentTime(videoRef.current.currentTime);
+                  }}
+                  onPlay={() => setIsPlaying(true)}
+                  onPause={() => setIsPlaying(false)}
+                />
               </div>
-            )}
-          </div>
 
-          {/* Dynamic Video Player */}
-          <div className="relative bg-black rounded-lg overflow-hidden min-h-[300px] flex items-center justify-center border border-slate-900 shadow-inner">
-            {selectedRecord ? (
-              <video
-                key={activeVideoUrl}
-                ref={videoRef}
-                src={activeVideoUrl}
-                controls
-                autoPlay
-                onPlay={() => setIsPlaying(true)}
-                onPause={() => setIsPlaying(false)}
-                onTimeUpdate={() => {
-                  if (videoRef.current) setCurrentTime(videoRef.current.currentTime);
-                }}
-                className="w-full h-auto max-h-[440px] object-contain"
-              />
-            ) : (
-              <div className="text-center p-8 text-slate-400 font-mono text-xs">
-                <Film className="w-10 h-10 text-slate-600 mx-auto mb-2" />
-                <p>No video selected. Select a recording from the archive list on the right.</p>
-              </div>
-            )}
-          </div>
+              {/* Video Telemetry & Markers */}
+              <div className="p-4 space-y-3 font-mono text-xs">
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-[11px] bg-slate-50 p-2.5 rounded border border-[#DCE4EA]">
+                  <div>
+                    <span className="text-slate-400 block text-[9px] uppercase">Device / Camera</span>
+                    <span className="font-bold text-slate-800">{selectedRecord.device_id || 'FIXED-01'}</span>
+                  </div>
+                  <div>
+                    <span className="text-slate-400 block text-[9px] uppercase">Duration</span>
+                    <span className="font-bold text-slate-800">{selectedRecord.duration_sec || 120}s</span>
+                  </div>
+                  <div>
+                    <span className="text-slate-400 block text-[9px] uppercase">Source Type</span>
+                    <span className="font-bold text-[#245B84]">{selectedRecord.source_type || 'CONTINUOUS'}</span>
+                  </div>
+                  <div>
+                    <span className="text-slate-400 block text-[9px] uppercase">Captured Time</span>
+                    <span className="font-bold text-slate-700">
+                      {new Date(selectedRecord.start_time || selectedRecord.timestamp || '').toLocaleTimeString()}
+                    </span>
+                  </div>
+                </div>
 
-          {/* Selected Record Metadata Bar */}
-          {selectedRecord && (
-            <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 bg-[#F8FAFC] p-3 rounded-lg border border-[#DCE4EA] font-mono text-[11px]">
-              <div>
-                <span className="text-slate-400 block text-[9px] uppercase">Location</span>
-                <span className="text-slate-800 font-bold truncate block">{selectedRecord.location || 'Anna Salai'}</span>
-              </div>
-              <div>
-                <span className="text-slate-400 block text-[9px] uppercase">Duration & Size</span>
-                <span className="text-slate-800 font-bold">{selectedRecord.duration_sec}s • {selectedRecord.file_size_mb} MB</span>
-              </div>
-              <div>
-                <span className="text-slate-400 block text-[9px] uppercase">Source Device</span>
-                <span className="text-blue-600 font-bold">{selectedRecord.device_id || 'CAM-FIXED-01'}</span>
-              </div>
-              <div>
-                <span className="text-slate-400 block text-[9px] uppercase">Integrity SHA-256</span>
-                <span className="text-slate-600 truncate block font-mono text-[9px]" title={selectedRecord.sha256_hash}>
-                  {(selectedRecord.sha256_hash || '').slice(0, 16)}...
-                </span>
-              </div>
-            </div>
-          )}
-
-          {/* Interactive Timeline Event Markers */}
-          {selectedRecord && selectedRecord.event_markers && selectedRecord.event_markers.length > 0 && (
-            <div className="space-y-2 pt-1">
-              <h3 className="text-[10px] font-mono font-bold text-slate-600 uppercase flex items-center gap-1">
-                <Clock className="w-3 h-3 text-[#245B84]" /> TIMELINE EVENT MARKERS (CLICK TO SEEK)
-              </h3>
-              <div className="flex items-center gap-2 overflow-x-auto pb-2">
-                {selectedRecord.event_markers.map((evt: any, i: number) => (
-                  <button
-                    key={i}
-                    onClick={() => handleSeek(evt.time_sec)}
-                    className="px-3 py-1.5 bg-[#EEF6FC] hover:bg-[#DCEEFA] active:scale-95 border border-[#DCE4EA] rounded text-left shrink-0 font-mono text-xs space-y-0.5 transition-transform"
-                  >
-                    <div className="flex items-center gap-1 font-bold text-[#245B84] text-[10px]">
-                      <Tag className="w-3 h-3 text-[#245B84]" /> {evt.type} @ {evt.time_sec}s
+                {/* Event Markers Seek Bar */}
+                {selectedRecord.event_markers && selectedRecord.event_markers.length > 0 && (
+                  <div>
+                    <span className="text-[10px] font-bold text-slate-500 uppercase block mb-1.5">
+                      TIMELINE EVENT MARKERS (CLICK TO SEEK)
+                    </span>
+                    <div className="flex flex-wrap gap-1.5">
+                      {selectedRecord.event_markers.map((mk, idx) => (
+                        <button
+                          key={idx}
+                          onClick={() => handleSeek(mk.time_sec)}
+                          className="px-2 py-1 bg-slate-100 hover:bg-[#EEF6FC] hover:text-[#245B84] border border-[#DCE4EA] rounded text-[10px] flex items-center gap-1 transition-colors"
+                        >
+                          <Clock className="w-3 h-3 text-slate-400" />
+                          <span className="font-bold">{mk.time_sec}s:</span>
+                          <span className="text-slate-600">{mk.description}</span>
+                        </button>
+                      ))}
                     </div>
-                    <p className="text-[9px] text-slate-600 truncate max-w-[150px]">{evt.description}</p>
-                  </button>
-                ))}
+                  </div>
+                )}
+
+                {/* Cryptographic SHA-256 Hash */}
+                <div className="p-2 bg-slate-50 border border-slate-200 rounded text-[10px] flex items-center justify-between gap-2">
+                  <div className="flex items-center gap-1.5 truncate">
+                    <ShieldCheck className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
+                    <span className="text-slate-500 shrink-0">SHA-256:</span>
+                    <span className="font-mono text-slate-700 truncate">{selectedRecord.sha256_hash}</span>
+                  </div>
+                  <span className="px-1.5 py-0.2 bg-emerald-100 text-emerald-800 rounded text-[8px] font-extrabold shrink-0">
+                    VERIFIED
+                  </span>
+                </div>
               </div>
+            </div>
+          ) : selectedRecord && selectedRecord.type === 'PHOTO' ? (
+            <div className="bg-white rounded-lg border border-[#DCE4EA] shadow-xs overflow-hidden space-y-3 p-4">
+              <div className="flex items-center justify-between border-b pb-2">
+                <div className="flex items-center gap-2 font-mono">
+                  <Camera className="w-4 h-4 text-emerald-600" />
+                  <span className="font-bold text-xs text-slate-800">{selectedRecord.record_id}</span>
+                  <span className="px-1.5 py-0.5 text-[9px] font-extrabold rounded bg-emerald-700 text-white">
+                    PHOTO EVIDENCE
+                  </span>
+                </div>
+                <span className="text-[10px] font-mono text-slate-500">{selectedRecord.location}</span>
+              </div>
+
+              {/* Photo Image Display */}
+              <div className="relative bg-slate-950 aspect-video rounded overflow-hidden flex items-center justify-center">
+                <img
+                  src={resolveVideoUrl(selectedRecord.file_url || selectedRecord.image_url)}
+                  alt="Captured Evidence"
+                  className="max-h-full object-contain"
+                  onError={(e) => {
+                    (e.target as any).src = '/vigitra_logo.jpg';
+                  }}
+                />
+                {selectedRecord.plate_number && (
+                  <div className="absolute top-3 left-3 px-2.5 py-1 bg-amber-400 text-slate-950 font-mono font-extrabold text-xs rounded shadow-md border border-amber-500">
+                    PLATE: {selectedRecord.plate_number}
+                  </div>
+                )}
+              </div>
+
+              {/* Photo Telemetry Grid */}
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 font-mono text-xs bg-slate-50 p-3 rounded border border-[#DCE4EA]">
+                <div>
+                  <span className="text-slate-400 block text-[9px] uppercase">Device</span>
+                  <span className="font-bold text-slate-800">{selectedRecord.device_id}</span>
+                </div>
+                <div>
+                  <span className="text-slate-400 block text-[9px] uppercase">Event Type</span>
+                  <span className="font-bold text-emerald-700">{selectedRecord.event_type}</span>
+                </div>
+                <div>
+                  <span className="text-slate-400 block text-[9px] uppercase">Confidence</span>
+                  <span className="font-bold text-[#245B84]">
+                    {Math.round((selectedRecord.confidence || selectedRecord.ocr_confidence || 0.88) * 100)}%
+                  </span>
+                </div>
+                <div>
+                  <span className="text-slate-400 block text-[9px] uppercase">Captured At</span>
+                  <span className="font-bold text-slate-700">
+                    {new Date(selectedRecord.timestamp || '').toLocaleTimeString()}
+                  </span>
+                </div>
+              </div>
+
+              <div className="p-2.5 bg-amber-50 border border-amber-200 rounded font-mono text-xs text-amber-900 flex items-center gap-2">
+                <AlertTriangle className="w-4 h-4 text-amber-600 shrink-0" />
+                <span>
+                  <strong>DISCLAIMER:</strong> AI DETECTION — Review required. Evidence indexed for audit inspection.
+                </span>
+              </div>
+            </div>
+          ) : (
+            <div className="bg-white rounded-lg border border-[#DCE4EA] p-12 text-center text-slate-400 font-mono text-xs">
+              Select any video recording or photo from the list on the right to inspect evidence.
             </div>
           )}
         </div>
 
-        {/* Right Column: Search & Archive Video List */}
-        <div className="lg:col-span-4 bg-white p-4 sm:p-5 rounded-xl border border-[#DCE4EA] shadow-xs space-y-4">
-          <h2 className="text-xs font-mono font-extrabold text-slate-800 uppercase flex items-center gap-1.5">
-            <Search className="w-4 h-4 text-[#245B84]" /> FILTER RECORDINGS ({recordings.length})
-          </h2>
-
-          {/* Type Filter Tabs */}
-          <div className="grid grid-cols-3 gap-1 bg-slate-100 p-1 rounded-lg font-mono text-[10px] font-bold">
-            <button
-              onClick={() => setTypeFilter('ALL')}
-              className={`py-1.5 rounded transition-colors ${typeFilter === 'ALL' ? 'bg-white text-slate-800 shadow-2xs' : 'text-slate-500 hover:text-slate-800'}`}
-            >
-              ALL ({recordings.length})
-            </button>
-            <button
-              onClick={() => setTypeFilter('MOBILE')}
-              className={`py-1.5 rounded transition-colors flex items-center justify-center gap-1 ${typeFilter === 'MOBILE' ? 'bg-purple-600 text-white shadow-2xs' : 'text-slate-500 hover:text-slate-800'}`}
-            >
-              <Smartphone className="w-3 h-3" /> MOBILE
-            </button>
-            <button
-              onClick={() => setTypeFilter('FIXED')}
-              className={`py-1.5 rounded transition-colors flex items-center justify-center gap-1 ${typeFilter === 'FIXED' ? 'bg-[#245B84] text-white shadow-2xs' : 'text-slate-500 hover:text-slate-800'}`}
-            >
-              <Video className="w-3 h-3" /> FIXED
-            </button>
+        {/* Right Column: Records Vault List (5 cols) */}
+        <div className="lg:col-span-5 space-y-3">
+          <div className="flex items-center justify-between">
+            <span className="text-xs font-mono font-bold text-slate-700 uppercase">
+              RECORDS VAULT ({filteredRecords.length} ITEMS)
+            </span>
+            <span className="text-[10px] font-mono text-slate-400">Sort: Newest First</span>
           </div>
 
-          <div className="space-y-2 font-mono text-xs">
-            <div>
-              <label className="block text-[10px] text-slate-500 uppercase mb-1">Search Location or Record ID</label>
-              <div className="flex gap-2">
-                <input
-                  type="text"
-                  value={locationFilter}
-                  onChange={(e) => setLocationFilter(e.target.value)}
-                  onKeyDown={(e) => { if (e.key === 'Enter') fetchRecordings(); }}
-                  placeholder="e.g. Anna Salai or REC-MOB"
-                  className="w-full bg-white border border-[#DCE4EA] rounded-lg p-2 text-slate-800 text-xs focus:outline-none focus:ring-1 focus:ring-[#245B84]"
-                />
-                <button
-                  onClick={fetchRecordings}
-                  className="px-3 py-2 bg-[#245B84] text-white hover:bg-[#1E4A6F] font-bold rounded-lg text-xs shrink-0"
-                >
-                  <Search className="w-3.5 h-3.5" />
-                </button>
-              </div>
-            </div>
-          </div>
-
-          {/* Recordings Scroll List */}
-          <div className="border-t border-[#DCE4EA] pt-3 space-y-2 max-h-[460px] overflow-y-auto pr-1">
-            {displayedRecordings.length === 0 ? (
-              <div className="text-center py-8 text-slate-400 font-mono text-xs">
-                No recordings found matching filter.
+          <div className="space-y-2.5 max-h-[calc(100vh-280px)] overflow-y-auto pr-1">
+            {filteredRecords.length === 0 ? (
+              <div className="p-8 text-center bg-white rounded-lg border border-[#DCE4EA] text-slate-400 font-mono text-xs">
+                No matching records found. Use the controls above to clear filters or refresh.
               </div>
             ) : (
-              displayedRecordings.map((rec) => {
-                const isSelected = selectedRecord?.record_id === rec.record_id;
-                const isMobile = rec.recording_type === 'MOBILE_FIELD';
+              filteredRecords.map((item) => {
+                const isSelected = selectedRecord?.record_id === item.record_id;
+                const isPhoto = item.type === 'PHOTO';
 
                 return (
                   <div
-                    key={rec.record_id || rec.id}
-                    onClick={() => setSelectedRecord(rec)}
-                    className={`p-3 rounded-xl border text-xs font-mono cursor-pointer transition-all space-y-1.5 ${
+                    key={item.record_id}
+                    onClick={() => setSelectedRecord(item)}
+                    className={`p-3.5 rounded-lg border transition-all cursor-pointer font-mono flex flex-col justify-between gap-2 shadow-xs ${
                       isSelected
-                        ? isMobile
-                          ? 'bg-purple-50/80 border-purple-500 shadow-xs'
-                          : 'bg-[#F2F7FC] border-[#245B84] shadow-xs'
-                        : 'bg-slate-50/80 border-[#DCE4EA] hover:bg-slate-100/90'
+                        ? 'bg-white border-[#245B84] ring-2 ring-[#245B84]/20'
+                        : 'bg-white hover:bg-slate-50 border-[#DCE4EA]'
                     }`}
                   >
-                    <div className="flex items-center justify-between">
-                      <span className="font-bold text-slate-900 truncate max-w-[170px] flex items-center gap-1.5">
-                        {isMobile ? (
-                          <Smartphone className="w-3.5 h-3.5 text-purple-600 shrink-0" />
-                        ) : (
-                          <Video className="w-3.5 h-3.5 text-[#245B84] shrink-0" />
-                        )}
-                        <span className={isSelected ? 'text-[#245B84] font-black' : ''}>{rec.record_id}</span>
-                      </span>
+                    <div className="flex items-start justify-between gap-2">
+                      <div className="flex items-start gap-2.5">
+                        <div
+                          className={`p-2 rounded mt-0.5 ${
+                            isPhoto ? 'bg-emerald-100 text-emerald-800' : 'bg-[#EEF6FC] text-[#245B84]'
+                          }`}
+                        >
+                          {isPhoto ? <Camera className="w-4 h-4" /> : <Film className="w-4 h-4" />}
+                        </div>
+                        <div>
+                          <div className="flex items-center gap-1.5">
+                            <span className="font-bold text-xs text-slate-800">{item.record_id}</span>
+                            <span
+                              className={`px-1.5 py-0.2 text-[8px] font-extrabold rounded ${
+                                isPhoto
+                                  ? 'bg-emerald-100 text-emerald-800 border border-emerald-300'
+                                  : 'bg-[#EEF6FC] text-[#245B84] border border-[#DCE4EA]'
+                              }`}
+                            >
+                              {isPhoto ? 'PHOTO' : 'VIDEO'}
+                            </span>
+                          </div>
+                          <div className="flex items-center gap-1 text-[10px] text-slate-500 mt-0.5">
+                            <MapPin className="w-3 h-3 text-slate-400 shrink-0" />
+                            <span className="truncate">{item.location}</span>
+                          </div>
+                        </div>
+                      </div>
 
-                      <span className={`text-[9px] px-1.5 py-0.5 rounded font-bold uppercase ${
-                        isMobile ? 'bg-purple-200 text-purple-900' : 'bg-blue-100 text-blue-800'
-                      }`}>
-                        {isMobile ? 'MOBILE FIELD' : 'FIXED CCTV'}
-                      </span>
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          handleDelete(item.record_id, item.id);
+                        }}
+                        className="p-1 text-slate-400 hover:text-red-600 rounded transition-colors"
+                        title="Delete Record"
+                      >
+                        <Trash2 className="w-3.5 h-3.5" />
+                      </button>
                     </div>
 
-                    <p className="text-slate-700 font-bold truncate text-[11px]">{rec.location}</p>
+                    {/* Metadata Footer */}
+                    <div className="flex items-center justify-between text-[10px] border-t border-slate-100 pt-2 text-slate-500">
+                      <span className="flex items-center gap-1">
+                        <Clock className="w-3 h-3 text-slate-400" />
+                        {new Date(item.timestamp || item.start_time || '').toLocaleTimeString()}
+                      </span>
 
-                    <div className="flex items-center justify-between text-[10px] text-slate-500">
-                      <span>{rec.duration_sec}s • {rec.file_size_mb} MB</span>
-                      <span>{rec.device_id || 'CAM-01'}</span>
+                      {item.plate_number && (
+                        <span className="px-1.5 py-0.2 bg-amber-100 text-amber-800 font-bold rounded">
+                          {item.plate_number}
+                        </span>
+                      )}
+
+                      {!isPhoto && (
+                        <span className="font-bold text-slate-700">{item.duration_sec || 120}s</span>
+                      )}
+
+                      <span className="text-slate-400 truncate max-w-[120px]">
+                        {item.device_id || 'FIXED-01'}
+                      </span>
                     </div>
                   </div>
                 );

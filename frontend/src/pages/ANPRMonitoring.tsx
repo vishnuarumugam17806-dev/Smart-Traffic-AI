@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from 'react';
-import { Search, Edit3, Check, X, ShieldAlert, FileText, AlertTriangle, Clock, MapPin, DollarSign, Car, Sparkles, Filter } from 'lucide-react';
+import { Link } from 'react-router-dom';
+import { Search, Edit3, Check, X, ShieldAlert, FileText, AlertTriangle, Clock, MapPin, DollarSign, Car, Sparkles, Filter, Route as RouteIcon } from 'lucide-react';
 import { apiClient } from '../api/client';
 import { useStore } from '../store/useStore';
 
@@ -43,6 +44,7 @@ interface PlateDossier {
     rc_status: string;
     is_stolen: boolean;
     stolen_reason?: string;
+    compliance?: any;
   };
   total_sightings_count: number;
   total_violations_count: number;
@@ -52,14 +54,14 @@ interface PlateDossier {
 }
 
 const SAMPLE_TEST_PLATES = [
-  { plate: "KA05MN3821", label: "Stolen Watchlist (Motorcycle)", type: "BLACKLIST", color: "bg-red-50 text-red-700 border-red-200" },
-  { plate: "TN01AB1234", label: "14 Unpaid Fines (Swift)", type: "VIOLATION", color: "bg-amber-50 text-amber-700 border-amber-200" },
-  { plate: "DL02CP9012", label: "Route Anomaly (432 km/h)", type: "ANOMALY", color: "bg-purple-50 text-purple-700 border-purple-200" },
-  { plate: "KA01AM1080", label: "Emergency Ambulance", type: "EMERGENCY", color: "bg-orange-50 text-orange-700 border-orange-200" },
-  { plate: "TN01EM9999", label: "Police Cruiser Escort", type: "POLICE", color: "bg-blue-50 text-blue-700 border-blue-200" },
-  { plate: "MH04EV4040", label: "Electric Vehicle (Nexon EV)", type: "EV", color: "bg-emerald-50 text-emerald-700 border-emerald-200" },
-  { plate: "KL07BF5566", label: "Interstate Volvo Bus", type: "BUS", color: "bg-teal-50 text-teal-700 border-teal-200" },
-  { plate: "KA01TR9999", label: "Heavy Logistics Truck", type: "TRUCK", color: "bg-slate-100 text-slate-700 border-slate-300" },
+  { plate: "TNXX1001", label: "🟢 COMPLIANT (Nexon EV • All Docs Valid)", type: "COMPLIANT", color: "bg-emerald-50 text-emerald-800 border-emerald-300 font-bold" },
+  { plate: "TNXX1002", label: "🔴 ACTION REQUIRED (Creta • Insurance Expired)", type: "ACTION_REQ", color: "bg-red-50 text-red-800 border-red-300 font-bold" },
+  { plate: "TNXX1003", label: "🔴 ACTION REQUIRED (Dzire • PUC Expired)", type: "ACTION_REQ", color: "bg-amber-50 text-amber-800 border-amber-300 font-bold" },
+  { plate: "TNXX1004", label: "🔴 ACTION REQUIRED (Bolero Maxi • Fitness Expired)", type: "ACTION_REQ", color: "bg-orange-50 text-orange-800 border-orange-300 font-bold" },
+  { plate: "TNXX1005", label: "🟠 REVIEW REQUIRED (Scorpio-N • Watchlist Match)", type: "REVIEW_REQ", color: "bg-purple-50 text-purple-800 border-purple-300 font-bold" },
+  { plate: "KA05MN3821", label: "🚨 Stolen Watchlist (Ambulance)", type: "BLACKLIST", color: "bg-red-50 text-red-700 border-red-200" },
+  { plate: "TN01AB1234", label: "🚗 Swift Verna (Video 1 Vehicle)", type: "VIOLATION", color: "bg-slate-50 text-slate-700 border-slate-200" },
+  { plate: "DL02CP9012", label: "🚌 City Bus (Fitness Expiring Soon)", type: "BUS", color: "bg-blue-50 text-blue-700 border-blue-200" },
 ];
 
 export const ANPRMonitoring: React.FC = () => {
@@ -82,6 +84,14 @@ export const ANPRMonitoring: React.FC = () => {
   const [seedingPlates, setSeedingPlates] = useState<boolean>(false);
   const [seedSuccessMsg, setSeedSuccessMsg] = useState<string | null>(null);
 
+  // Manual Watchlist Tracking states
+  const [showTrackModal, setShowTrackModal] = useState<boolean>(false);
+  const [trackPlateInput, setTrackPlateInput] = useState<string>('');
+  const [trackReasonInput, setTrackReasonInput] = useState<string>('Suspected Stolen Vehicle');
+  const [trackNotesInput, setTrackNotesInput] = useState<string>('');
+  const [watchlistPlates, setWatchlistPlates] = useState<string[]>([]);
+  const [trackingSuccessMsg, setTrackingSuccessMsg] = useState<string | null>(null);
+
   const fetchObservations = async () => {
     try {
       const res = await apiClient.get('/anpr/observations');
@@ -97,6 +107,34 @@ export const ANPRMonitoring: React.FC = () => {
       }
     } catch (err) {
       console.warn('Using local ANPR plate observations while backend connects:', err);
+    }
+
+    // Load active watchlist tracked plates
+    try {
+      const wRes = await apiClient.get('/watchlist');
+      if (Array.isArray(wRes.data)) {
+        setWatchlistPlates(wRes.data.map((w: any) => (w.plate || '').toUpperCase().replace(/[\s-]/g, '')));
+      }
+    } catch (err) {}
+  };
+
+  const handleAddTrackVehicle = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!trackPlateInput.trim()) return;
+    try {
+      const cleanPlate = trackPlateInput.toUpperCase().replace(/[\s-]/g, '');
+      await apiClient.post('/watchlist', {
+        plate: cleanPlate,
+        reason: trackReasonInput,
+        notes: trackNotesInput
+      });
+      setWatchlistPlates((prev) => [...prev, cleanPlate]);
+      setShowTrackModal(false);
+      setTrackingSuccessMsg(`Vehicle ${cleanPlate} successfully added to surveillance watchlist. System will alert when crossed at any signal.`);
+      setTimeout(() => setTrackingSuccessMsg(null), 6000);
+      fetchObservations();
+    } catch (err) {
+      console.error('Error adding vehicle to watchlist:', err);
     }
   };
 
@@ -216,6 +254,15 @@ export const ANPRMonitoring: React.FC = () => {
           )}
 
           <button
+            onClick={() => { setTrackPlateInput(searchPlate || ''); setShowTrackModal(true); }}
+            className="px-3.5 py-2 bg-red-600 hover:bg-red-700 text-white font-bold text-xs rounded-lg flex items-center gap-1.5 shadow-sm font-mono transition-colors"
+            title="Add a license plate to track if the vehicle crossed in any traffic signal"
+          >
+            <ShieldAlert className="w-4 h-4 text-white" />
+            <span>+ Track Vehicle at Signals</span>
+          </button>
+
+          <button
             onClick={handleSeedPlates}
             disabled={seedingPlates}
             className="px-3.5 py-2 bg-[#245B84] hover:bg-[#1E4A6F] text-white font-bold text-xs rounded-lg flex items-center gap-1.5 shadow-sm font-mono transition-colors"
@@ -226,6 +273,14 @@ export const ANPRMonitoring: React.FC = () => {
           </button>
         </div>
       </div>
+
+      {/* Tracking Success banner */}
+      {trackingSuccessMsg && (
+        <div className="p-3 bg-red-50 text-red-800 border border-red-200 rounded-lg text-xs font-mono flex items-center gap-2 animate-fadeIn shadow-xs">
+          <ShieldAlert className="w-4 h-4 text-red-600 shrink-0" />
+          <span className="font-bold">{trackingSuccessMsg}</span>
+        </div>
+      )}
 
       {/* Success banner if seeded */}
       {seedSuccessMsg && (
@@ -396,13 +451,23 @@ export const ANPRMonitoring: React.FC = () => {
 
           const isEditing = editingId === obs.id;
 
+          const cleanCardPlate = obs.plate_number.toUpperCase().replace(/[\s-]/g, '');
+          const isTracked = watchlistPlates.includes(cleanCardPlate);
+
           return (
-            <div key={obs.id} className="bg-white p-4 rounded-xl border border-[#DCE4EA] shadow-xs flex flex-col justify-between space-y-4 hover:border-blue-300 transition-colors">
+            <div key={obs.id} className={`bg-white p-4 rounded-xl border shadow-xs flex flex-col justify-between space-y-4 hover:border-blue-300 transition-colors ${isTracked ? 'border-red-400 bg-red-50/15 ring-1 ring-red-300' : 'border-[#DCE4EA]'}`}>
               {/* Header */}
               <div className="flex items-center justify-between">
-                <span className="px-2 py-0.5 rounded bg-slate-50 border border-[#DCE4EA] text-[10px] font-mono text-[#245B84] font-bold">
-                  Camera #{obs.camera_id} • Lane {obs.lane}
-                </span>
+                <div className="flex items-center gap-1.5 flex-wrap">
+                  <span className="px-2 py-0.5 rounded bg-slate-50 border border-[#DCE4EA] text-[10px] font-mono text-[#245B84] font-bold">
+                    Camera #{obs.camera_id} • Lane {obs.lane}
+                  </span>
+                  {isTracked && (
+                    <span className="px-1.5 py-0.5 rounded bg-red-600 text-white font-mono text-[9px] font-bold flex items-center gap-1 animate-pulse" title="Target vehicle under active signal surveillance">
+                      <ShieldAlert className="w-2.5 h-2.5" /> TRACKED
+                    </span>
+                  )}
+                </div>
                 <span className={`px-2 py-0.5 rounded border text-[10px] font-mono font-bold ${confColor}`}>
                   {Math.round(obs.final_confidence * 100)}% Match
                 </span>
@@ -468,6 +533,15 @@ export const ANPRMonitoring: React.FC = () => {
                 <div className="flex justify-between">
                   <span className="text-slate-500">Timestamp:</span>
                   <span className="text-slate-400">{new Date(obs.timestamp).toLocaleTimeString()}</span>
+                </div>
+                <div className="pt-2 border-t border-slate-100 flex justify-end">
+                  <Link
+                    to={`/trajectories?plate=${obs.plate_number}`}
+                    onClick={(e) => e.stopPropagation()}
+                    className="text-[10px] font-bold text-[#245B84] hover:underline flex items-center gap-1"
+                  >
+                    <RouteIcon className="w-3 h-3" /> View Vehicle Tracking →
+                  </Link>
                 </div>
               </div>
             </div>
@@ -561,6 +635,159 @@ export const ANPRMonitoring: React.FC = () => {
                 </div>
               </div>
 
+              {/* VEHICLE COMPLIANCE VERIFICATION (VAHAN / DEMO REGISTRY) */}
+              {selectedDossier.owner_info.compliance && (
+                <div className="bg-slate-800/80 p-5 rounded-xl border border-slate-700 space-y-4">
+                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-slate-700 pb-3">
+                    <div className="flex items-center gap-2">
+                      <div className="p-1.5 rounded-lg bg-blue-600/20 text-blue-400">
+                        <Check className="w-5 h-5" />
+                      </div>
+                      <div>
+                        <h3 className="text-xs font-mono font-bold text-white uppercase tracking-wider">
+                          VEHICLE COMPLIANCE VERIFICATION
+                        </h3>
+                        <p className="text-[10px] text-slate-400 font-mono">
+                          {selectedDossier.owner_info.compliance.data_source_label}
+                        </p>
+                      </div>
+                    </div>
+
+                    <div className="flex items-center gap-2">
+                      {selectedDossier.owner_info.compliance.compliance_status === 'COMPLIANT' && (
+                        <span className="px-3 py-1 rounded-full text-xs font-mono font-bold bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 flex items-center gap-1.5 animate-pulse">
+                          <Check className="w-3.5 h-3.5" /> 🟢 COMPLIANT (ALL DOCS VALID)
+                        </span>
+                      )}
+                      {selectedDossier.owner_info.compliance.compliance_status === 'ACTION_REQUIRED' && (
+                        <span className="px-3 py-1 rounded-full text-xs font-mono font-bold bg-red-500/20 text-red-400 border border-red-500/30 flex items-center gap-1.5 animate-pulse">
+                          <AlertTriangle className="w-3.5 h-3.5" /> 🔴 ACTION REQUIRED
+                        </span>
+                      )}
+                      {selectedDossier.owner_info.compliance.compliance_status === 'REVIEW_REQUIRED' && (
+                        <span className="px-3 py-1 rounded-full text-xs font-mono font-bold bg-purple-500/20 text-purple-400 border border-purple-500/30 flex items-center gap-1.5 animate-pulse">
+                          <ShieldAlert className="w-3.5 h-3.5" /> 🟠 REVIEW REQUIRED (WATCHLIST)
+                        </span>
+                      )}
+                      {selectedDossier.owner_info.compliance.compliance_status === 'DATA_UNAVAILABLE' && (
+                        <span className="px-3 py-1 rounded-full text-xs font-mono font-bold bg-slate-700 text-slate-300 border border-slate-600">
+                          ⚪ DATA UNAVAILABLE
+                        </span>
+                      )}
+                    </div>
+                  </div>
+
+                  {/* Document Grid */}
+                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
+                    {/* 1. Registration (RC) */}
+                    <div className={`p-3 rounded-lg border text-xs font-mono space-y-1 ${
+                      selectedDossier.owner_info.compliance.rc.status === 'VALID'
+                        ? 'bg-slate-900/60 border-emerald-500/30'
+                        : 'bg-red-950/20 border-red-500/40'
+                    }`}>
+                      <div className="flex justify-between items-center">
+                        <span className="text-slate-400 text-[10px] uppercase font-bold">Registration (RC)</span>
+                        <span className={`px-1.5 py-0.5 rounded text-[10px] font-bold ${
+                          selectedDossier.owner_info.compliance.rc.status === 'VALID'
+                            ? 'bg-emerald-500/20 text-emerald-400'
+                            : 'bg-red-500/20 text-red-400'
+                        }`}>
+                          {selectedDossier.owner_info.compliance.rc.status}
+                        </span>
+                      </div>
+                      <p className="text-white font-bold">{selectedDossier.owner_info.compliance.rc.valid_until || 'Indefinite'}</p>
+                      <p className="text-[10px] text-slate-400">Class: {selectedDossier.owner_info.vehicle_make}</p>
+                    </div>
+
+                    {/* 2. Insurance */}
+                    <div className={`p-3 rounded-lg border text-xs font-mono space-y-1 ${
+                      selectedDossier.owner_info.compliance.insurance.status === 'VALID'
+                        ? 'bg-slate-900/60 border-emerald-500/30'
+                        : selectedDossier.owner_info.compliance.insurance.status === 'EXPIRING_SOON'
+                        ? 'bg-amber-950/20 border-amber-500/40'
+                        : 'bg-red-950/20 border-red-500/40'
+                    }`}>
+                      <div className="flex justify-between items-center">
+                        <span className="text-slate-400 text-[10px] uppercase font-bold">Motor Insurance</span>
+                        <span className={`px-1.5 py-0.5 rounded text-[10px] font-bold ${
+                          selectedDossier.owner_info.compliance.insurance.status === 'VALID'
+                            ? 'bg-emerald-500/20 text-emerald-400'
+                            : selectedDossier.owner_info.compliance.insurance.status === 'EXPIRING_SOON'
+                            ? 'bg-amber-500/20 text-amber-400'
+                            : 'bg-red-500/20 text-red-400'
+                        }`}>
+                          {selectedDossier.owner_info.compliance.insurance.status}
+                        </span>
+                      </div>
+                      <p className="text-white font-bold">{selectedDossier.owner_info.compliance.insurance.valid_until || 'Expired'}</p>
+                      <p className="text-[10px] text-slate-400 truncate">{selectedDossier.owner_info.compliance.insurance.provider}</p>
+                    </div>
+
+                    {/* 3. PUC Certificate */}
+                    <div className={`p-3 rounded-lg border text-xs font-mono space-y-1 ${
+                      selectedDossier.owner_info.compliance.puc.status === 'VALID'
+                        ? 'bg-slate-900/60 border-emerald-500/30'
+                        : selectedDossier.owner_info.compliance.puc.status === 'EXPIRING_SOON'
+                        ? 'bg-amber-950/20 border-amber-500/40'
+                        : 'bg-red-950/20 border-red-500/40'
+                    }`}>
+                      <div className="flex justify-between items-center">
+                        <span className="text-slate-400 text-[10px] uppercase font-bold">PUC Certificate</span>
+                        <span className={`px-1.5 py-0.5 rounded text-[10px] font-bold ${
+                          selectedDossier.owner_info.compliance.puc.status === 'VALID'
+                            ? 'bg-emerald-500/20 text-emerald-400'
+                            : selectedDossier.owner_info.compliance.puc.status === 'EXPIRING_SOON'
+                            ? 'bg-amber-500/20 text-amber-400'
+                            : 'bg-red-500/20 text-red-400'
+                        }`}>
+                          {selectedDossier.owner_info.compliance.puc.status}
+                        </span>
+                      </div>
+                      <p className="text-white font-bold">{selectedDossier.owner_info.compliance.puc.valid_until || 'Expired'}</p>
+                      <p className="text-[10px] text-slate-400">Emission Standard Valid</p>
+                    </div>
+
+                    {/* 4. Fitness */}
+                    <div className={`p-3 rounded-lg border text-xs font-mono space-y-1 ${
+                      selectedDossier.owner_info.compliance.fitness.status === 'VALID'
+                        ? 'bg-slate-900/60 border-emerald-500/30'
+                        : selectedDossier.owner_info.compliance.fitness.status === 'EXPIRING_SOON'
+                        ? 'bg-amber-950/20 border-amber-500/40'
+                        : 'bg-red-950/20 border-red-500/40'
+                    }`}>
+                      <div className="flex justify-between items-center">
+                        <span className="text-slate-400 text-[10px] uppercase font-bold">Fitness Certificate</span>
+                        <span className={`px-1.5 py-0.5 rounded text-[10px] font-bold ${
+                          selectedDossier.owner_info.compliance.fitness.status === 'VALID'
+                            ? 'bg-emerald-500/20 text-emerald-400'
+                            : selectedDossier.owner_info.compliance.fitness.status === 'EXPIRING_SOON'
+                            ? 'bg-amber-500/20 text-amber-400'
+                            : 'bg-red-500/20 text-red-400'
+                        }`}>
+                          {selectedDossier.owner_info.compliance.fitness.status}
+                        </span>
+                      </div>
+                      <p className="text-white font-bold">{selectedDossier.owner_info.compliance.fitness.valid_until || 'Expired'}</p>
+                      <p className="text-[10px] text-slate-400">Roadworthiness Audit</p>
+                    </div>
+                  </div>
+
+                  {/* Commercial Permit if applicable */}
+                  {selectedDossier.owner_info.compliance.permit && (
+                    <div className="p-3 bg-slate-900/40 border border-slate-700/60 rounded-lg flex items-center justify-between text-xs font-mono">
+                      <span className="text-slate-400">Commercial Permit: <span className="text-white font-bold">{selectedDossier.owner_info.compliance.permit.permit_type}</span></span>
+                      <span className="text-emerald-400 font-bold">{selectedDossier.owner_info.compliance.permit.status} (Valid: {selectedDossier.owner_info.compliance.permit.valid_until})</span>
+                    </div>
+                  )}
+
+                  {/* Data Protection Disclaimer */}
+                  <div className="pt-1 text-[10px] font-mono text-slate-400 flex items-center justify-between">
+                    <span>Protected Access: Driver's license data segregated under DPDP Act 2023.</span>
+                    <span className="text-blue-400">Authorized Parivahan Adapter Ready</span>
+                  </div>
+                </div>
+              )}
+
               {/* Violations Evidence List */}
               <div className="space-y-3">
                 <h3 className="text-xs font-mono font-bold text-slate-300 uppercase tracking-wider flex items-center gap-2">
@@ -592,6 +819,137 @@ export const ANPRMonitoring: React.FC = () => {
 
             </div>
 
+            {/* Dossier Footer */}
+            <div className="p-4 bg-slate-800 border-t border-slate-700 flex flex-wrap items-center justify-between gap-2">
+              <div className="flex flex-wrap items-center gap-2">
+                <Link
+                  to={`/trajectories?plate=${selectedDossier.plate_number}`}
+                  className="px-4 py-2 bg-[#245B84] hover:bg-[#1E4A6F] text-white rounded-lg text-xs font-mono font-bold flex items-center gap-1.5 transition-colors shadow-xs"
+                >
+                  <RouteIcon className="w-4 h-4" /> VIEW VEHICLE TRACKING (CROSS-CAMERA TRAJECTORY) →
+                </Link>
+
+                <button
+                  onClick={() => {
+                    setTrackPlateInput(selectedDossier.plate_number);
+                    setShowTrackModal(true);
+                  }}
+                  className="px-3.5 py-2 bg-red-600 hover:bg-red-700 text-white rounded-lg text-xs font-mono font-bold flex items-center gap-1.5 transition-colors shadow-xs"
+                  title="Track if this vehicle crosses any signal"
+                >
+                  <ShieldAlert className="w-4 h-4" /> 🚨 TRACK ON ALL SIGNALS
+                </button>
+              </div>
+
+              <button
+                onClick={() => setSelectedDossier(null)}
+                className="px-4 py-2 bg-slate-700 hover:bg-slate-600 text-white rounded-lg text-xs font-mono font-bold"
+              >
+                Close
+              </button>
+            </div>
+
+          </div>
+        </div>
+      )}
+
+      {/* MANUAL WATCHLIST & SIGNAL CROSSING TRACKING MODAL */}
+      {showTrackModal && (
+        <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-4">
+          <div className="bg-white p-6 rounded-xl max-w-md w-full border border-[#DCE4EA] shadow-2xl space-y-4">
+            <div className="flex items-center justify-between border-b border-slate-200 pb-3">
+              <div className="flex items-center gap-2">
+                <div className="p-2 rounded-lg bg-red-100 text-red-600">
+                  <ShieldAlert className="w-5 h-5" />
+                </div>
+                <div>
+                  <h3 className="font-mono font-bold text-sm text-slate-900 uppercase">
+                    Track Vehicle Across Signals
+                  </h3>
+                  <p className="text-[10px] text-slate-500 font-mono">
+                    Surveillance Watchlist & Real-Time Crossing Intercept
+                  </p>
+                </div>
+              </div>
+              <button
+                onClick={() => setShowTrackModal(false)}
+                className="text-slate-400 hover:text-slate-700 font-bold p-1 rounded hover:bg-slate-100"
+              >
+                ✕
+              </button>
+            </div>
+
+            <form onSubmit={handleAddTrackVehicle} className="space-y-3.5 font-mono text-xs">
+              <div>
+                <label className="block text-[10px] font-bold text-slate-600 uppercase mb-1">
+                  License Plate Number to Track *
+                </label>
+                <input
+                  type="text"
+                  required
+                  placeholder="e.g. TN09AB9999"
+                  value={trackPlateInput}
+                  onChange={(e) => setTrackPlateInput(e.target.value)}
+                  className="w-full bg-[#F6F8FA] border border-[#DCE4EA] rounded-lg p-2.5 text-xs text-slate-900 font-extrabold uppercase focus:border-red-500 focus:outline-none tracking-wider"
+                />
+              </div>
+
+              <div>
+                <label className="block text-[10px] font-bold text-slate-600 uppercase mb-1">
+                  Tracking Reason / Surveillance Priority *
+                </label>
+                <select
+                  value={trackReasonInput}
+                  onChange={(e) => setTrackReasonInput(e.target.value)}
+                  className="w-full bg-[#F6F8FA] border border-[#DCE4EA] rounded-lg p-2.5 text-xs text-slate-800 focus:border-red-500 focus:outline-none font-bold"
+                >
+                  <option value="Suspected Stolen Vehicle">🚨 Suspected Stolen Vehicle</option>
+                  <option value="Hit-and-Run Investigation">⚠️ Hit-and-Run Investigation</option>
+                  <option value="Signal Violation Warrant">🚦 Traffic Signal Violation Warrant</option>
+                  <option value="Security Hotlist Intercept">🛡️ Police Security Hotlist Intercept</option>
+                  <option value="High-Speed Recidivist">🏎️ Speed Recidivist Tracking</option>
+                  <option value="Custom Surveillance Reason">📋 Other Law Enforcement Surveillance</option>
+                </select>
+              </div>
+
+              <div>
+                <label className="block text-[10px] font-bold text-slate-600 uppercase mb-1">
+                  Case File / FIR Reference / Officer Notes
+                </label>
+                <textarea
+                  rows={3}
+                  placeholder="e.g. FIR-2026/89 Anna Salai PS. Immediate signal intercept requested."
+                  value={trackNotesInput}
+                  onChange={(e) => setTrackNotesInput(e.target.value)}
+                  className="w-full bg-[#F6F8FA] border border-[#DCE4EA] rounded-lg p-2.5 text-xs text-slate-800 focus:border-red-500 focus:outline-none"
+                />
+              </div>
+
+              <div className="p-3 bg-red-50 border border-red-200 rounded-lg text-[10px] text-red-800 space-y-1">
+                <p className="font-bold flex items-center gap-1">
+                  <span>⚡ Real-Time Signal Intercept Active</span>
+                </p>
+                <p className="text-red-700">
+                  When any junction camera detects this plate crossing a traffic signal, VIGITRA AI will immediately log the crossing, generate an alert, and update the trajectory history.
+                </p>
+              </div>
+
+              <div className="flex items-center justify-end gap-2 pt-2 border-t border-slate-200">
+                <button
+                  type="button"
+                  onClick={() => setShowTrackModal(false)}
+                  className="px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-lg font-bold"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  className="px-4 py-2 bg-red-600 hover:bg-red-700 text-white rounded-lg font-bold flex items-center gap-1.5 shadow-sm"
+                >
+                  <ShieldAlert className="w-4 h-4" /> Save & Activate Signal Tracking
+                </button>
+              </div>
+            </form>
           </div>
         </div>
       )}

@@ -35,7 +35,7 @@ export const Sidebar: React.FC = () => {
     { name: 'Signal Control', path: '/signals', icon: TrafficCone },
     { name: 'Alerts', path: '/alerts', icon: Bell, badge: 'LIVE' },
     { name: 'Region Forecast', path: '/forecast', icon: TrendingUp },
-    { name: 'Recorded Video', path: '/recordings', icon: Film },
+    { name: 'RECORDS', path: '/recordings', icon: Film },
     { name: 'Link Mobile Device', path: '/devices', icon: Smartphone },
   ];
 

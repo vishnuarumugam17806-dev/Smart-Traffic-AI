@@ -42,7 +42,7 @@ export const AndroidDrawer: React.FC<AndroidDrawerProps> = ({ isOpen, onClose })
     { name: 'Alerts', path: '/alerts', icon: Bell, badge: 'LIVE', category: 'AI' },
     { name: 'Traffic Forecast', path: '/predictions', icon: TrendingUp, category: 'ANALYTICS' },
     { name: 'Region Forecast', path: '/forecast', icon: TrendingUp, category: 'ANALYTICS' },
-    { name: 'Recorded Video', path: '/recordings', icon: Film, category: 'CORE' },
+    { name: 'RECORDS', path: '/recordings', icon: Film, category: 'CORE' },
     { name: 'Link Mobile Device', path: '/devices', icon: Smartphone, category: 'CORE' },
   ];
 

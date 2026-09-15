@@ -11,7 +11,7 @@ def get_engine():
     db_url = settings.get_db_url()
     try:
         if db_url.startswith("postgresql"):
-            engine = create_engine(db_url, pool_pre_ping=True, pool_size=10, max_overflow=20)
+            engine = create_engine(db_url, pool_pre_ping=True, pool_recycle=300, pool_size=10, max_overflow=20)
             # Test connection
             with engine.connect() as conn:
                 pass

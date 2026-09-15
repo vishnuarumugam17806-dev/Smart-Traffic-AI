@@ -1,9 +1,8 @@
 FROM python:3.11-slim
 
-# Set working directory
 WORKDIR /app
 
-# Install essential system runtime libraries for computer vision and media processing
+# Install system dependencies for OpenCV and video streaming
 RUN apt-get update && apt-get install -y --no-install-recommends \
     libgl1 \
     libglib2.0-0 \
@@ -11,33 +10,26 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     curl \
     && rm -rf /var/lib/apt/lists/*
 
-# Pre-install CPU-only PyTorch to prevent downloading heavy CUDA dependencies during build
+# Pre-install CPU-only PyTorch to prevent downloading heavy CUDA dependencies
 RUN pip install --no-cache-dir --upgrade pip && \
     pip install --no-cache-dir torch torchvision --index-url https://download.pytorch.org/whl/cpu
 
-# Copy requirements and install remaining python dependencies
-COPY requirements.txt .
+COPY backend/requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
 # Pre-download lightweight YOLOv8 nano model weights into container image layer
 RUN python -c "from ultralytics import YOLO; YOLO('yolov8n.pt')"
 
-# Copy backend application source and resources
-COPY . .
+COPY backend/ .
 
-# Ensure storage and upload directories exist
 RUN mkdir -p /app/storage/recordings /app/storage/evidence /app/uploads
 
-# Expose backend port
 EXPOSE 8000
 
-# Set production environment variables
 ENV PORT=8000
 ENV PYTHONUNBUFFERED=1
 
-# Healthcheck to verify container readiness
 HEALTHCHECK --interval=30s --timeout=10s --start-period=30s --retries=3 \
     CMD curl -f http://localhost:${PORT:-8000}/health || exit 1
 
-# Launch uvicorn with dynamic PORT support and single worker for cloud memory efficiency
 CMD ["sh", "-c", "uvicorn app.main:app --host 0.0.0.0 --port ${PORT:-8000} --workers 1"]

@@ -307,18 +307,41 @@ export const MobileCamera: React.FC = () => {
       }
     }
 
+    const locString = gpsCoords.lat !== 0 ? `${locationName} (${gpsCoords.lat.toFixed(4)}, ${gpsCoords.lng.toFixed(4)})` : 'Location unavailable';
+
     try {
-      await apiClient.post('/field/capture-photo', {
+      const res = await apiClient.post('/field/capture-photo', {
         operator_id: user?.police_id || user?.username || 'OFFICER-FIELD-1',
-        location: `${locationName} (${gpsCoords.lat.toFixed(4)}, ${gpsCoords.lng.toFixed(4)})`,
+        location: locString,
         photo_base64: photoBase64,
         device_id: deviceId
       });
 
+      // Save to local records cache for instant access in RECORDS
+      const localPhotoRecord = {
+        id: Date.now(),
+        record_id: res.data?.record_id || `PHO-${Date.now()}`,
+        photo_id: res.data?.photo_id || res.data?.record_id,
+        type: 'PHOTO',
+        media_type: 'PHOTO',
+        device_id: deviceId,
+        location: locString,
+        timestamp: new Date().toISOString(),
+        created_at: new Date().toISOString(),
+        plate_number: res.data?.plate_number,
+        confidence: res.data?.ocr_confidence,
+        event_type: res.data?.event_type || 'FIELD_PHOTO_CAPTURE',
+        file_url: photoBase64,
+        image_url: photoBase64,
+        review_status: 'PENDING'
+      };
+      const existing = JSON.parse(localStorage.getItem('vigitra_mobile_recordings') || '[]');
+      localStorage.setItem('vigitra_mobile_recordings', JSON.stringify([localPhotoRecord, ...existing]));
+
       setEmergencyAlertSent(true);
-      setTimeout(() => setEmergencyAlertSent(false), 4000);
+      setTimeout(() => setEmergencyAlertSent(false), 4500);
     } catch (err) {
-      console.error('Error dispatching emergency photo:', err);
+      console.error('Error dispatching photo capture:', err);
     } finally {
       setCapturingPhoto(false);
     }
@@ -420,14 +443,14 @@ export const MobileCamera: React.FC = () => {
 
       {/* Control Action Buttons */}
       <div className="space-y-2.5">
-        {/* ONE-TAP EMERGENCY PHOTO */}
+        {/* CAPTURE PHOTO (SECTION 30) */}
         <button
           onClick={takeEmergencyPhoto}
           disabled={capturingPhoto || !isStreaming}
-          className="w-full py-3.5 bg-gradient-to-r from-red-600 to-rose-600 hover:from-red-500 hover:to-rose-500 active:scale-[0.98] text-white font-black text-xs sm:text-sm tracking-wider uppercase rounded-xl flex items-center justify-center gap-2 shadow-xl shadow-red-600/20 border border-red-500 disabled:opacity-40 transition-all"
+          className="w-full py-3.5 bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 active:scale-[0.98] text-white font-black text-xs sm:text-sm tracking-wider uppercase rounded-xl flex items-center justify-center gap-2 shadow-xl shadow-emerald-600/20 border border-emerald-500 disabled:opacity-40 transition-all"
         >
-          <AlertTriangle className="w-4 h-4 text-yellow-300 animate-pulse" />
-          {capturingPhoto ? 'DISPATCHING EMERGENCY PHOTO...' : '⚡ TAKE EMERGENCY PHOTO'}
+          <Camera className="w-4 h-4 text-emerald-100" />
+          {capturingPhoto ? 'ANALYZING & CAPTURING EVIDENCE...' : '📸 CAPTURE PHOTO'}
         </button>
 
         {/* RECORDING CONTROLS */}

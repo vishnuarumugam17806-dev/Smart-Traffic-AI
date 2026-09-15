@@ -235,7 +235,11 @@ class BlacklistOut(BaseModel):
     created_by: str
     created_at: datetime
     status: str
-    notes: Optional[str]
+    notes: Optional[str] = None
+    total_crossings: Optional[int] = 0
+    last_crossing_location: Optional[str] = None
+    last_crossing_time: Optional[str] = None
+    sighted: Optional[bool] = False
 
     class Config:
         from_attributes = True

@@ -6,20 +6,25 @@ services:
     env: docker
     rootDir: backend
     dockerfilePath: Dockerfile
-    dockerContext: .
+    dockerContext: backend
+    healthCheckPath: /health
     plan: free
     region: oregon
     envVars:
-      - key: PYTHON_VERSION
-        value: 3.11.9
       - key: PORT
         value: 8000
+      - key: PYTHONUNBUFFERED
+        value: "1"
+      - key: USE_SQLITE_FALLBACK
+        value: "true"
+      - key: FRONTEND_BASE_URL
+        value: https://vigitra-frontend.onrender.com
+      - key: DATABASE_URL
+        sync: false
       - key: MONGODB_URI
         sync: false
       - key: MONGODB_DB_NAME
         value: vigitra_db
-      - key: FRONTEND_BASE_URL
-        value: https://vigitra-frontend.onrender.com
 
   # 2. React Vite Frontend Static SPA Service
   - type: web
@@ -40,5 +45,3 @@ services:
         value: wss://vigitra-backend.onrender.com/ws/traffic
       - key: VITE_FRONTEND_BASE_URL
         value: https://vigitra-frontend.onrender.com
-
-

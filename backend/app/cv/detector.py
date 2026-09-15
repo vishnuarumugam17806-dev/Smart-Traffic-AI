@@ -1,7 +1,8 @@
 import cv2
 import numpy as np
 import logging
-from typing import Dict, Any, List
+from typing import Dict, Any, List, Optional
+from datetime import datetime, timezone
 from app.cv.tracker import IoUTracker
 from app.cv.anpr import ANPREngine
 
@@ -37,13 +38,25 @@ class TrafficVisionProcessor:
             logger.warning(f"Could not load YOLOv8 model ({e}). Using OpenCV Background Subtractor CV engine.")
             self.yolo_model = None
 
-    def process_frame(self, frame: np.ndarray) -> Dict[str, Any]:
+    def process_frame(
+        self,
+        frame: np.ndarray,
+        roi: Optional[List[int]] = None,
+        congestion_speed_threshold: float = 10.0
+    ) -> Dict[str, Any]:
         """
-        Processes a single video frame.
-        Returns detailed analytics: detections, tracks, counts, density, queues, incidents, emergency vehicles, and ANPR results.
+        Processes a single video frame with approach/ROI filtering (Section 3 & 4).
+        Returns approach-relevant counts, queue estimation based on speed threshold,
+        density, emergency detections, and queue availability metadata.
         """
         h, w, _ = frame.shape
         raw_detections = []
+
+        # Validate ROI bounds if provided [x1, y1, x2, y2]
+        roi_box = None
+        if roi and len(roi) == 4:
+            rx1, ry1, rx2, ry2 = roi
+            roi_box = [max(0, rx1), max(0, ry1), min(w, rx2), min(h, ry2)]
 
         if self.yolo_model is not None:
             results = self.yolo_model(frame, verbose=False, conf=self.conf_threshold)[0]
@@ -56,8 +69,14 @@ class TrafficVisionProcessor:
                 # Custom rule: check standard vehicle classes
                 if label is not None or cls_id in [2, 3, 5, 7]:
                     name = label if label else "car"
-                    # Color-based emergency vehicle heuristic mapping
                     x1, y1, x2, y2 = max(0, int(xyxy[0])), max(0, int(xyxy[1])), min(w, int(xyxy[2])), min(h, int(xyxy[3]))
+                    cx, cy = (x1 + x2) // 2, (y1 + y2) // 2
+
+                    # ROI filter: only include vehicles inside approach ROI if specified
+                    if roi_box:
+                        if not (roi_box[0] <= cx <= roi_box[2] and roi_box[1] <= cy <= roi_box[3]):
+                            continue
+
                     crop = frame[y1:y2, x1:x2]
                     if crop.size > 0:
                         avg_color = np.mean(crop, axis=(0, 1))
@@ -65,7 +84,7 @@ class TrafficVisionProcessor:
                         if r_avg > 130 and b_avg < 100:
                             name = "ambulance"
                     raw_detections.append({
-                        "bbox": [int(xyxy[0]), int(xyxy[1]), int(xyxy[2]), int(xyxy[3])],
+                        "bbox": [x1, y1, x2, y2],
                         "label": name,
                         "confidence": round(conf, 2)
                     })
@@ -80,8 +99,11 @@ class TrafficVisionProcessor:
                 area = cv2.contourArea(cnt)
                 if area > 1200:
                     x, y, bw, bh = cv2.boundingRect(cnt)
+                    cx, cy = x + bw // 2, y + bh // 2
+                    if roi_box:
+                        if not (roi_box[0] <= cx <= roi_box[2] and roi_box[1] <= cy <= roi_box[3]):
+                            continue
                     name = "car" if area < 4000 else "bus"
-                    # Color-based emergency vehicle heuristic mapping
                     crop = frame[max(0, y):min(h, y+bh), max(0, x):min(w, x+bw)]
                     if crop.size > 0:
                         avg_color = np.mean(crop, axis=(0, 1))
@@ -100,21 +122,29 @@ class TrafficVisionProcessor:
         # Vehicle counts by type
         vehicle_counts = {}
         emergency_detected = []
-        stopped_vehicles = 0
+        stopped_or_queued_vehicles = 0
         total_occupancy_area = 0
+        speeds = []
 
         annotated_frame = frame.copy()
+
+        # Highlight ROI if configured
+        if roi_box:
+            cv2.rectangle(annotated_frame, (roi_box[0], roi_box[1]), (roi_box[2], roi_box[3]), (255, 200, 0), 2)
+            cv2.putText(annotated_frame, "APPROACH ROI", (roi_box[0] + 5, max(20, roi_box[1] - 5)),
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.4, (255, 200, 0), 1)
 
         for track in tracked_objects:
             lbl = track.label
             vehicle_counts[lbl] = vehicle_counts.get(lbl, 0) + 1
+            speeds.append(track.speed_kmh)
 
             # Occupancy
             box = track.bbox
             box_area = (box[2] - box[0]) * (box[3] - box[1])
             total_occupancy_area += box_area
 
-            # Emergency check (labels or red/blue emergency vehicle detection)
+            # Emergency check
             if lbl in EMERGENCY_CLASSES:
                 emergency_detected.append({
                     "vehicle_type": lbl,
@@ -122,9 +152,9 @@ class TrafficVisionProcessor:
                     "confidence": track.confidence
                 })
 
-            # Speed / Stopped vehicle check for Incident detection
-            if track.speed_kmh < 2.0 and track.hits > 5:
-                stopped_vehicles += 1
+            # Queue length estimation: vehicles moving below configured congestion speed threshold (Section 4)
+            if track.speed_kmh <= congestion_speed_threshold or (track.speed_kmh < 2.0 and track.hits > 3):
+                stopped_or_queued_vehicles += 1
 
             # Extract crop and run ANPR OCR
             x1, y1, x2, y2 = max(0, box[0]), max(0, box[1]), min(w, box[2]), min(h, box[3])
@@ -143,14 +173,14 @@ class TrafficVisionProcessor:
             color = (0, 255, 0) if lbl not in EMERGENCY_CLASSES else (0, 0, 255)
             cv2.rectangle(annotated_frame, (box[0], box[1]), (box[2], box[3]), color, 2)
             
-            plate_lbl = f" | Plate: {plate_info['plate_number']}" if plate_info else ""
-            cv2.putText(annotated_frame, f"#{track.track_id} {lbl} {int(track.confidence*100)}%{plate_lbl}",
-                        (box[0], max(15, box[1] - 5)), cv2.FONT_HERSHEY_SIMPLEX, 0.45, color, 2)
+            plate_lbl = f" | {plate_info['plate_number']}" if plate_info else ""
+            cv2.putText(annotated_frame, f"#{track.track_id} {lbl} {int(track.speed_kmh)}km/h{plate_lbl}",
+                        (box[0], max(15, box[1] - 5)), cv2.FONT_HERSHEY_SIMPLEX, 0.40, color, 1)
 
-        # Density & Queue Calculation
+        # Total vehicles in observation
         total_vehicles = len(tracked_objects)
-        frame_area = w * h
-        occupancy_pct = min(100.0, round((total_occupancy_area / float(frame_area)) * 300.0, 1))
+        frame_area = (roi_box[2] - roi_box[0]) * (roi_box[3] - roi_box[1]) if roi_box else (w * h)
+        occupancy_pct = min(100.0, round((total_occupancy_area / float(max(1, frame_area))) * 250.0, 1))
 
         if occupancy_pct < 20.0 and total_vehicles < 6:
             density_state = "LOW"
@@ -161,16 +191,18 @@ class TrafficVisionProcessor:
         else:
             density_state = "SEVERE"
 
-        # Queue length estimation (stopped vehicles + clustered vehicles)
-        queue_length = stopped_vehicles + int(total_vehicles * 0.4)
+        # Queue length represents traffic waiting for junction (stopped/slow traffic)
+        queue_length = stopped_or_queued_vehicles if stopped_or_queued_vehicles > 0 else int(total_vehicles * 0.5)
 
-        # Incident checks
+        avg_speed = float(np.mean(speeds)) if speeds else 38.0
+
+        # Incidents
         incidents = []
-        if stopped_vehicles >= 3 and total_vehicles > 8:
+        if stopped_or_queued_vehicles >= 3 and total_vehicles > 8:
             incidents.append({
                 "incident_type": "traffic_blockage",
                 "severity": "HIGH",
-                "description": f"Traffic queue standstill detected ({stopped_vehicles} stopped vehicles)."
+                "description": f"Traffic queue standstill detected ({stopped_or_queued_vehicles} queued vehicles)."
             })
 
         return {
@@ -179,6 +211,9 @@ class TrafficVisionProcessor:
             "occupancy_percentage": occupancy_pct,
             "density_state": density_state,
             "queue_length": queue_length,
+            "average_speed": round(avg_speed, 1),
+            "is_queue_available": True,
+            "queue_timestamp": datetime.utcnow().isoformat(),
             "emergency_detected": emergency_detected,
             "incidents": incidents,
             "tracked_objects": [

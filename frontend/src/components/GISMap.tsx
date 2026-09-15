@@ -199,10 +199,12 @@ export const GISMap: React.FC<GISMapProps> = ({
         });
 
       marker.bindTooltip(`
-        <div style="padding: 6px; font-family: monospace; font-size: 11px; color: #1E293B;">
+        <div style="padding: 8px; font-family: monospace; font-size: 11px; color: #1E293B; line-height: 1.4;">
           <b>${badgeIcon} ${inter.name}</b><br/>
-          <span style="color: ${color}; font-weight: bold;">Status: ${inter.current_status} Density</span><br/>
-          <span style="color: #64748B; font-size: 10px;">Type: ${hasMobileCam ? 'LINKED MOBILE CAMERA' : 'FIXED CCTV NODE'}</span>
+          <span style="color: #245B84; font-weight: bold;">Approaches: ${inter.num_approaches || 4}-Side Dynamic</span><br/>
+          <span style="color: ${color}; font-weight: bold;">Traffic Density: ${inter.current_status}</span><br/>
+          <span style="color: #10B981; font-size: 10px; font-weight: bold;">Signal Engine: ACTIVE OPTIMIZATION</span><br/>
+          <span style="color: #64748B; font-size: 10px;">Node: ${hasMobileCam ? 'LINKED MOBILE CAMERA' : 'FIXED CCTV JUNCTION'}</span>
         </div>
       `, { direction: 'top', offset: [0, -10] });
 

@@ -73,6 +73,19 @@ class Settings(BaseSettings):
     ALL_RED_TIME: int = 2
     PEDESTRIAN_CLEARANCE_TIME: int = 10
 
+    # Production Adaptive Signal Optimization Weights (Weights strictly sum to 1.0)
+    QUEUE_WEIGHT: float = 0.45       # Queue contribution: 45% (Highest priority)
+    VEHICLE_WEIGHT: float = 0.25     # Vehicle count: 25%
+    WAIT_WEIGHT: float = 0.20        # Waiting time: 20%
+    DENSITY_WEIGHT: float = 0.10     # Traffic density: 10%
+
+    # Waiting Time Fairness & Anti-Starvation Boundaries
+    MAX_ALLOWED_WAIT: float = 120.0       # Max wait before mandatory escalation (seconds)
+    WAITING_BONUS_WEIGHT: float = 0.50    # Bonus multiplier for waiting fairness
+    CONGESTION_SPEED_THRESHOLD_KMH: float = 10.0  # Speed below which vehicles are considered queued
+    MAX_EXPECTED_QUEUE: int = 50          # Max expected queue count for normalization scaling
+    MAX_EXPECTED_VEHICLES: int = 60       # Max expected vehicle count for normalization scaling
+
     # Vision & Processing
     DETECTION_FPS: int = 10
     CONFIDENCE_THRESHOLD: float = 0.45
@@ -91,7 +104,10 @@ class Settings(BaseSettings):
 
     def get_db_url(self) -> str:
         if self.DATABASE_URL:
-            return self.DATABASE_URL
+            url = self.DATABASE_URL.strip()
+            if url.startswith("postgres://"):
+                url = url.replace("postgres://", "postgresql://", 1)
+            return url
         return f"postgresql://{self.POSTGRES_USER}:{self.POSTGRES_PASSWORD}@{self.POSTGRES_SERVER}:{self.POSTGRES_PORT}/{self.POSTGRES_DB}"
 
 settings = Settings()

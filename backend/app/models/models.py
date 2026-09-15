@@ -320,6 +320,8 @@ class EvidenceRecord(Base):
     plate_number: Mapped[Optional[str]] = Column(String(50), nullable=True) # type: ignore
     ocr_confidence: Mapped[float] = Column(Float, default=0.92) # type: ignore
     vehicle_type: Mapped[str] = Column(String(50), default="car") # type: ignore
+    event_type: Mapped[str] = Column(String(100), default="FIELD_PHOTO_CAPTURE") # type: ignore
+    alert_id: Mapped[Optional[int]] = Column(Integer, nullable=True) # type: ignore
     vehicle_image: Mapped[Optional[str]] = Column(String(255), nullable=True) # type: ignore
     plate_crop: Mapped[Optional[str]] = Column(String(255), nullable=True) # type: ignore
     original_image: Mapped[str] = Column(String(255), nullable=False) # type: ignore
@@ -346,11 +348,25 @@ class SignalDecision(Base):
 
     id = Column(Integer, primary_key=True, index=True)
     signal_id = Column(Integer, ForeignKey("signals.id"), nullable=False)
-    recommended_green = Column(Integer, nullable=False)
-    recommended_red = Column(Integer, nullable=False)
-    recommended_phase = Column(String(50), nullable=False)
+    junction_id = Column(Integer, ForeignKey("intersections.id"), nullable=True, index=True)
+    approach_id = Column(String(50), nullable=True)
+    vehicle_count = Column(Float, default=0.0)
+    queue_length = Column(Integer, default=0)
+    traffic_density = Column(String(50), default="LOW")
+    waiting_time = Column(Float, default=0.0)
+    demand_score = Column(Float, default=0.0)
+    priority_score = Column(Float, default=0.0)
+    green_duration = Column(Integer, default=30)
+    signal_state = Column(String(50), default="GREEN")
+    mode = Column(String(50), default="AUTOMATIC")  # AUTOMATIC, MANUAL, EMERGENCY
+    decision_reason = Column(Text, nullable=True)
+
+    # Legacy fields preserved for complete backwards-compatibility
+    recommended_green = Column(Integer, nullable=False, default=30)
+    recommended_red = Column(Integer, nullable=False, default=30)
+    recommended_phase = Column(String(50), nullable=False, default="NORTH")
     priority_level = Column(String(50), default="NORMAL")
-    reasoning = Column(Text, nullable=False)
+    reasoning = Column(Text, nullable=False, default="")
     confidence = Column(Float, default=0.95)
     applied = Column(Boolean, default=True)
     timestamp = Column(DateTime, default=datetime.utcnow, index=True)

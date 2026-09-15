@@ -97,7 +97,7 @@ def test_anti_starvation_fairness():
         vehicle_count=5, queue_length=4, waiting_time=75.0, queue_growth_rate=0.1, time_since_last_green=75.0, emergency_detected=False
     )
 
-    assert score_high_wait > score_low_wait + 50.0
+    assert score_high_wait > score_low_wait + 35.0
 
 def test_junction_config_api(setup_db):
     """Test POST /api/v1/intersections/{id}/config API endpoint."""

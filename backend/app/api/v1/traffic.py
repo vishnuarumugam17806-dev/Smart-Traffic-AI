@@ -44,11 +44,15 @@ class FrameStreamInput(BaseModel):
     frame_base64: str
 
 class FieldCapturePhotoInput(BaseModel):
-    operator_id: str
-    location: str
-    photo_base64: str
-    device_id: Optional[str] = None
+    operator_id: Optional[str] = "OFFICER-FIELD"
+    location: Optional[str] = None
+    location_text: Optional[str] = None
+    photo_base64: Optional[str] = None
+    image_base64: Optional[str] = None
+    device_id: Optional[str] = "MOBILE-CAM-001"
     camera_id: Optional[int] = None
+    latitude: Optional[float] = None
+    longitude: Optional[float] = None
 
 from app.services.report_service import report_service
 from app.services.prediction_service import prediction_engine
@@ -458,6 +462,78 @@ def update_intersection_config(
         "active_approaches": list(controller.approaches.keys())
     }
 
+@router.get("/intersections/{id}/cameras")
+def get_intersection_cameras(id: int, db: Session = Depends(get_db)):
+    """
+    Returns all camera inputs mapped to approaches for the specified junction.
+    Provides verified demo video sources for simulated traffic camera evaluation.
+    """
+    inter = db.query(Intersection).filter(Intersection.id == id).first()
+    if not inter:
+        raise HTTPException(status_code=404, detail="Intersection not found")
+
+    cameras = db.query(Camera).filter(Camera.intersection_id == id).all()
+
+    video_map = {
+        "NORTH": "/videos/sample_traffic_urban.mp4",
+        "SOUTH": "/videos/sample_traffic_congested.mp4",
+        "EAST": "/videos/sample_traffic_highway.mp4",
+        "WEST": "/videos/sample_traffic_junction.mp4",
+        "APPROACH_1": "/videos/sample_traffic_urban.mp4",
+        "APPROACH_2": "/videos/sample_traffic_congested.mp4",
+        "APPROACH_3": "/videos/sample_traffic_emergency.mp4",
+        "APPROACH_4": "/videos/sample_traffic_rainy.mp4"
+    }
+
+    result = []
+    seen_dirs = set()
+    for cam in cameras:
+        dir_key = (cam.direction or "NORTH").upper()
+        seen_dirs.add(dir_key)
+        v_source = cam.source_url if (cam.source_url and ("/" in cam.source_url or cam.source_url.endswith(".mp4"))) else video_map.get(dir_key, "/videos/sample_traffic_urban.mp4")
+        if not v_source.startswith("/") and not v_source.startswith("http"):
+            v_source = f"/videos/{v_source}"
+
+        result.append({
+            "camera_id": cam.id,
+            "camera_name": cam.name,
+            "junction_id": inter.id,
+            "approach_id": dir_key,
+            "source_type": cam.source_type or "DEMO_SIMULATION",
+            "video_source": v_source,
+            "status": cam.status.value if hasattr(cam.status, "value") else str(cam.status),
+            "direction": dir_key,
+            "location": inter.location,
+            "enabled": cam.status != CameraStatusEnum.OFFLINE,
+            "demo_mode": True
+        })
+
+    # If the intersection has configured approaches without a direct camera row, provide demo simulated camera inputs
+    approaches = inter.approaches_config or []
+    if not approaches and inter.num_approaches:
+        default_dirs = ["NORTH", "EAST", "SOUTH", "WEST"][:inter.num_approaches]
+        approaches = [{"id": d, "name": f"{d.title()} Approach", "direction": d} for d in default_dirs]
+
+    for idx, app in enumerate(approaches):
+        dir_key = (app.get("direction") or app.get("id") or f"APPROACH_{idx + 1}").upper()
+        if dir_key not in seen_dirs:
+            seen_dirs.add(dir_key)
+            result.append({
+                "camera_id": 1000 + inter.id * 10 + idx,
+                "camera_name": f"CCTV-{idx + 1:02d} {dir_key.title()} ({inter.name})",
+                "junction_id": inter.id,
+                "approach_id": dir_key,
+                "source_type": "DEMO_SIMULATION",
+                "video_source": video_map.get(dir_key, "/videos/sample_traffic_urban.mp4"),
+                "status": "LIVE",
+                "direction": dir_key,
+                "location": inter.location,
+                "enabled": True,
+                "demo_mode": True
+            })
+
+    return result
+
 @router.get("/intersections/{id}/traffic")
 def get_intersection_traffic(id: int, db: Session = Depends(get_db)):
     controller = signal_registry.get_controller(id, db=db)
@@ -467,13 +543,21 @@ def get_intersection_traffic(id: int, db: Session = Depends(get_db)):
         "approaches": {
             name: {
                 "name": app.get("name") or f"{name.title()} Approach",
-                "direction": app["direction"],
+                "direction": app.get("direction", name),
                 "camera_id": app.get("camera_id"),
-                "vehicle_count": round(app["vehicle_count"], 1),
-                "queue_length": app["queue_length"],
-                "waiting_time": round(app["waiting_time"], 1),
-                "emergency_detected": app["emergency_detected"],
-                "emergency_type": app["emergency_type"]
+                "camera_status": app.get("camera_status", "DATA_AVAILABLE"),
+                "vehicle_count": round(app.get("vehicle_count", 0.0), 1),
+                "queue_length": app.get("queue_length", 0),
+                "traffic_density": app.get("traffic_density", "MODERATE"),
+                "average_speed": round(app.get("average_speed", 35.0), 1),
+                "waiting_time": round(app.get("waiting_time", 0.0), 1),
+                "demand_score": round(app.get("demand_score", 0.0), 3),
+                "priority_score": round(app.get("priority_score", 0.0), 1),
+                "green_duration": app.get("green_duration", 30),
+                "is_queue_available": app.get("is_queue_available", True),
+                "queue_timestamp": app.get("queue_timestamp"),
+                "emergency_detected": app.get("emergency_detected", False),
+                "emergency_type": app.get("emergency_type")
             } for name, app in controller.approaches.items()
         }
     }
@@ -481,6 +565,7 @@ def get_intersection_traffic(id: int, db: Session = Depends(get_db)):
 @router.get("/intersections/{id}/signal")
 def get_intersection_signal(id: int, db: Session = Depends(get_db)):
     controller = signal_registry.get_controller(id, db=db)
+    active_app_data = controller.approaches.get(controller.active_approach, {})
     return {
         "intersection_id": id,
         "num_approaches": controller.num_approaches,
@@ -489,10 +574,29 @@ def get_intersection_signal(id: int, db: Session = Depends(get_db)):
         "state": controller.state,
         "countdown": controller.countdown,
         "mode": controller.mode,
+        "reasoning": controller.last_reasoning,
+        "elapsed_green_time": round(controller.elapsed_green_time, 1),
+        "current_metrics": {
+            "approach": controller.active_approach,
+            "vehicle_count": round(active_app_data.get("vehicle_count", 0.0), 1),
+            "queue_length": active_app_data.get("queue_length", 0),
+            "waiting_time": round(active_app_data.get("waiting_time", 0.0), 1),
+            "traffic_density": active_app_data.get("traffic_density", "MODERATE"),
+            "demand_score": round(active_app_data.get("demand_score", 0.0), 3),
+            "priority_score": round(active_app_data.get("priority_score", 0.0), 1),
+            "green_duration": active_app_data.get("green_duration", controller.countdown)
+        },
         "approaches": {
             name: {
                 "name": app.get("name") or f"{name.title()} Approach",
-                "signal": controller.get_approach_signal(name)
+                "direction": app.get("direction", name),
+                "signal": controller.get_approach_signal(name),
+                "vehicle_count": round(app.get("vehicle_count", 0.0), 1),
+                "queue_length": app.get("queue_length", 0),
+                "waiting_time": round(app.get("waiting_time", 0.0), 1),
+                "traffic_density": app.get("traffic_density", "MODERATE"),
+                "priority_score": round(app.get("priority_score", 0.0), 1),
+                "camera_status": app.get("camera_status", "DATA_AVAILABLE")
             } for name, app in controller.approaches.items()
         }
     }
@@ -501,14 +605,23 @@ def get_intersection_signal(id: int, db: Session = Depends(get_db)):
 def get_intersection_optimization(id: int, db: Session = Depends(get_db)):
     controller = signal_registry.get_controller(id, db=db)
     scores = {}
+    demands = {}
     for name, app in controller.approaches.items():
+        demands[name] = controller.optimizer.calculate_demand_score(
+            queue_length=app["queue_length"],
+            vehicle_count=app["vehicle_count"],
+            waiting_time=app["waiting_time"],
+            density=app.get("traffic_density", "MODERATE")
+        )
         scores[name] = controller.optimizer.calculate_priority_score(
-            app["vehicle_count"],
-            app["queue_length"],
-            app["waiting_time"],
-            app["queue_growth_rate"],
-            app["time_since_last_green"],
-            app["emergency_detected"]
+            vehicle_count=app["vehicle_count"],
+            queue_length=app["queue_length"],
+            waiting_time=app["waiting_time"],
+            queue_growth_rate=app.get("queue_growth_rate", 0.0),
+            time_since_last_green=app.get("time_since_last_green", 0.0),
+            emergency_detected=app.get("emergency_detected", False),
+            pedestrian_waiting=app.get("pedestrian_waiting", 0),
+            density_state=app.get("traffic_density", "MODERATE")
         )
     return {
         "intersection_id": id,
@@ -517,6 +630,7 @@ def get_intersection_optimization(id: int, db: Session = Depends(get_db)):
         "active_phase": controller.active_phase,
         "explanation": controller.last_reasoning,
         "priority_scores": scores,
+        "demand_scores": demands,
         "weights": WEIGHTS
     }
 
@@ -531,8 +645,8 @@ def apply_manual_override(
     controller = signal_registry.get_controller(id, db=db)
     success = controller.request_manual_control(db, control_in.phase, control_in.reason, str(current_user.username))
     if not success:
-        raise HTTPException(status_code=400, detail="Failed to apply manual control")
-    return {"status": "SUCCESS", "message": f"Manual control override set to approach {control_in.phase}."}
+        raise HTTPException(status_code=400, detail="Failed to apply manual control. Invalid approach or junction.")
+    return {"status": "SUCCESS", "message": f"Manual control override initiated for approach {control_in.phase}."}
 
 @router.post("/intersections/{id}/return-to-auto")
 def return_to_auto(
@@ -548,18 +662,36 @@ def return_to_auto(
 
 @router.get("/intersections/{id}/decision-history")
 def get_decision_history(id: int, limit: int = 50, db: Session = Depends(get_db)):
-    decisions = db.query(SignalDecision).filter(SignalDecision.signal_id == id).order_by(SignalDecision.timestamp.desc()).limit(limit).all()
+    # Support lookup either by junction_id or legacy signal_id
+    sig = db.query(Signal).filter(Signal.intersection_id == id).first()
+    sig_id = sig.id if sig else id
+    decisions = db.query(SignalDecision).filter(
+        (SignalDecision.junction_id == id) | (SignalDecision.signal_id == sig_id)
+    ).order_by(SignalDecision.timestamp.desc()).limit(limit).all()
+
     return [
         {
             "id": d.id,
+            "junction_id": getattr(d, "junction_id", id) or id,
             "signal_id": d.signal_id,
+            "approach_id": getattr(d, "approach_id", d.recommended_phase) or d.recommended_phase,
+            "vehicle_count": getattr(d, "vehicle_count", 0.0),
+            "queue_length": getattr(d, "queue_length", 0),
+            "traffic_density": getattr(d, "traffic_density", "MODERATE"),
+            "waiting_time": getattr(d, "waiting_time", 0.0),
+            "demand_score": getattr(d, "demand_score", 0.0),
+            "priority_score": getattr(d, "priority_score", 0.0),
+            "green_duration": getattr(d, "green_duration", d.recommended_green) or d.recommended_green,
+            "signal_state": getattr(d, "signal_state", "GREEN"),
+            "mode": getattr(d, "mode", "AUTOMATIC"),
+            "decision_reason": getattr(d, "decision_reason", d.reasoning) or d.reasoning,
             "recommended_green": d.recommended_green,
             "recommended_red": d.recommended_red,
             "recommended_phase": d.recommended_phase,
             "priority_level": d.priority_level,
             "reasoning": d.reasoning,
             "confidence": d.confidence,
-            "timestamp": d.timestamp.isoformat()
+            "timestamp": d.timestamp.isoformat() if d.timestamp else datetime.utcnow().isoformat()
         } for d in decisions
     ]
 
@@ -1017,16 +1149,71 @@ def ingest_mobile_frame(stream_in: FrameStreamInput, db: Session = Depends(get_d
     frame = mobile_manager.push_frame_base64(stream_in.device_id, stream_in.frame_base64)
     if frame is None:
         raise HTTPException(status_code=400, detail="Invalid frame format or unregistered device session.")
+
+    # Keep device session active in DB
+    try:
+        dev = db.query(MobileDevice).filter(MobileDevice.device_id == stream_in.device_id).first()
+        if dev:
+            dev.connection_status = "CONNECTED"
+            dev.stream_status = "STREAMING"
+            dev.last_seen = datetime.now(timezone.utc).replace(tzinfo=None)
+            db.commit()
+    except Exception:
+        db.rollback()
+
     return {"status": "FRAME_ACCEPTED", "timestamp": datetime.utcnow().isoformat()}
 
-# --- FIELD CAPTURE & PHOTO ANALYSIS MODULE ---
+@router.get("/mobile-camera/{device_id}/live-frame")
+def get_mobile_live_frame(device_id: str, db: Session = Depends(get_db)):
+    """
+    Returns latest frame pushed from the mobile patrol camera for real-time desktop preview.
+    """
+    frame, meta = mobile_manager.get_latest_frame(device_id)
+    if frame is None:
+        # Check if device is in DB
+        dev = db.query(MobileDevice).filter(MobileDevice.device_id == device_id).first()
+        return {
+            "device_id": device_id,
+            "status": dev.connection_status if dev else "OFFLINE",
+            "frame_base64": None,
+            "has_frame": False,
+            "fps": 0.0,
+            "timestamp": datetime.utcnow().isoformat()
+        }
+
+    import cv2, base64
+    _, buffer = cv2.imencode(".jpg", frame, [cv2.IMWRITE_JPEG_QUALITY, 70])
+    b64_str = base64.b64encode(buffer).decode("utf-8")
+
+    return {
+        "device_id": device_id,
+        "status": "STREAMING",
+        "frame_base64": f"data:image/jpeg;base64,{b64_str}",
+        "has_frame": True,
+        "fps": meta.get("fps", 24.0),
+        "battery_pct": meta.get("battery_pct", 92),
+        "timestamp": datetime.utcnow().isoformat()
+    }
+
+# --- FIELD CAPTURE & PHOTO ANALYSIS MODULE (SECTIONS 18-23, 27, 30) ---
 @router.post("/field-capture/photo", status_code=status.HTTP_201_CREATED)
-def analyze_field_photo(photo_in: FieldCapturePhotoInput, db: Session = Depends(get_db)):
-    import base64, cv2, numpy as np
+@router.post("/mobile-camera/capture-photo", status_code=status.HTTP_201_CREATED)
+async def analyze_field_photo(photo_in: FieldCapturePhotoInput, db: Session = Depends(get_db)):
+    """
+    Captures field camera photo, performs AI vehicle/plate detection, cross-references authorized
+    watchlist, creates alert if anomaly/match detected, and stores persistent evidence in RECORDS.
+    """
+    import base64, cv2, numpy as np, hashlib
     from app.cv.anpr import anpr_engine
+    from app.websocket.manager import ws_manager
+
+    evidence_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "..", "storage", "evidence"))
+    os.makedirs(evidence_dir, exist_ok=True)
 
     try:
-        raw_b64 = photo_in.photo_base64
+        raw_b64 = photo_in.photo_base64 or photo_in.image_base64
+        if not raw_b64:
+            raise HTTPException(status_code=400, detail="No photo payload provided")
         if "," in raw_b64:
             raw_b64 = raw_b64.split(",")[1]
         img_bytes = base64.b64decode(raw_b64)
@@ -1035,41 +1222,151 @@ def analyze_field_photo(photo_in: FieldCapturePhotoInput, db: Session = Depends(
         if img is None:
             raise HTTPException(status_code=400, detail="Failed to decode image payload")
 
-        plate_res = anpr_engine.extract_plate(img)
-        detected_plate = plate_res["plate_number"] if plate_res else "TN01AB1234"
-        confidence = plate_res["final_confidence"] if plate_res else 0.88
+        # Resolve location respecting privacy & user permission
+        resolved_location = photo_in.location or photo_in.location_text
+        if not resolved_location:
+            if photo_in.latitude is not None and photo_in.longitude is not None:
+                resolved_location = f"{photo_in.latitude:.4f}, {photo_in.longitude:.4f}"
+            else:
+                resolved_location = "Location unavailable"
 
+        sha256 = hashlib.sha256(img_bytes).hexdigest()
         rec_count = db.query(EvidenceRecord).count() + 1
-        record_id = f"EVD-{datetime.now(timezone.utc).strftime('%Y%m%d')}-{rec_count:03d}"
+        timestamp_str = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
+        record_id = f"PHO-{timestamp_str}-{rec_count:03d}"
+        filename = f"{record_id}.jpg"
+        dest_path = os.path.join(evidence_dir, filename)
 
+        # Write actual image file to disk
+        cv2.imwrite(dest_path, img)
+
+        # Run ANPR OCR extraction
+        plate_res = anpr_engine.extract_plate(img)
+        detected_plate = plate_res["plate_number"] if plate_res else None
+        confidence = round(plate_res["final_confidence"], 2) if plate_res else 0.85
+
+        # Check authorized Watchlist / Blacklist
+        matched_alert_id = None
+        event_type = "FIELD_PHOTO_CAPTURE"
+        alert_msg = None
+        notes = "AI DETECTION — NOT VERIFIED (Field Officer Capture)"
+
+        if detected_plate:
+            normalized_plate = detected_plate.replace(" ", "").upper()
+            blacklist_match = db.query(Blacklist).filter(
+                Blacklist.plate == normalized_plate,
+                Blacklist.status == "ACTIVE"
+            ).first()
+
+            if blacklist_match:
+                event_type = "WATCHLIST_MATCH"
+                alert = Alert(
+                    type="WATCHLIST_MATCH",
+                    severity="CRITICAL",
+                    camera_id=photo_in.camera_id,
+                    location=resolved_location,
+                    vehicle_plate=normalized_plate,
+                    message=f"WATCHLIST MATCH: Vehicle plate {normalized_plate} identified at {resolved_location}. Reason: {blacklist_match.reason}. (AI DETECTION — Review required)",
+                    status="NEW",
+                    confidence=confidence
+                )
+                db.add(alert)
+                db.commit()
+                db.refresh(alert)
+                matched_alert_id = alert.id
+                alert_msg = alert.message
+                notes = f"AI DETECTION — WATCHLIST MATCH ({blacklist_match.reason})"
+
+                await ws_manager.broadcast({
+                    "event": "ALERT_CREATED",
+                    "alert": {
+                        "id": alert.id,
+                        "type": alert.type,
+                        "severity": alert.severity,
+                        "location": alert.location,
+                        "vehicle_plate": alert.vehicle_plate,
+                        "message": alert.message,
+                        "timestamp": alert.timestamp.isoformat()
+                    }
+                })
+            else:
+                # Standard vehicle observation
+                event_type = "AI_ANPR_SIGHTING"
+
+        # Create persistent Evidence Record (Photo in RECORDS)
         evidence = EvidenceRecord(
             record_id=record_id,
             camera_id=photo_in.camera_id,
             device_id=photo_in.device_id or "MOBILE-CAM-001",
-            operator_id=photo_in.operator_id,
-            location=photo_in.location,
+            operator_id=photo_in.operator_id or "OFFICER-FIELD",
+            location=resolved_location,
             plate_number=detected_plate,
             ocr_confidence=confidence,
             vehicle_type="car",
-            original_image="/uploads/evidence/field_photo_sample.jpg",
+            event_type=event_type,
+            alert_id=matched_alert_id,
+            original_image=f"/storage/evidence/{filename}",
+            vehicle_image=f"/storage/evidence/{filename}",
             review_status="PENDING",
-            notes="AI DETECTION — NOT VERIFIED (Field Operator Photo Capture)"
+            notes=notes,
+            file_hash=sha256
         )
         db.add(evidence)
         db.commit()
         db.refresh(evidence)
 
+        # Broadcast real-time photo capture notification
+        await ws_manager.broadcast({
+            "event": "PHOTO_CAPTURED",
+            "record": {
+                "photo_id": evidence.record_id,
+                "file_url": f"/storage/evidence/{filename}",
+                "plate_number": detected_plate,
+                "confidence": confidence,
+                "event_type": event_type,
+                "device_id": evidence.device_id,
+                "location": evidence.location,
+                "alert_id": matched_alert_id,
+                "timestamp": evidence.timestamp.isoformat()
+            }
+        })
+
+        # Trigger Automated Vehicle Compliance Verification
+        compliance_summary = None
+        if detected_plate:
+            try:
+                from app.services.compliance.vehicle_compliance_service import vehicle_compliance_service
+                compliance_summary = await vehicle_compliance_service.verify_vehicle_passage(
+                    plate_number=detected_plate,
+                    camera_id=photo_in.camera_id or 0,
+                    anpr_confidence=confidence,
+                    vehicle_type="car",
+                    evidence_image_url=f"/storage/evidence/{filename}",
+                    db=db
+                )
+            except Exception as comp_err:
+                logger.warning(f"Compliance check note on photo: {comp_err}")
+
         return {
+            "photo_id": evidence.record_id,
             "record_id": evidence.record_id,
             "plate_number": evidence.plate_number,
             "ocr_confidence": evidence.ocr_confidence,
             "vehicle_type": evidence.vehicle_type,
+            "event_type": evidence.event_type,
             "location": evidence.location,
+            "alert_id": matched_alert_id,
+            "alert_created": matched_alert_id is not None or (compliance_summary and compliance_summary.get("action_required")),
+            "alert_message": alert_msg or (compliance_summary.get("alerts", [{}])[0].get("message") if compliance_summary and compliance_summary.get("alerts") else None),
+            "compliance_status": compliance_summary.get("compliance_status") if compliance_summary else "DATA_UNAVAILABLE",
+            "compliance": compliance_summary,
+            "file_url": f"/storage/evidence/{filename}",
             "review_status": evidence.review_status,
-            "disclaimer": "AI DETECTION — NOT VERIFIED",
+            "disclaimer": "AI DETECTION — Review required",
             "captured_at": evidence.timestamp.isoformat()
         }
     except Exception as e:
+        db.rollback()
         raise HTTPException(status_code=400, detail=f"Error analyzing field photo: {e}")
 
 @router.get("/evidence")
@@ -1088,73 +1385,120 @@ def review_evidence_record(evidence_id: int, review_status: str, db: Session = D
     db.refresh(evd)
     return evd
 
-# --- RECORDED VIDEO SEARCH, UPLOAD & PLAYBACK MODULE ---
+# --- RECORDS: UNIFIED VIDEO & PHOTO EVIDENCE ARCHIVE (SECTIONS 26-28) ---
+@router.get("/records")
 @router.get("/recordings")
-def search_recorded_videos(
+def get_all_records(
+    record_type: Optional[str] = "ALL",  # ALL, VIDEOS, PHOTOS
     camera_id: Optional[int] = None,
     device_id: Optional[str] = None,
     location: Optional[str] = None,
+    plate_number: Optional[str] = None,
+    event_type: Optional[str] = None,
     db: Session = Depends(get_db)
 ):
-    try:
-        query = db.query(VideoRecording)
-        if camera_id:
-            query = query.filter(VideoRecording.camera_id == camera_id)
-        if device_id:
-            query = query.filter(VideoRecording.device_id == device_id)
-        if location:
-            query = query.filter(VideoRecording.location.like(f"%{location}%"))
+    """
+    Unified RECORDS archive returning verified Video recordings and Photo evidence.
+    Supports multi-attribute filtering (Section 26, 27, 28).
+    """
+    video_list = []
+    photo_list = []
 
-        recs = query.order_by(VideoRecording.start_time.desc()).all()
-    except Exception as e:
-        recs = []
+    # 1. Fetch Videos if requested
+    if record_type in ["ALL", "VIDEOS"]:
+        try:
+            v_query = db.query(VideoRecording)
+            if camera_id:
+                v_query = v_query.filter(VideoRecording.camera_id == camera_id)
+            if device_id:
+                v_query = v_query.filter(VideoRecording.device_id == device_id)
+            if location:
+                v_query = v_query.filter(VideoRecording.location.like(f"%{location}%"))
+            v_recs = v_query.order_by(VideoRecording.start_time.desc()).all()
+        except Exception:
+            v_recs = []
 
-    if not recs:
-        # Provide sample seed recording metadata
-        return [
-            {
-                "id": 1,
-                "record_id": "REC-20260901-001",
-                "camera_id": 1,
-                "device_id": "FIXED-CAM-001",
-                "location": "Anna Salai - Spencers Junction",
-                "start_time": datetime.utcnow().isoformat(),
-                "end_time": datetime.utcnow().isoformat(),
-                "duration_sec": 120.0,
-                "file_size_mb": 14.5,
-                "file_reference": "/videos/sample_traffic_urban.mp4",
-                "file_url": "/videos/sample_traffic_urban.mp4",
-                "recording_type": "CONTINUOUS",
-                "sha256_hash": "a4b2c8901234567890abcdef1234567890abcdef1234567890abcdef12345678",
+        for r in v_recs:
+            file_url = r.file_reference if (r.file_reference and (r.file_reference.startswith('/') or r.file_reference.startswith('http'))) else f"/storage/recordings/{r.file_reference}" if r.file_reference else "/videos/sample_traffic_urban.mp4"
+            video_list.append({
+                "id": r.id,
+                "record_id": r.record_id,
+                "video_id": r.record_id,
+                "type": "VIDEO",
+                "media_type": "VIDEO",
+                "source_type": getattr(r, 'recording_type', 'CONTINUOUS'),
+                "camera_id": getattr(r, 'camera_id', None),
+                "device_id": getattr(r, 'device_id', None) or "FIXED-CCTV-01",
+                "location": r.location,
+                "start_time": r.start_time.isoformat() if hasattr(r.start_time, 'isoformat') else str(r.start_time),
+                "end_time": r.end_time.isoformat() if (r.end_time and hasattr(r.end_time, 'isoformat')) else None,
+                "duration_sec": getattr(r, 'duration_sec', 120.0),
+                "file_size_mb": getattr(r, 'file_size_mb', 14.5),
+                "file_reference": r.file_reference,
+                "file_url": file_url,
+                "sha256_hash": getattr(r, 'file_hash', None) or "a4b2c8901234567890abcdef1234567890abcdef1234567890abcdef12345678",
+                "related_alerts": [],
+                "detected_plates": ["TN01AB1234", "KA05MN3821"] if getattr(r, 'device_id', None) else ["TN01AB1234"],
+                "created_at": r.start_time.isoformat() if hasattr(r.start_time, 'isoformat') else str(r.start_time),
                 "event_markers": [
-                    {"time_sec": 15.0, "type": "ANPR_EVENT", "description": "Plate TN01AB1234 sighted"},
-                    {"time_sec": 48.0, "type": "ANOMALY", "description": "Stopped vehicle slowdown"}
+                    {"time_sec": 5.0, "type": "RECORD_START", "description": "Feed Ingestion Stream Active"},
+                    {"time_sec": 15.0, "type": "ANPR_EVENT", "description": "Plate Sighted"},
+                    {"time_sec": 48.0, "type": "ANOMALY", "description": "Traffic Flow Slowdown"}
                 ]
-            }
-        ]
+            })
 
-    return [
-        {
-            "id": r.id,
-            "record_id": r.record_id,
-            "camera_id": getattr(r, 'camera_id', None),
-            "device_id": getattr(r, 'device_id', None),
-            "location": r.location,
-            "start_time": r.start_time.isoformat() if hasattr(r.start_time, 'isoformat') else str(r.start_time),
-            "end_time": r.end_time.isoformat() if (r.end_time and hasattr(r.end_time, 'isoformat')) else None,
-            "duration_sec": getattr(r, 'duration_sec', 15.0),
-            "file_size_mb": getattr(r, 'file_size_mb', 5.0),
-            "file_reference": r.file_reference,
-            "file_url": r.file_reference if (r.file_reference and (r.file_reference.startswith('/') or r.file_reference.startswith('http'))) else f"/videos/{r.file_reference}" if r.file_reference else "/videos/sample_traffic_urban.mp4",
-            "recording_type": getattr(r, 'recording_type', 'CONTINUOUS'),
-            "sha256_hash": getattr(r, 'file_hash', None) or getattr(r, 'sha256_hash', None) or "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
-            "event_markers": [
-                {"time_sec": 5.0, "type": "RECORD_START", "description": "Feed Ingestion Stream Active"},
-                {"time_sec": 15.0, "type": "ANPR_EVENT", "description": "Plate Sighted"},
-                {"time_sec": 48.0, "type": "ANOMALY", "description": "Traffic Flow Slowdown"}
-            ]
-        } for r in recs
-    ]
+    # 2. Fetch Photos if requested
+    if record_type in ["ALL", "PHOTOS"]:
+        try:
+            p_query = db.query(EvidenceRecord)
+            if camera_id:
+                p_query = p_query.filter(EvidenceRecord.camera_id == camera_id)
+            if device_id:
+                p_query = p_query.filter(EvidenceRecord.device_id == device_id)
+            if location:
+                p_query = p_query.filter(EvidenceRecord.location.like(f"%{location}%"))
+            if plate_number:
+                p_query = p_query.filter(EvidenceRecord.plate_number.like(f"%{plate_number}%"))
+            if event_type:
+                p_query = p_query.filter(EvidenceRecord.event_type == event_type)
+            p_recs = p_query.order_by(EvidenceRecord.timestamp.desc()).all()
+        except Exception:
+            p_recs = []
+
+        for p in p_recs:
+            file_url = p.original_image if (p.original_image and (p.original_image.startswith('/') or p.original_image.startswith('http'))) else f"/storage/evidence/{p.record_id}.jpg"
+            photo_list.append({
+                "id": p.id,
+                "photo_id": p.record_id,
+                "record_id": p.record_id,
+                "type": "PHOTO",
+                "media_type": "PHOTO",
+                "source_type": "FIELD_PHOTO",
+                "camera_id": getattr(p, 'camera_id', None),
+                "device_id": getattr(p, 'device_id', None) or "MOBILE-CAM-001",
+                "operator_id": p.operator_id,
+                "location": p.location,
+                "timestamp": p.timestamp.isoformat() if hasattr(p.timestamp, 'isoformat') else str(p.timestamp),
+                "created_at": p.timestamp.isoformat() if hasattr(p.timestamp, 'isoformat') else str(p.timestamp),
+                "plate_number": p.plate_number,
+                "ocr_confidence": p.ocr_confidence,
+                "confidence": p.ocr_confidence,
+                "vehicle_type": p.vehicle_type,
+                "event_type": getattr(p, 'event_type', 'FIELD_PHOTO_CAPTURE'),
+                "alert_id": getattr(p, 'alert_id', None),
+                "file_reference": p.original_image,
+                "file_url": file_url,
+                "image_url": file_url,
+                "sha256_hash": getattr(p, 'file_hash', None),
+                "review_status": p.review_status,
+                "notes": p.notes or "AI DETECTION — Review required",
+                "disclaimer": "AI DETECTION — Review required"
+            })
+
+    # Combined sorted by newest first
+    combined = video_list + photo_list
+    combined.sort(key=lambda x: x.get("created_at") or x.get("timestamp") or "", reverse=True)
+    return combined
 
 @router.post("/recordings/upload")
 async def upload_mobile_recording(
@@ -1401,34 +1745,240 @@ def update_alert_status(alert_id: int, status_in: AlertStatusUpdate, db: Session
     db.refresh(alert)
     return alert
 
-# 10. Blacklist CRUD
+# 10. Watchlist & Signal Crossing Tracking
+@router.get("/watchlist", response_model=List[BlacklistOut])
 @router.get("/blacklist", response_model=List[BlacklistOut])
 def get_blacklist(db: Session = Depends(get_db)):
-    return db.query(Blacklist).all()
+    """
+    Returns all actively tracked watchlist vehicles, enriched with real-time signal crossing
+    counts, last detected intersection/signal, and sighting status.
+    """
+    items = db.query(Blacklist).order_by(Blacklist.created_at.desc()).all()
+    results = []
+    for item in items:
+        clean_p = item.plate.upper().replace(" ", "").replace("-", "")
+        # Query crossings across all traffic signal cameras
+        obs_query = db.query(PlateObservation).filter(PlateObservation.plate_number.like(f"%{clean_p}%"))
+        crossings_count = obs_query.count()
+        last_obs = obs_query.order_by(PlateObservation.timestamp.desc()).first()
 
+        last_loc = None
+        last_time = None
+        if last_obs:
+            if last_obs.camera and last_obs.camera.intersection:
+                last_loc = f"{last_obs.camera.intersection.name} ({last_obs.direction} Approach)"
+            elif last_obs.camera:
+                last_loc = f"{last_obs.camera.name} (Cam #{last_obs.camera_id})"
+            else:
+                last_loc = f"Signal Camera #{last_obs.camera_id}"
+            last_time = last_obs.timestamp.isoformat()
+
+        results.append(BlacklistOut(
+            id=item.id,
+            plate=item.plate,
+            reason=item.reason,
+            created_by=item.created_by or "operator",
+            created_at=item.created_at,
+            status=item.status or "ACTIVE",
+            notes=item.notes,
+            total_crossings=crossings_count,
+            last_crossing_location=last_loc,
+            last_crossing_time=last_time,
+            sighted=crossings_count > 0
+        ))
+    return results
+
+@router.post("/watchlist", response_model=BlacklistOut, status_code=status.HTTP_201_CREATED)
 @router.post("/blacklist", response_model=BlacklistOut, status_code=status.HTTP_201_CREATED)
-def add_to_blacklist(entry_in: BlacklistCreate, db: Session = Depends(get_db)):
-    # Check if already blacklisted
-    existing = db.query(Blacklist).filter(Blacklist.plate == entry_in.plate.upper().replace(" ", "")).first()
-    if existing:
-        raise HTTPException(status_code=400, detail="Plate already blacklisted")
-        
-    entry = Blacklist(
-        plate=entry_in.plate.upper().replace(" ", ""),
-        reason=entry_in.reason,
-        created_by="operator",
-        notes=entry_in.notes
-    )
-    db.add(entry)
-    db.commit()
-    db.refresh(entry)
-    return entry
+async def add_to_blacklist(entry_in: BlacklistCreate, db: Session = Depends(get_db)):
+    """
+    Manually registers a target vehicle license plate into the surveillance watchlist
+    to track if the vehicle has crossed or crosses any traffic signal junction.
+    """
+    from app.services.compliance.providers.demo_vehicle_provider import demo_vehicle_provider
+    from app.websocket.manager import ws_manager
 
+    clean_p = entry_in.plate.upper().replace(" ", "").replace("-", "")
+    existing = db.query(Blacklist).filter(Blacklist.plate == clean_p).first()
+    
+    if existing:
+        existing.reason = entry_in.reason
+        existing.status = "ACTIVE"
+        if entry_in.notes:
+            existing.notes = entry_in.notes
+        db.commit()
+        db.refresh(existing)
+        entry = existing
+    else:
+        entry = Blacklist(
+            plate=clean_p,
+            reason=entry_in.reason,
+            created_by="operator",
+            status="ACTIVE",
+            notes=entry_in.notes
+        )
+        db.add(entry)
+        db.commit()
+        db.refresh(entry)
+
+    # Sync with demo vehicle registry so compliance engine flags it on signal passage
+    if clean_p in demo_vehicle_provider._memory_cache:
+        demo_vehicle_provider._memory_cache[clean_p]["watchlist"] = {
+            "matched": True,
+            "reference": f"WATCHLIST-{entry.id}",
+            "reason": entry_in.reason
+        }
+    else:
+        # Create a fictional vehicle entry for this newly tracked plate
+        demo_vehicle_provider._memory_cache[clean_p] = {
+            "vehicle_number": clean_p,
+            "registration_status": "ACTIVE",
+            "vehicle_class": "MOTOR CAR (LMV)",
+            "manufacturer": "GENERIC",
+            "model": "SURVEILLANCE TARGET",
+            "registration_date": "2023-01-01",
+            "fuel_type": "PETROL",
+            "rc": {"status": "VALID", "valid_until": "2038-01-01"},
+            "insurance": {"status": "VALID", "provider": "National Insurance", "valid_until": "2027-01-01"},
+            "puc": {"status": "VALID", "valid_until": "2026-12-31"},
+            "fitness": {"status": "VALID", "valid_until": "2038-01-01"},
+            "permit": None,
+            "watchlist": {
+                "matched": True,
+                "reference": f"WATCHLIST-{entry.id}",
+                "reason": entry_in.reason
+            },
+            "owner_reference": f"TARGET-{entry.id}",
+            "authorized_owner_display_name": "Target Under Surveillance",
+            "notes": entry_in.notes or "Manually flagged for traffic signal crossing tracking"
+        }
+
+    # Query if this vehicle has already crossed any signal camera
+    obs_query = db.query(PlateObservation).filter(PlateObservation.plate_number.like(f"%{clean_p}%"))
+    crossings_count = obs_query.count()
+    last_obs = obs_query.order_by(PlateObservation.timestamp.desc()).first()
+
+    last_loc = None
+    last_time = None
+    if last_obs:
+        if last_obs.camera and last_obs.camera.intersection:
+            last_loc = f"{last_obs.camera.intersection.name} ({last_obs.direction} Approach)"
+        elif last_obs.camera:
+            last_loc = f"{last_obs.camera.name} (Cam #{last_obs.camera_id})"
+        else:
+            last_loc = f"Signal Camera #{last_obs.camera_id}"
+        last_time = last_obs.timestamp.isoformat()
+
+        # Generate immediate notification that tracked vehicle was sighted at a signal
+        alert_msg = f"TRACKED VEHICLE SIGHTED: Target plate {clean_p} has crossed {crossings_count} traffic signal(s). Most recent: {last_loc} at {last_time}."
+        alert = Alert(
+            type="WATCHLIST_MATCH",
+            severity="HIGH",
+            camera_id=last_obs.camera_id,
+            location=last_loc,
+            vehicle_plate=clean_p,
+            message=alert_msg,
+            status="NEW",
+            confidence=last_obs.final_confidence or 0.95
+        )
+        db.add(alert)
+        db.commit()
+
+        await ws_manager.broadcast({
+            "event": "ALERT_CREATED",
+            "alert": {
+                "id": alert.id,
+                "type": alert.type,
+                "severity": alert.severity,
+                "location": alert.location,
+                "vehicle_plate": alert.vehicle_plate,
+                "message": alert.message,
+                "timestamp": alert.timestamp.isoformat()
+            }
+        })
+
+    # Broadcast real-time watchlist updated event
+    await ws_manager.broadcast({
+        "event": "WATCHLIST_UPDATED",
+        "entry": {
+            "id": entry.id,
+            "plate": clean_p,
+            "reason": entry.reason,
+            "notes": entry.notes,
+            "total_crossings": crossings_count,
+            "last_crossing_location": last_loc,
+            "sighted": crossings_count > 0
+        }
+    })
+
+    return BlacklistOut(
+        id=entry.id,
+        plate=clean_p,
+        reason=entry.reason,
+        created_by="operator",
+        created_at=entry.created_at,
+        status=entry.status or "ACTIVE",
+        notes=entry.notes,
+        total_crossings=crossings_count,
+        last_crossing_location=last_loc,
+        last_crossing_time=last_time,
+        sighted=crossings_count > 0
+    )
+
+@router.get("/watchlist/{plate_number}/crossings")
+def get_watchlist_vehicle_crossings(plate_number: str, db: Session = Depends(get_db)):
+    """
+    Returns all junction/signal crossing records and camera detections for a specific tracked plate.
+    """
+    clean_p = plate_number.upper().replace(" ", "").replace("-", "")
+    sightings = db.query(PlateObservation).filter(
+        PlateObservation.plate_number.like(f"%{clean_p}%")
+    ).order_by(PlateObservation.timestamp.desc()).all()
+
+    output = []
+    for s in sightings:
+        loc_name = "City Corridor"
+        if s.camera and s.camera.intersection:
+            loc_name = s.camera.intersection.name
+        elif s.camera:
+            loc_name = s.camera.name
+
+        output.append({
+            "id": s.id,
+            "plate_number": s.plate_number,
+            "camera_id": s.camera_id,
+            "camera_name": s.camera.name if s.camera else f"CAM-{s.camera_id}",
+            "intersection_name": loc_name,
+            "lane": s.lane,
+            "direction": s.direction,
+            "speed_kmh": s.speed_kmh or 42.0,
+            "timestamp": s.timestamp.isoformat(),
+            "confidence": s.final_confidence,
+            "vehicle_type": s.vehicle_type or "car",
+            "image_path": s.image_path or "/sample_traffic.mp4"
+        })
+    return {
+        "plate_number": clean_p,
+        "total_crossings": len(output),
+        "crossings": output
+    }
+
+@router.delete("/watchlist/{blacklist_id}", status_code=status.HTTP_204_NO_CONTENT)
 @router.delete("/blacklist/{blacklist_id}", status_code=status.HTTP_204_NO_CONTENT)
 def remove_from_blacklist(blacklist_id: int, db: Session = Depends(get_db)):
     entry = db.query(Blacklist).filter(Blacklist.id == blacklist_id).first()
     if not entry:
         raise HTTPException(status_code=404, detail="Watch entry not found")
+    
+    clean_p = entry.plate.upper().replace(" ", "").replace("-", "")
+    from app.services.compliance.providers.demo_vehicle_provider import demo_vehicle_provider
+    if clean_p in demo_vehicle_provider._memory_cache:
+        demo_vehicle_provider._memory_cache[clean_p]["watchlist"] = {
+            "matched": False,
+            "reference": None,
+            "reason": None
+        }
+
     db.delete(entry)
     db.commit()
     return
@@ -1873,19 +2423,54 @@ def get_number_plate_dossier(
         Violation.license_plate.like(f"%{clean_plate}%")
     ).order_by(Violation.timestamp.desc()).all()
     
-    # Mock / DB Vehicle Registry Lookup
+    # Query Vehicle Compliance Service & Active Registry Provider
+    from app.services.compliance.vehicle_compliance_service import vehicle_compliance_service
+    provider = vehicle_compliance_service.get_active_provider()
+    reg_details = provider.get_vehicle_details(clean_plate)
+    
+    # Evaluate document status dates
+    now_date = datetime.now(timezone.utc).date()
+    compliance_doc_summary = None
+    if reg_details:
+        rc_s, rc_d = vehicle_compliance_service._evaluate_date_status(reg_details.get("rc", {}).get("valid_until"), now_date)
+        ins_s, ins_d = vehicle_compliance_service._evaluate_date_status(reg_details.get("insurance", {}).get("valid_until"), now_date)
+        puc_s, puc_d = vehicle_compliance_service._evaluate_date_status(reg_details.get("puc", {}).get("valid_until"), now_date)
+        fit_s, fit_d = vehicle_compliance_service._evaluate_date_status(reg_details.get("fitness", {}).get("valid_until"), now_date)
+        
+        overall = "COMPLIANT"
+        if ins_s == "EXPIRED" or puc_s == "EXPIRED" or fit_s == "EXPIRED" or rc_s in ["EXPIRED", "SUSPENDED"]:
+            overall = "ACTION_REQUIRED"
+        elif reg_details.get("watchlist", {}).get("matched") or stolen_rec:
+            overall = "REVIEW_REQUIRED"
+            
+        compliance_doc_summary = {
+            "source": reg_details.get("source", "DEMO_VEHICLE_REGISTRY"),
+            "data_source_label": "DEMO VEHICLE REGISTRY (Fictional Data)" if reg_details.get("source") == "DEMO_VEHICLE_REGISTRY" else "AUTHORIZED PARIVAHAN GATEWAY",
+            "compliance_status": overall,
+            "rc": {"status": rc_s, "valid_until": rc_d},
+            "insurance": {"status": ins_s, "provider": reg_details.get("insurance", {}).get("provider", "National Insurance"), "valid_until": ins_d},
+            "puc": {"status": puc_s, "valid_until": puc_d},
+            "fitness": {"status": fit_s, "valid_until": fit_d},
+            "permit": reg_details.get("permit"),
+            "watchlist": reg_details.get("watchlist", {"matched": bool(stolen_rec)})
+        }
+
+    # Protected Owner Info (Fictional Demo Records with Role-Based Protection)
+    owner_name_display = reg_details.get("authorized_owner_display_name", "Protected Owner") if reg_details else ("Rohan Sharma (Demo)" if "TN01" in clean_plate else "Protected Citizen (Demo)")
     owner_info = {
         "plate_number": clean_plate,
-        "owner_name": "Rohan Sharma" if "TN01" in clean_plate or "KA01" in clean_plate else "Vikramaditya Kumar",
-        "vehicle_make": "Hyundai",
-        "vehicle_model": "Creta SX",
-        "color": "Silver Metallic",
-        "registration_date": "2022-04-14",
+        "owner_name": owner_name_display,
+        "vehicle_make": reg_details.get("manufacturer", "Hyundai") if reg_details else "Hyundai",
+        "vehicle_model": reg_details.get("model", "Creta SX") if reg_details else "Creta SX",
+        "color": "Metallic Titanium",
+        "registration_date": reg_details.get("registration_date", "2022-04-14") if reg_details else "2022-04-14",
+        "fuel_type": reg_details.get("fuel_type", "PETROL") if reg_details else "PETROL",
         "chassis_number": f"MA3XXXXXXXXX{clean_plate[:4]}",
         "engine_number": f"ENG{clean_plate[-4:]}99812",
-        "rc_status": "STOLEN ALERT" if stolen_rec else "ACTIVE",
-        "is_stolen": bool(stolen_rec),
-        "stolen_reason": stolen_rec.reason if stolen_rec else None
+        "rc_status": "STOLEN ALERT" if stolen_rec else (reg_details.get("registration_status", "ACTIVE") if reg_details else "ACTIVE"),
+        "is_stolen": bool(stolen_rec or (reg_details and reg_details.get("watchlist", {}).get("matched"))),
+        "stolen_reason": stolen_rec.reason if stolen_rec else (reg_details.get("watchlist", {}).get("reason") if reg_details else None),
+        "compliance": compliance_doc_summary
     }
     
     sighting_data = []

@@ -15,6 +15,7 @@ from app.core.config import settings
 from app.database.session import engine, Base, SessionLocal
 from app.api.v1.auth import router as auth_router
 from app.api.v1.traffic import router as traffic_router
+from app.api.v1.compliance import router as compliance_router
 from app.websocket.manager import ws_manager
 from app.cv.detector import TrafficVisionProcessor
 from app.cv.stream_manager import stream_manager
@@ -42,7 +43,20 @@ try:
             "ALTER TABLE users ADD COLUMN area_jurisdiction VARCHAR(100);",
             "ALTER TABLE users ADD COLUMN police_id VARCHAR(50);",
             "ALTER TABLE users ADD COLUMN mobile_number VARCHAR(20);",
-            "ALTER TABLE users ADD COLUMN is_approved BOOLEAN DEFAULT 1;"
+            "ALTER TABLE users ADD COLUMN is_approved BOOLEAN DEFAULT 1;",
+            "ALTER TABLE signal_decisions ADD COLUMN junction_id INTEGER;",
+            "ALTER TABLE signal_decisions ADD COLUMN approach_id VARCHAR(50);",
+            "ALTER TABLE signal_decisions ADD COLUMN vehicle_count REAL DEFAULT 0.0;",
+            "ALTER TABLE signal_decisions ADD COLUMN queue_length INTEGER DEFAULT 0;",
+            "ALTER TABLE signal_decisions ADD COLUMN traffic_density VARCHAR(50) DEFAULT 'LOW';",
+            "ALTER TABLE signal_decisions ADD COLUMN waiting_time REAL DEFAULT 0.0;",
+            "ALTER TABLE signal_decisions ADD COLUMN demand_score REAL DEFAULT 0.0;",
+            "ALTER TABLE signal_decisions ADD COLUMN priority_score REAL DEFAULT 0.0;",
+            "ALTER TABLE signal_decisions ADD COLUMN green_duration INTEGER DEFAULT 30;",
+            "ALTER TABLE signal_decisions ADD COLUMN signal_state VARCHAR(50) DEFAULT 'GREEN';",
+            "ALTER TABLE signal_decisions ADD COLUMN decision_reason TEXT;",
+            "ALTER TABLE evidence_records ADD COLUMN event_type VARCHAR(100) DEFAULT 'FIELD_PHOTO_CAPTURE';",
+            "ALTER TABLE evidence_records ADD COLUMN alert_id INTEGER;"
         ]:
             try:
                 conn.execute(text(col_def))
@@ -119,6 +133,14 @@ async def background_video_processing_loop():
                                 "timestamp": alert.timestamp.isoformat()
                             }
                         })
+
+                        # Graceful approach status update on camera failure (Section 24)
+                        if cam.intersection_id:
+                            controller = signal_registry.get_controller(cast(int, cam.intersection_id), db=db)
+                            dir_key = cam.direction.upper() if cam.direction else "NORTH"
+                            if dir_key in controller.approaches:
+                                controller.approaches[dir_key]["camera_status"] = "CAMERA_OFFLINE"
+
                         continue
 
                     # Fallback to simulated high-quality frame if stream unavailable
@@ -262,25 +284,31 @@ async def background_video_processing_loop():
                                     "trajectory": traj
                                 })
 
-                    # 3. Dynamic Signal Controller Optimization Tick
+                    # 3. Dynamic Signal Controller Approach Update & Tick
                     if cam.intersection_id:
                         controller = signal_registry.get_controller(cast(int, cam.intersection_id), db=db)
+                        dir_key = cam.direction.upper() if cam.direction else "NORTH"
 
                         has_emergency = len(res["emergency_detected"]) > 0
-                        if has_emergency:
+                        if has_emergency and dir_key in controller.approaches:
                             em_type = res["emergency_detected"][0]["vehicle_type"]
-                            dir_key = cam.direction.upper() if cam.direction else "NORTH"
-                            if dir_key in controller.approaches:
-                                controller.approaches[dir_key]["emergency_detected"] = True
-                                controller.approaches[dir_key]["emergency_type"] = em_type
+                            controller.approaches[dir_key]["emergency_detected"] = True
+                            controller.approaches[dir_key]["emergency_type"] = em_type
+
+                        # Update observation inputs derived from camera/AI detection (Section 2, 3, 4, 22)
+                        controller.update_approach_observation(
+                            approach_key=dir_key,
+                            vehicle_count=res["total_vehicles"],
+                            queue_length=res["queue_length"],
+                            traffic_density=res["density_state"],
+                            average_speed=res.get("average_speed", 38.0),
+                            camera_status="DATA_AVAILABLE",
+                            is_queue_available=res.get("is_queue_available", True)
+                        )
 
                         controller.tick(db, dt=1.5)
 
-                        dir_key = cam.direction.upper() if cam.direction else "NORTH"
-                        if dir_key in controller.approaches:
-                            controller.approaches[dir_key]["vehicle_count"] = res["total_vehicles"]
-                            controller.approaches[dir_key]["queue_length"] = res["queue_length"]
-
+                        active_app_data = controller.approaches.get(controller.active_approach, {})
                         await ws_manager.broadcast({
                             "event": "SIGNAL_STATE_CHANGED",
                             "intersection_id": cam.intersection_id,
@@ -291,13 +319,28 @@ async def background_video_processing_loop():
                             "countdown": controller.countdown,
                             "mode": controller.mode,
                             "reasoning": controller.last_reasoning,
+                            "elapsed_green_time": round(controller.elapsed_green_time, 1),
+                            "current_metrics": {
+                                "approach": controller.active_approach,
+                                "vehicle_count": round(active_app_data.get("vehicle_count", 0.0), 1),
+                                "queue_length": active_app_data.get("queue_length", 0),
+                                "waiting_time": round(active_app_data.get("waiting_time", 0.0), 1),
+                                "traffic_density": active_app_data.get("traffic_density", "MODERATE"),
+                                "demand_score": round(active_app_data.get("demand_score", 0.0), 3),
+                                "priority_score": round(active_app_data.get("priority_score", 0.0), 1),
+                                "green_duration": active_app_data.get("green_duration", controller.countdown)
+                            },
                             "approaches": {
                                 name: {
                                     "name": app.get("name") or f"{name.title()} Approach",
-                                    "direction": app["direction"],
-                                    "vehicle_count": round(app["vehicle_count"], 1),
-                                    "queue_length": app["queue_length"],
-                                    "waiting_time": round(app["waiting_time"], 1),
+                                    "direction": app.get("direction", name),
+                                    "vehicle_count": round(app.get("vehicle_count", 0.0), 1),
+                                    "queue_length": app.get("queue_length", 0),
+                                    "waiting_time": round(app.get("waiting_time", 0.0), 1),
+                                    "traffic_density": app.get("traffic_density", "MODERATE"),
+                                    "demand_score": round(app.get("demand_score", 0.0), 3),
+                                    "priority_score": round(app.get("priority_score", 0.0), 1),
+                                    "camera_status": app.get("camera_status", "DATA_AVAILABLE"),
                                     "signal": controller.get_approach_signal(name)
                                 } for name, app in controller.approaches.items()
                             }
@@ -345,6 +388,13 @@ async def lifespan(app: FastAPI):
     except Exception as seed_err:
         logger.error(f"Error during auto-seeding: {seed_err}")
 
+    try:
+        from app.services.compliance.providers.demo_vehicle_provider import demo_vehicle_provider
+        demo_vehicle_provider.seed_registry()
+        logger.info("Demo Vehicle Registry loaded successfully.")
+    except Exception as reg_err:
+        logger.warning(f"Note: Demo Vehicle Registry init: {reg_err}")
+
     bg_task = asyncio.create_task(background_video_processing_loop())
     yield
     bg_task.cancel()
@@ -370,11 +420,15 @@ app.add_middleware(
 # Mount Routers
 app.include_router(auth_router, prefix=f"{settings.API_V1_STR}/auth", tags=["Auth"])
 app.include_router(traffic_router, prefix=settings.API_V1_STR, tags=["Traffic & AI"])
+app.include_router(compliance_router, prefix=f"{settings.API_V1_STR}/compliance", tags=["Vehicle Compliance"])
 
-# Ensure persistent video recordings storage directory exists
+# Ensure persistent video recordings and photo evidence storage directories exist
 RECORDINGS_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "storage", "recordings"))
+EVIDENCE_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "storage", "evidence"))
 os.makedirs(RECORDINGS_DIR, exist_ok=True)
+os.makedirs(EVIDENCE_DIR, exist_ok=True)
 app.mount("/storage/recordings", StaticFiles(directory=RECORDINGS_DIR), name="recordings")
+app.mount("/storage/evidence", StaticFiles(directory=EVIDENCE_DIR), name="evidence")
 
 @app.get("/")
 def root():
