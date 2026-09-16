@@ -22,12 +22,14 @@ import {
   ChevronDown,
   Monitor,
   Eye,
-  Sparkles
+  Sparkles,
+  Zap
 } from 'lucide-react';
 import { apiClient, resolveVideoUrl } from '../api/client';
 import { Intersection } from '../types';
 import { useStore } from '../store/useStore';
 import { FALLBACK_INTERSECTIONS, FALLBACK_SIGNAL_DATA } from '../api/mockFallback';
+import { IntersectionRadiusRadar } from '../components/IntersectionRadiusRadar';
 
 interface ApproachData {
   key: string;
@@ -95,6 +97,10 @@ export const Signals: React.FC = () => {
   const [selectedCameraIds, setSelectedCameraIds] = useState<number[]>([]);
   const [isDemoPlaying, setIsDemoPlaying] = useState<boolean>(true);
   const [isAutoOptimizing, setIsAutoOptimizing] = useState<boolean>(true);
+
+  // Video playback & signal counter interaction refs & notification
+  const videoRefs = useRef<Map<number, HTMLVideoElement>>(new Map());
+  const [vehiclePassNotice, setVehiclePassNotice] = useState<{ approach: string; text: string } | null>(null);
 
   // Manual Override State
   const [showOverrideModal, setShowOverrideModal] = useState<boolean>(false);
@@ -352,6 +358,104 @@ export const Signals: React.FC = () => {
   const displayedCameras = useMemo(() => {
     return junctionCameras.filter((c) => selectedCameraIds.includes(c.camera_id));
   }, [junctionCameras, selectedCameraIds]);
+
+  // Section: Smooth local 1-second countdown decrement between backend polls
+  useEffect(() => {
+    const timer = setInterval(() => {
+      setSignalData((prev: any) => {
+        if (!prev || typeof prev.countdown !== 'number') return prev;
+        if (prev.countdown <= 1) return { ...prev, countdown: 0 };
+        return { ...prev, countdown: prev.countdown - 1 };
+      });
+    }, 1000);
+    return () => clearInterval(timer);
+  }, []);
+
+  // Section: Synchronize live video footage playback and physical speed with running signal counter
+  useEffect(() => {
+    displayedCameras.forEach((cam) => {
+      const el = videoRefs.current.get(cam.camera_id);
+      if (!el) return;
+      const dirKey = cam.direction.toUpperCase();
+      const isCurrentActive =
+        signalData?.active_approach === dirKey || signalData?.active_phase === dirKey;
+      const currentSignal = isCurrentActive ? (signalData?.state || 'GREEN') : 'RED';
+
+      if (!isDemoPlaying) {
+        el.pause();
+        return;
+      }
+
+      if (currentSignal === 'GREEN') {
+        // Full normal flow speed
+        el.playbackRate = 1.0;
+        el.play().catch(() => {});
+      } else if (currentSignal === 'YELLOW') {
+        // Decelerating clearance flow speed
+        el.playbackRate = 0.35;
+        el.play().catch(() => {});
+      } else {
+        // RED: Halted flow at stop line (0 km/h)
+        el.pause();
+      }
+    });
+  }, [
+    signalData?.state,
+    signalData?.active_approach,
+    signalData?.active_phase,
+    signalData?.countdown,
+    isDemoPlaying,
+    displayedCameras
+  ]);
+
+  // Quick Action: Simulate 1 vehicle passing 60m radius on specified approach
+  const handlePassVehicle = async (approachKey: string) => {
+    try {
+      const res = await apiClient.post(`/intersections/${selectedJunctionId}/vehicle-pass`, {
+        approach: approachKey
+      });
+      const remaining = res.data?.vehicles_remaining ?? 0;
+      setVehiclePassNotice({
+        approach: approachKey,
+        text: `⚡ Vehicle passed 60m radius (${remaining} veh remaining)`
+      });
+      setTimeout(() => setVehiclePassNotice(null), 2500);
+      fetchJunctionData();
+    } catch (err) {
+      console.error('Error passing vehicle:', err);
+    }
+  };
+
+  // Quick Action: Clear all vehicles on specified approach (triggers instant auto-switch)
+  const handleClearApproach = async (approachKey: string) => {
+    try {
+      await apiClient.post(`/intersections/${selectedJunctionId}/clear-approach`, {
+        approach: approachKey
+      });
+      setVehiclePassNotice({
+        approach: approachKey,
+        text: `⚡ Approach cleared (0 veh)! Switching to next phase...`
+      });
+      setTimeout(() => setVehiclePassNotice(null), 2500);
+      fetchJunctionData();
+    } catch (err) {
+      console.error('Error clearing approach:', err);
+    }
+  };
+
+  // Quick Action: Force green signal priority for an approach
+  const handleForceGreen = async (approachKey: string) => {
+    try {
+      await apiClient.post(`/intersections/${selectedJunctionId}/manual-override`, {
+        phase: approachKey,
+        reason: `Manual priority requested for ${approachKey} approach via camera feed`
+      });
+      setOverrideMessage(`Signal forced GREEN for ${approachKey} approach.`);
+      fetchJunctionData();
+    } catch (err) {
+      console.error('Error forcing green:', err);
+    }
+  };
 
   // Demo playback controls (Section 12)
   const handleResetDemo = () => {
@@ -650,6 +754,25 @@ export const Signals: React.FC = () => {
         </div>
       </div>
 
+      {/* SECTION: INTERACTIVE DETECTION RADIUS (60m) & ZERO-WASTE AUTO-SWITCH RADAR */}
+      <IntersectionRadiusRadar
+        junctionId={selectedJunctionId}
+        junctionName={activeJunction?.name || `Junction #${selectedJunctionId}`}
+        activeApproach={activeApproachKey}
+        activeSignal={signalData?.state || 'GREEN'}
+        countdown={signalData?.countdown || 30}
+        approaches={approachesList.map((a) => ({
+          key: a.key,
+          name: a.name,
+          direction: a.direction,
+          vehicle_count: a.vehicle_count,
+          queue_length: a.queue_length,
+          signal: a.signal,
+          priority_score: a.priority_score
+        }))}
+        onRefresh={fetchJunctionData}
+      />
+
       {/* SECTION 1, 3, 8 & 13: DYNAMIC VIDEO PANELS WITH MOVEMENT VS STOPPING SIMULATION LAYER */}
       <div className="space-y-3">
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
@@ -736,77 +859,182 @@ export const Signals: React.FC = () => {
                   </span>
                 </div>
 
-                {/* Video Feed with Section 8 Simulation Layer */}
-                <div className="relative bg-slate-950 aspect-video flex items-center justify-center overflow-hidden">
+                {/* Video Feed with Signal Physics & Running Counter Interaction */}
+                <div className="relative bg-slate-950 aspect-video flex items-center justify-center overflow-hidden group">
                   <video
                     src={resolveVideoUrl(cam.video_source)}
                     autoPlay
                     muted
                     loop
                     playsInline
-                    className="w-full h-full object-cover"
+                    className="w-full h-full object-cover transition-opacity duration-300"
                     ref={(el) => {
                       if (el) {
-                        if (isDemoPlaying) {
+                        videoRefs.current.set(cam.camera_id, el);
+                        if (!isDemoPlaying) {
+                          el.pause();
+                        } else if (isGreen) {
+                          el.playbackRate = 1.0;
+                          el.play().catch(() => {});
+                        } else if (isYellow) {
+                          el.playbackRate = 0.35;
                           el.play().catch(() => {});
                         } else {
                           el.pause();
                         }
+                      } else {
+                        videoRefs.current.delete(cam.camera_id);
                       }
                     }}
                   />
 
-                  {/* SECTION 8: VISUAL MOVEMENT VS STOPPING SIMULATION LAYER */}
-                  <div className="absolute top-2.5 left-2.5 right-2.5 flex items-center justify-between pointer-events-none">
+                  {/* VISUAL STOP LINE / FLOW CORRIDOR BARRIER OVERLAY (Interacting with signal & counter) */}
+                  {isRed && (
+                    <div className="absolute inset-x-0 bottom-10 z-10 pointer-events-none flex flex-col items-center">
+                      <div className="w-full py-1 bg-red-600/85 backdrop-blur-xs border-y border-red-400 flex items-center justify-center gap-2 shadow-[0_0_15px_rgba(239,68,68,0.7)] animate-pulse">
+                        <span className="text-[10px] font-mono font-black text-white tracking-wider flex items-center gap-1.5">
+                          🛑 STOP LINE ENFORCEMENT [HALTED 0 KM/H] • QUEUE: {appData.queue_length} VEH
+                        </span>
+                      </div>
+                      <div className="w-full h-1 bg-gradient-to-r from-transparent via-red-500 to-transparent"></div>
+                    </div>
+                  )}
+
+                  {isYellow && (
+                    <div className="absolute inset-x-0 bottom-10 z-10 pointer-events-none flex flex-col items-center">
+                      <div className="w-full py-1 bg-amber-500/85 backdrop-blur-xs border-y border-amber-300 flex items-center justify-center gap-2 shadow-[0_0_15px_rgba(245,158,11,0.7)] animate-pulse">
+                        <span className="text-[10px] font-mono font-black text-slate-950 tracking-wider flex items-center gap-1.5">
+                          ⚠️ CLEARANCE INTERVAL [DECELERATING 14 KM/H] • PREPARE TO STOP
+                        </span>
+                      </div>
+                    </div>
+                  )}
+
+                  {isGreen && (
+                    <div className="absolute inset-x-0 bottom-10 z-10 pointer-events-none flex flex-col items-center">
+                      <div className="w-full py-0.5 bg-emerald-600/75 backdrop-blur-xs border-y border-emerald-400 flex items-center justify-center gap-2 shadow-[0_0_15px_rgba(16,185,129,0.5)]">
+                        <span className="text-[9px] font-mono font-black text-emerald-100 tracking-wider flex items-center gap-1">
+                          🟢 FLOW CORRIDOR ACTIVE [48 KM/H] • 60m DETECTION RADAR ARMED
+                        </span>
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Vehicle Passed Radius Floating Notification Badge */}
+                  {vehiclePassNotice && vehiclePassNotice.approach === dirKey && (
+                    <div className="absolute top-11 inset-x-4 z-20 pointer-events-none flex justify-center animate-bounce">
+                      <span className="px-3 py-1.5 bg-emerald-500 text-slate-950 font-mono font-black text-xs rounded-full shadow-lg border border-emerald-300 flex items-center gap-1.5">
+                        {vehiclePassNotice.text}
+                      </span>
+                    </div>
+                  )}
+
+                  {/* TOP BAR: SIGNAL STATUS & RUNNING COUNTDOWN VISOR */}
+                  <div className="absolute top-2.5 left-2.5 right-2.5 flex items-center justify-between pointer-events-none z-10">
                     <div
-                      className={`px-2.5 py-1 rounded-md text-[10px] font-mono font-extrabold flex items-center gap-1.5 shadow-md backdrop-blur-xs border ${
+                      className={`px-2.5 py-1 rounded-md text-[10px] font-mono font-extrabold flex items-center gap-1.5 shadow-md backdrop-blur-sm border ${
                         isGreen
-                          ? 'bg-emerald-950/80 text-emerald-300 border-emerald-400'
+                          ? 'bg-emerald-950/85 text-emerald-300 border-emerald-400'
                           : isYellow
-                          ? 'bg-amber-950/80 text-amber-300 border-amber-400'
-                          : 'bg-red-950/80 text-red-300 border-red-500'
+                          ? 'bg-amber-950/85 text-amber-300 border-amber-400'
+                          : 'bg-red-950/85 text-red-300 border-red-500'
                       }`}
                     >
                       <span
-                        className={`w-2 h-2 rounded-full ${
-                          isGreen ? 'bg-emerald-400 animate-ping' : isYellow ? 'bg-amber-400' : 'bg-red-500'
+                        className={`w-2.5 h-2.5 rounded-full ${
+                          isGreen ? 'bg-emerald-400 animate-ping' : isYellow ? 'bg-amber-400 animate-pulse' : 'bg-red-500'
                         }`}
                       />
                       <span>
                         {isGreen
-                          ? 'TRAFFIC FLOW: PROCEED'
+                          ? 'FLOW: 48 KM/H (ACTIVE)'
                           : isYellow
-                          ? 'TRAFFIC FLOW: PREPARE TO STOP'
-                          : 'TRAFFIC FLOW: STOP / WAIT'}
+                          ? 'FLOW: 14 KM/H (DECEL)'
+                          : 'FLOW: 0 KM/H (STOPPED)'}
                       </span>
                     </div>
 
-                    {isGreen && (
-                      <span className="px-2 py-0.5 bg-emerald-950/80 border border-emerald-400 text-emerald-300 rounded font-mono font-bold text-[10px] shadow-sm">
-                        ⏱ {signalData?.countdown}s LEFT
+                    {/* LIVE RUNNING SIGNAL COUNTDOWN BADGE */}
+                    <div
+                      className={`px-2.5 py-1 rounded-md text-[10px] font-mono font-extrabold flex items-center gap-1 shadow-md backdrop-blur-sm border ${
+                        isGreen
+                          ? 'bg-emerald-950/90 border-emerald-400 text-emerald-300 ring-1 ring-emerald-400/50'
+                          : isYellow
+                          ? 'bg-amber-950/90 border-amber-400 text-amber-300 ring-1 ring-amber-400/50'
+                          : 'bg-red-950/90 border-red-500 text-red-300'
+                      }`}
+                    >
+                      <Clock className="w-3 h-3 animate-spin" style={{ animationDuration: '6s' }} />
+                      <span>
+                        {isGreen
+                          ? `⏱ ${signalData?.countdown ?? 25}s REMAINING`
+                          : isYellow
+                          ? `⏱ ${signalData?.countdown ?? 3}s CLEARANCE`
+                          : `⏱ WAIT ${appData.waiting_time || signalData?.countdown || 15}s`}
                       </span>
-                    )}
+                    </div>
                   </div>
 
-                  {/* LIVE ANPR & VEHICLE COMPLIANCE OVERLAY (Section 47) */}
-                  <div className="absolute bottom-2 left-2 right-2 flex items-center justify-between pointer-events-none">
-                    <div className="px-2 py-1 rounded bg-slate-900/90 backdrop-blur-xs border border-slate-700 text-[10px] font-mono text-white flex items-center gap-1.5 shadow-sm">
+                  {/* QUICK INTERACTIVE ACTION CONTROLS (Interact with footage & running signal) */}
+                  <div className="absolute inset-x-2 bottom-2 z-20 flex items-center justify-between gap-1.5 opacity-90 group-hover:opacity-100 transition-opacity">
+                    {/* Compliance tag on left */}
+                    <div className="px-2 py-1 rounded bg-slate-900/90 backdrop-blur-xs border border-slate-700 text-[9px] font-mono text-white flex items-center gap-1.5 shadow-sm">
                       <span className="font-extrabold text-amber-300">
-                        {cam.camera_id % 2 === 0 ? 'TNXX1002' : 'TNXX1001'}
+                        {cam.camera_id % 2 === 0 ? 'TN09AB1002' : 'TN01AX1001'}
                       </span>
-                      <span className="text-slate-400">| 96% ANPR</span>
-                      <span className={`px-1.5 py-0.2 rounded text-[8px] font-bold ${
+                      <span className="text-slate-400">| 98%</span>
+                      <span className={`px-1 rounded text-[8px] font-bold ${
                         cam.camera_id % 2 === 0
                           ? 'bg-red-500/30 text-red-300 border border-red-500/40'
                           : 'bg-emerald-500/30 text-emerald-300 border border-emerald-500/40'
                       }`}>
-                        {cam.camera_id % 2 === 0 ? '🔴 ACTION REQUIRED (Insurance Expired)' : '🟢 COMPLIANT'}
+                        {cam.camera_id % 2 === 0 ? 'INSURANCE DUE' : 'CLEARED'}
                       </span>
                     </div>
 
-                    <span className="px-1.5 py-0.5 bg-slate-900/80 rounded border border-slate-700 text-[8px] font-mono text-slate-400">
-                      DEMO REGISTRY
-                    </span>
+                    {/* Interactive Action Buttons */}
+                    <div className="flex items-center gap-1 pointer-events-auto">
+                      {isGreen ? (
+                        <>
+                          <button
+                            type="button"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              handlePassVehicle(dirKey);
+                            }}
+                            className="px-2 py-1 bg-emerald-600 hover:bg-emerald-500 text-white font-mono text-[9px] font-bold rounded shadow-md border border-emerald-400 transition-all flex items-center gap-1 active:scale-95 cursor-pointer"
+                            title="Simulate 1 vehicle crossing 60m radius and passing the stop line"
+                          >
+                            <Zap className="w-2.5 h-2.5 text-yellow-300" />
+                            <span>PASS VEHICLE (-1)</span>
+                          </button>
+                          <button
+                            type="button"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              handleClearApproach(dirKey);
+                            }}
+                            className="px-2 py-1 bg-teal-700 hover:bg-teal-600 text-white font-mono text-[9px] font-bold rounded shadow-md border border-teal-400 transition-all flex items-center gap-1 active:scale-95 cursor-pointer"
+                            title="Clear all vehicles on this approach: triggers zero-waste auto-switch immediately"
+                          >
+                            <span>CLEAR (0)</span>
+                          </button>
+                        </>
+                      ) : (
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            handleForceGreen(dirKey);
+                          }}
+                          className="px-2 py-1 bg-slate-800/90 hover:bg-emerald-600 text-slate-200 hover:text-white font-mono text-[9px] font-bold rounded shadow-md border border-slate-600 hover:border-emerald-400 transition-all flex items-center gap-1 active:scale-95 cursor-pointer"
+                          title="Force signal GREEN for this approach: video will begin moving and countdown starts"
+                        >
+                          <Play className="w-2.5 h-2.5 text-emerald-400" />
+                          <span>FORCE GREEN</span>
+                        </button>
+                      )}
+                    </div>
                   </div>
 
                   {/* Corner Watermark */}

@@ -247,10 +247,22 @@ class Blacklist(Base):
     id = Column(Integer, primary_key=True, index=True)
     plate = Column(String(50), unique=True, index=True, nullable=False)
     reason = Column(String(255), nullable=False)
+    directory_type = Column(String(50), default="SECURITY_WATCHLIST", nullable=False) # STOLEN_VEHICLES, SECURITY_WATCHLIST, CHALLAN_DEFAULTER, RTO_COMPLIANCE, VIP_WHITELIST
+    severity = Column(String(50), default="CRITICAL", nullable=False) # CRITICAL, HIGH, MEDIUM, LOW
+    vehicle_model = Column(String(100), nullable=True) # e.g. "White Swift Dzire"
+    owner_name = Column(String(100), nullable=True)
+    fir_number = Column(String(100), nullable=True) # e.g. "FIR-2026/89"
+    police_station = Column(String(100), nullable=True) # e.g. "Anna Salai PS"
+    auto_alert = Column(Boolean, default=True, nullable=False)
+    scan_count = Column(Integer, default=0, nullable=False)
+    last_scanned_at = Column(DateTime, nullable=True)
     created_by = Column(String(100), default="admin")
     created_at = Column(DateTime, default=datetime.utcnow)
     status = Column(String(50), default="ACTIVE")
     notes = Column(Text, nullable=True)
+
+# Semantic alias
+VehicleDirectory = Blacklist
 
 class RouteAnomaly(Base):
     __tablename__ = "route_anomalies"

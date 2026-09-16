@@ -300,6 +300,9 @@ class SignalController:
             "demand_score": 0.25,
             "priority_score": 25.0,
             "green_duration": 30,
+            "detection_radius_m": 60.0,
+            "passed_radius_count": 0,
+            "last_passed_radius_time": None,
             "is_queue_available": True,
             "queue_timestamp": now_str,
             "last_observation_time": now_str,
@@ -331,6 +334,97 @@ class SignalController:
             now_str = datetime.now(timezone.utc).isoformat()
             app["queue_timestamp"] = now_str
             app["last_observation_time"] = now_str
+
+    def vehicle_passed_radius(
+        self,
+        db: Session,
+        approach_key: Optional[str] = None,
+        vehicle_id: Optional[str] = None
+    ) -> Dict[str, Any]:
+        """
+        Invoked when a vehicle passes the intersection detection radius.
+        Decrements approach occupancy. If no vehicles remain on the approach,
+        automatically triggers an immediate safe transition to the next approach.
+        """
+        key = (approach_key or self.active_approach).upper()
+        if key not in self.approaches:
+            key = self.active_approach
+
+        app = self.approaches[key]
+        now_str = datetime.now(timezone.utc).isoformat()
+
+        # Record vehicle pass and decrement count
+        app["passed_radius_count"] = app.get("passed_radius_count", 0) + 1
+        app["last_passed_radius_time"] = now_str
+        app["vehicle_count"] = max(0.0, float(app["vehicle_count"]) - 1.0)
+        app["queue_length"] = max(0, int(app["vehicle_count"] * 0.75))
+
+        switched = False
+        reason = ""
+
+        # If this approach is active GREEN and now has NO vehicles remaining
+        if self.mode == "AUTOMATIC" and self.state == "GREEN" and key == self.active_approach:
+            if app["vehicle_count"] <= 0.05:
+                app["vehicle_count"] = 0.0
+                app["queue_length"] = 0
+                self.state = "YELLOW"
+                self.countdown = settings.YELLOW_TIME
+                switched = True
+                reason = (
+                    f"Vehicle passed intersection radius (60m). Approach {key} has 0 vehicles remaining. "
+                    f"Signal automatically changing and switching to next approach."
+                )
+                self.last_reasoning = reason
+                logger.info(f"[Radius Auto-Switch] {reason}")
+
+        return {
+            "intersection_id": self.intersection_id,
+            "approach": key,
+            "vehicle_id": vehicle_id,
+            "vehicles_remaining": round(app["vehicle_count"], 1),
+            "queue_length": app["queue_length"],
+            "passed_radius_count": app["passed_radius_count"],
+            "auto_switched_to_next": switched,
+            "state": self.state,
+            "countdown": self.countdown,
+            "reasoning": reason or f"Vehicle passed radius on {key} approach ({app['vehicle_count']:.0f} remaining)."
+        }
+
+    def clear_approach_vehicles(self, db: Session, approach_key: Optional[str] = None) -> Dict[str, Any]:
+        """
+        Simulates all vehicles on the approach passing the radius (0 vehicles remaining).
+        Triggers instant automatic phase change to the next approach if active.
+        """
+        key = (approach_key or self.active_approach).upper()
+        if key not in self.approaches:
+            key = self.active_approach
+
+        app = self.approaches[key]
+        app["passed_radius_count"] = app.get("passed_radius_count", 0) + max(1, int(app["vehicle_count"]))
+        app["vehicle_count"] = 0.0
+        app["queue_length"] = 0
+        app["last_passed_radius_time"] = datetime.now(timezone.utc).isoformat()
+
+        switched = False
+        if self.mode == "AUTOMATIC" and self.state == "GREEN" and key == self.active_approach:
+            self.state = "YELLOW"
+            self.countdown = settings.YELLOW_TIME
+            switched = True
+            self.last_reasoning = (
+                f"Radius Clearance: All vehicles passed radius. 0 vehicles remaining on {key}. "
+                f"Automatically switching signal to next approach."
+            )
+            logger.info(f"[Radius Auto-Switch] {self.last_reasoning}")
+
+        return {
+            "intersection_id": self.intersection_id,
+            "approach": key,
+            "vehicles_remaining": 0,
+            "auto_switched_to_next": switched,
+            "state": self.state,
+            "countdown": self.countdown,
+            "reasoning": self.last_reasoning
+        }
 
     def get_allowed_directions(self, phase: str) -> List[str]:
         if phase in self.approaches:
@@ -409,8 +503,22 @@ class SignalController:
 
         if self.countdown <= 0:
             self._handle_state_transition(db)
-        elif self.mode == "AUTOMATIC" and self.state == "GREEN" and self.elapsed_green_time >= settings.MIN_GREEN_TIME:
-            self._reassess_green_phase(db)
+        elif self.mode == "AUTOMATIC" and self.state == "GREEN":
+            # Radius Clearance Check: If all vehicles on the active green approach have passed the radius
+            # (leaving 0 vehicles and 0 queue), immediately trigger safe transition to next approach.
+            active_app = self.approaches.get(self.active_approach, {})
+            curr_v = active_app.get("vehicle_count", 0.0)
+            curr_q = active_app.get("queue_length", 0)
+            if curr_v <= 0.05 and curr_q == 0 and self.elapsed_green_time >= 2.0:
+                self.state = "YELLOW"
+                self.countdown = settings.YELLOW_TIME
+                self.last_reasoning = (
+                    f"Radius Auto-Switch: All vehicles passed detection radius (60m). Approach {self.active_approach} "
+                    f"has 0 vehicles remaining. Automatically switching signal to next approach."
+                )
+                logger.info(f"Approach {self.active_approach} empty inside radius. Triggered auto-switch to next approach.")
+            elif self.elapsed_green_time >= settings.MIN_GREEN_TIME:
+                self._reassess_green_phase(db)
 
     def _handle_state_transition(self, db: Session):
         """
@@ -515,7 +623,15 @@ class SignalController:
         else:
             # 2. Select approach with highest priority score
             sorted_approaches = sorted(priority_scores.items(), key=lambda x: x[1], reverse=True)
-            best_approach, highest_score = sorted_approaches[0]
+
+            # If current active approach has 0 queue (cleared), advance to another approach
+            other_approaches = [a for a in sorted_approaches if a[0] != self.active_approach]
+            curr_app_queue = self.approaches.get(self.active_approach, {}).get("queue_length", 0)
+            if other_approaches and curr_app_queue == 0:
+                best_approach, highest_score = other_approaches[0]
+            else:
+                best_approach, highest_score = sorted_approaches[0]
+
             best_demand = demand_scores[best_approach]
             app_data = self.approaches[best_approach]
 

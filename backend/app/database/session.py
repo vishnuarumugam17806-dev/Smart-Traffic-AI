@@ -35,16 +35,24 @@ SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 Base.metadata.create_all(bind=engine)
 try:
     with engine.connect() as conn:
-        try:
-            conn.execute(text("ALTER TABLE intersections ADD COLUMN num_approaches INTEGER DEFAULT 4;"))
-            conn.commit()
-        except Exception:
-            pass
-        try:
-            conn.execute(text("ALTER TABLE intersections ADD COLUMN approaches_config JSON;"))
-            conn.commit()
-        except Exception:
-            pass
+        for col_stmt in [
+            "ALTER TABLE intersections ADD COLUMN num_approaches INTEGER DEFAULT 4;",
+            "ALTER TABLE intersections ADD COLUMN approaches_config JSON;",
+            "ALTER TABLE blacklist ADD COLUMN directory_type VARCHAR(50) DEFAULT 'SECURITY_WATCHLIST';",
+            "ALTER TABLE blacklist ADD COLUMN severity VARCHAR(50) DEFAULT 'CRITICAL';",
+            "ALTER TABLE blacklist ADD COLUMN vehicle_model VARCHAR(100);",
+            "ALTER TABLE blacklist ADD COLUMN owner_name VARCHAR(100);",
+            "ALTER TABLE blacklist ADD COLUMN fir_number VARCHAR(100);",
+            "ALTER TABLE blacklist ADD COLUMN police_station VARCHAR(100);",
+            "ALTER TABLE blacklist ADD COLUMN auto_alert BOOLEAN DEFAULT 1;",
+            "ALTER TABLE blacklist ADD COLUMN scan_count INTEGER DEFAULT 0;",
+            "ALTER TABLE blacklist ADD COLUMN last_scanned_at DATETIME;",
+        ]:
+            try:
+                conn.execute(text(col_stmt))
+                conn.commit()
+            except Exception:
+                pass
 except Exception:
     pass
 

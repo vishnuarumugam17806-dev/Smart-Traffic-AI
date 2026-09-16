@@ -222,16 +222,32 @@ class PlateObservationOut(BaseModel):
     class Config:
         from_attributes = True
 
-# Blacklist Watchlist
+# Blacklist Watchlist & Directory Management
 class BlacklistCreate(BaseModel):
     plate: str
     reason: str
+    directory_type: Optional[str] = "SECURITY_WATCHLIST" # STOLEN_VEHICLES, SECURITY_WATCHLIST, CHALLAN_DEFAULTER, RTO_COMPLIANCE, VIP_WHITELIST
+    severity: Optional[str] = "CRITICAL" # CRITICAL, HIGH, MEDIUM, LOW
+    vehicle_model: Optional[str] = None
+    owner_name: Optional[str] = None
+    fir_number: Optional[str] = None
+    police_station: Optional[str] = None
+    auto_alert: Optional[bool] = True
     notes: Optional[str] = None
 
 class BlacklistOut(BaseModel):
     id: int
     plate: str
     reason: str
+    directory_type: Optional[str] = "SECURITY_WATCHLIST"
+    severity: Optional[str] = "CRITICAL"
+    vehicle_model: Optional[str] = None
+    owner_name: Optional[str] = None
+    fir_number: Optional[str] = None
+    police_station: Optional[str] = None
+    auto_alert: Optional[bool] = True
+    scan_count: Optional[int] = 0
+    last_scanned_at: Optional[datetime] = None
     created_by: str
     created_at: datetime
     status: str
@@ -243,6 +259,47 @@ class BlacklistOut(BaseModel):
 
     class Config:
         from_attributes = True
+
+# Alias for semantic directory schemas
+DirectoryEntryCreate = BlacklistCreate
+DirectoryEntryOut = BlacklistOut
+
+class DirectoryEntryUpdate(BaseModel):
+    reason: Optional[str] = None
+    directory_type: Optional[str] = None
+    severity: Optional[str] = None
+    vehicle_model: Optional[str] = None
+    owner_name: Optional[str] = None
+    fir_number: Optional[str] = None
+    police_station: Optional[str] = None
+    auto_alert: Optional[bool] = None
+    status: Optional[str] = None
+    notes: Optional[str] = None
+
+# Number Plate Scan & Directory Verification Schemas
+class PlateScanCheckRequest(BaseModel):
+    plate_number: Optional[str] = None
+    image_base64: Optional[str] = None
+    camera_id: Optional[int] = 1
+    location: Optional[str] = "Main Surveillance Junction"
+    source: Optional[str] = "MANUAL_SCAN" # MANUAL_SCAN, LIVE_CCTV, MOBILE_FIELD, FIELD_PHOTO
+    auto_create_alert: Optional[bool] = True
+
+class PlateScanCheckResponse(BaseModel):
+    plate_number: str
+    detected_via: str # OCR or DIRECT_INPUT
+    confidence: float
+    directory_matched: bool
+    matched_directory_type: Optional[str] = None # STOLEN_VEHICLES, SECURITY_WATCHLIST, CHALLAN_DEFAULTER, RTO_COMPLIANCE, VIP_WHITELIST
+    severity: str
+    match_reason: Optional[str] = None
+    directory_entry: Optional[Dict[str, Any]] = None
+    compliance_details: Optional[Dict[str, Any]] = None
+    alert_triggered: bool
+    alert: Optional[Dict[str, Any]] = None
+    recommended_action: str
+    scan_timestamp: str
+    sightings_count: int = 1
 
 # Route Anomaly
 class RouteAnomalyOut(BaseModel):

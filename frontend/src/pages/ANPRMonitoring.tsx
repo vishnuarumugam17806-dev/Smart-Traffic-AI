@@ -1,6 +1,11 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useRef } from 'react';
 import { Link } from 'react-router-dom';
-import { Search, Edit3, Check, X, ShieldAlert, FileText, AlertTriangle, Clock, MapPin, DollarSign, Car, Sparkles, Filter, Route as RouteIcon } from 'lucide-react';
+import {
+  Search, Edit3, Check, X, ShieldAlert, FileText, AlertTriangle,
+  Clock, MapPin, DollarSign, Car, Sparkles, Filter, Route as RouteIcon,
+  Bell, Plus, Trash2, Shield, Radio, Volume2, VolumeX, Eye,
+  RefreshCw, CheckCircle2, Siren, Database, Layers, ArrowRight
+} from 'lucide-react';
 import { apiClient } from '../api/client';
 import { useStore } from '../store/useStore';
 
@@ -31,6 +36,46 @@ interface PerformanceStats {
   fps: number;
 }
 
+interface DirectoryEntry {
+  id: number;
+  plate: string;
+  reason: string;
+  directory_type: string;
+  severity: string;
+  vehicle_model?: string;
+  owner_name?: string;
+  fir_number?: string;
+  police_station?: string;
+  auto_alert?: boolean;
+  scan_count?: number;
+  last_scanned_at?: string;
+  created_by: string;
+  created_at: string;
+  status: string;
+  notes?: string;
+  total_crossings?: number;
+  last_crossing_location?: string;
+  last_crossing_time?: string;
+  sighted?: boolean;
+}
+
+interface ScanCheckResult {
+  plate_number: string;
+  detected_via: string;
+  confidence: number;
+  directory_matched: boolean;
+  matched_directory_type?: string;
+  severity: string;
+  match_reason?: string;
+  directory_entry?: any;
+  compliance_details?: any;
+  alert_triggered: boolean;
+  alert?: any;
+  recommended_action: string;
+  scan_timestamp: string;
+  sightings_count: number;
+}
+
 interface PlateDossier {
   plate_number: string;
   owner_info: {
@@ -54,25 +99,43 @@ interface PlateDossier {
 }
 
 const SAMPLE_TEST_PLATES = [
-  { plate: "TNXX1001", label: "🟢 COMPLIANT (Nexon EV • All Docs Valid)", type: "COMPLIANT", color: "bg-emerald-50 text-emerald-800 border-emerald-300 font-bold" },
-  { plate: "TNXX1002", label: "🔴 ACTION REQUIRED (Creta • Insurance Expired)", type: "ACTION_REQ", color: "bg-red-50 text-red-800 border-red-300 font-bold" },
-  { plate: "TNXX1003", label: "🔴 ACTION REQUIRED (Dzire • PUC Expired)", type: "ACTION_REQ", color: "bg-amber-50 text-amber-800 border-amber-300 font-bold" },
-  { plate: "TNXX1004", label: "🔴 ACTION REQUIRED (Bolero Maxi • Fitness Expired)", type: "ACTION_REQ", color: "bg-orange-50 text-orange-800 border-orange-300 font-bold" },
-  { plate: "TNXX1005", label: "🟠 REVIEW REQUIRED (Scorpio-N • Watchlist Match)", type: "REVIEW_REQ", color: "bg-purple-50 text-purple-800 border-purple-300 font-bold" },
-  { plate: "KA05MN3821", label: "🚨 Stolen Watchlist (Ambulance)", type: "BLACKLIST", color: "bg-red-50 text-red-700 border-red-200" },
-  { plate: "TN01AB1234", label: "🚗 Swift Verna (Video 1 Vehicle)", type: "VIOLATION", color: "bg-slate-50 text-slate-700 border-slate-200" },
-  { plate: "DL02CP9012", label: "🚌 City Bus (Fitness Expiring Soon)", type: "BUS", color: "bg-blue-50 text-blue-700 border-blue-200" },
+  { plate: "KA05MN3821", label: "🚨 Stolen Yamaha FZ (Armed Theft)", category: "STOLEN_VEHICLES", color: "bg-red-50 text-red-800 border-red-300" },
+  { plate: "TN09BZ9999", label: "🚨 Stolen Scorpio-N (Commercial Lot)", category: "STOLEN_VEHICLES", color: "bg-red-50 text-red-800 border-red-300" },
+  { plate: "MH12PQ9999", label: "🛡️ Security Watchlist (Fortuner SUV)", category: "SECURITY_WATCHLIST", color: "bg-purple-50 text-purple-800 border-purple-300" },
+  { plate: "TN01AB1234", label: "⚠️ Challan Defaulter (14 Red-Light Fines)", category: "CHALLAN_DEFAULTER", color: "bg-amber-50 text-amber-800 border-amber-300" },
+  { plate: "TNXX1002", label: "📋 RTO Flag (Insurance Expired Creta)", category: "RTO_COMPLIANCE", color: "bg-orange-50 text-orange-800 border-orange-300" },
+  { plate: "TN01EM9999", label: "🟢 VIP Police Cruiser (Exempt/Convoy)", category: "VIP_WHITELIST", color: "bg-emerald-50 text-emerald-800 border-emerald-300" },
+  { plate: "TNXX1001", label: "🟢 Clean Compliant (Nexon EV Valid Docs)", category: "COMPLIANT", color: "bg-emerald-50 text-emerald-800 border-emerald-300" },
 ];
 
 export const ANPRMonitoring: React.FC = () => {
+  // Navigation Tabs
+  const [activeTab, setActiveTab] = useState<'SCANNER' | 'DIRECTORIES' | 'OBSERVATIONS'>('SCANNER');
+
+  // Observations state
   const [observations, setObservations] = useState<PlateObservation[]>([]);
   const [filterConf, setFilterConf] = useState<string>('ALL');
   const [filterVehicleType, setFilterVehicleType] = useState<string>('ALL');
   const [searchPlate, setSearchPlate] = useState<string>('');
   const { activeLiveUpdate } = useStore();
 
+  // Directories state
+  const [directories, setDirectories] = useState<DirectoryEntry[]>([]);
+  const [loadingDirectories, setLoadingDirectories] = useState<boolean>(false);
+  const [dirTypeFilter, setDirTypeFilter] = useState<string>('ALL');
+  const [dirSeverityFilter, setDirSeverityFilter] = useState<string>('ALL');
+  const [dirSearchQuery, setDirSearchQuery] = useState<string>('');
+
   // Performance Stats state
   const [perfStats, setPerfStats] = useState<PerformanceStats | null>(null);
+
+  // Instant Scanner & Directory Check state
+  const [scanInputPlate, setScanInputPlate] = useState<string>('KA05MN3821');
+  const [scanLocation, setScanLocation] = useState<string>('Anna Salai - Spencers Junction');
+  const [scanAutoAlert, setScanAutoAlert] = useState<boolean>(true);
+  const [isScanning, setIsScanning] = useState<boolean>(false);
+  const [scanResult, setScanResult] = useState<ScanCheckResult | null>(null);
+  const [audioAlertEnabled, setAudioAlertEnabled] = useState<boolean>(true);
 
   // Human Feedback Loop states
   const [editingId, setEditingId] = useState<number | null>(null);
@@ -81,16 +144,59 @@ export const ANPRMonitoring: React.FC = () => {
   // Dossier Modal state
   const [selectedDossier, setSelectedDossier] = useState<PlateDossier | null>(null);
   const [loadingDossier, setLoadingDossier] = useState<boolean>(false);
-  const [seedingPlates, setSeedingPlates] = useState<boolean>(false);
-  const [seedSuccessMsg, setSeedSuccessMsg] = useState<string | null>(null);
 
-  // Manual Watchlist Tracking states
-  const [showTrackModal, setShowTrackModal] = useState<boolean>(false);
-  const [trackPlateInput, setTrackPlateInput] = useState<string>('');
-  const [trackReasonInput, setTrackReasonInput] = useState<string>('Suspected Stolen Vehicle');
-  const [trackNotesInput, setTrackNotesInput] = useState<string>('');
-  const [watchlistPlates, setWatchlistPlates] = useState<string[]>([]);
-  const [trackingSuccessMsg, setTrackingSuccessMsg] = useState<string | null>(null);
+  // Add to Directory Modal states
+  const [showAddDirModal, setShowAddDirModal] = useState<boolean>(false);
+  const [newPlate, setNewPlate] = useState<string>('');
+  const [newDirType, setNewDirType] = useState<string>('STOLEN_VEHICLES');
+  const [newSeverity, setNewSeverity] = useState<string>('CRITICAL');
+  const [newReason, setNewReason] = useState<string>('Armed Robbery Getaway Vehicle');
+  const [newModel, setNewModel] = useState<string>('');
+  const [newOwner, setNewOwner] = useState<string>('');
+  const [newFIR, setNewFIR] = useState<string>('');
+  const [newStation, setNewStation] = useState<string>('Anna Salai PS');
+  const [newAutoAlert, setNewAutoAlert] = useState<boolean>(true);
+  const [newNotes, setNewNotes] = useState<string>('');
+
+  // Notifications
+  const [bannerMessage, setBannerMessage] = useState<{ type: 'success' | 'alert' | 'info'; text: string } | null>(null);
+
+  // Web Audio Synthesized Chime
+  const playAlertSound = (severity: string) => {
+    if (!audioAlertEnabled) return;
+    try {
+      const AudioCtx = window.AudioContext || (window as any).webkitAudioContext;
+      if (!AudioCtx) return;
+      const ctx = new AudioCtx();
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      osc.connect(gain);
+      gain.connect(ctx.destination);
+
+      if (severity === 'CRITICAL' || severity === 'HIGH') {
+        // Urgent alternating siren
+        osc.type = 'sawtooth';
+        osc.frequency.setValueAtTime(880, ctx.currentTime);
+        osc.frequency.setValueAtTime(660, ctx.currentTime + 0.15);
+        osc.frequency.setValueAtTime(880, ctx.currentTime + 0.3);
+        gain.gain.setValueAtTime(0.2, ctx.currentTime);
+        gain.gain.exponentialRampToValueAtTime(0.01, ctx.currentTime + 0.55);
+        osc.start(ctx.currentTime);
+        osc.stop(ctx.currentTime + 0.55);
+      } else {
+        // Confirmation tone
+        osc.type = 'sine';
+        osc.frequency.setValueAtTime(523.25, ctx.currentTime);
+        osc.frequency.exponentialRampToValueAtTime(783.99, ctx.currentTime + 0.2);
+        gain.gain.setValueAtTime(0.15, ctx.currentTime);
+        gain.gain.exponentialRampToValueAtTime(0.01, ctx.currentTime + 0.3);
+        osc.start(ctx.currentTime);
+        osc.stop(ctx.currentTime + 0.3);
+      }
+    } catch (e) {
+      // Audio context policy fallback
+    }
+  };
 
   const fetchObservations = async () => {
     try {
@@ -98,7 +204,6 @@ export const ANPRMonitoring: React.FC = () => {
       if (Array.isArray(res.data) && res.data.length > 0) {
         setObservations(res.data);
       } else if (Array.isArray(res.data) && res.data.length === 0) {
-        // Auto-seed plates if backend database is fresh
         apiClient.post('/anpr/seed-examples').then(() => {
           apiClient.get('/anpr/observations').then(r => {
             if (Array.isArray(r.data) && r.data.length > 0) setObservations(r.data);
@@ -108,33 +213,29 @@ export const ANPRMonitoring: React.FC = () => {
     } catch (err) {
       console.warn('Using local ANPR plate observations while backend connects:', err);
     }
-
-    // Load active watchlist tracked plates
-    try {
-      const wRes = await apiClient.get('/watchlist');
-      if (Array.isArray(wRes.data)) {
-        setWatchlistPlates(wRes.data.map((w: any) => (w.plate || '').toUpperCase().replace(/[\s-]/g, '')));
-      }
-    } catch (err) {}
   };
 
-  const handleAddTrackVehicle = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!trackPlateInput.trim()) return;
+  const fetchDirectories = async () => {
+    setLoadingDirectories(true);
     try {
-      const cleanPlate = trackPlateInput.toUpperCase().replace(/[\s-]/g, '');
-      await apiClient.post('/watchlist', {
-        plate: cleanPlate,
-        reason: trackReasonInput,
-        notes: trackNotesInput
-      });
-      setWatchlistPlates((prev) => [...prev, cleanPlate]);
-      setShowTrackModal(false);
-      setTrackingSuccessMsg(`Vehicle ${cleanPlate} successfully added to surveillance watchlist. System will alert when crossed at any signal.`);
-      setTimeout(() => setTrackingSuccessMsg(null), 6000);
-      fetchObservations();
+      let url = '/anpr/directories?';
+      if (dirTypeFilter !== 'ALL') url += `directory_type=${dirTypeFilter}&`;
+      if (dirSeverityFilter !== 'ALL') url += `severity=${dirSeverityFilter}&`;
+      if (dirSearchQuery.trim()) url += `search=${encodeURIComponent(dirSearchQuery)}&`;
+
+      const res = await apiClient.get(url);
+      if (Array.isArray(res.data) && res.data.length > 0) {
+        setDirectories(res.data);
+      } else if (Array.isArray(res.data) && res.data.length === 0 && dirTypeFilter === 'ALL') {
+        // Auto-seed directories if table is clean
+        await apiClient.post('/anpr/directories/seed');
+        const r = await apiClient.get('/anpr/directories');
+        if (Array.isArray(r.data)) setDirectories(r.data);
+      }
     } catch (err) {
-      console.error('Error adding vehicle to watchlist:', err);
+      console.warn('Using resilient directory records:', err);
+    } finally {
+      setLoadingDirectories(false);
     }
   };
 
@@ -145,7 +246,6 @@ export const ANPRMonitoring: React.FC = () => {
         setPerfStats(res.data);
       }
     } catch (err) {
-      // Use fallback stats if backend waking up
       setPerfStats({
         exact_accuracy: 96.8,
         char_accuracy: 98.4,
@@ -171,31 +271,159 @@ export const ANPRMonitoring: React.FC = () => {
     }
   };
 
-  const handleSeedPlates = async () => {
-    setSeedingPlates(true);
-    try {
-      const res = await apiClient.post('/anpr/seed-examples');
-      await fetchObservations();
-      setSeedSuccessMsg(res.data.message || 'Seeded 40+ diverse Indian number plate observations!');
-      setTimeout(() => setSeedSuccessMsg(null), 4000);
-    } catch (err) {
-      console.error('Error seeding plates:', err);
-    } finally {
-      setSeedingPlates(false);
-    }
-  };
-
   useEffect(() => {
     fetchObservations();
+    fetchDirectories();
     fetchPerformance();
   }, []);
 
   useEffect(() => {
-    if (activeLiveUpdate && activeLiveUpdate.event === 'PLATE_DETECTED') {
-      fetchObservations();
+    fetchDirectories();
+  }, [dirTypeFilter, dirSeverityFilter, dirSearchQuery]);
+
+  // Live WebSocket listener
+  useEffect(() => {
+    if (activeLiveUpdate) {
+      if (activeLiveUpdate.event === 'PLATE_DETECTED') {
+        fetchObservations();
+      }
+      if (activeLiveUpdate.event === 'DIRECTORY_UPDATED' || activeLiveUpdate.event === 'WATCHLIST_UPDATED') {
+        fetchDirectories();
+      }
+      if (activeLiveUpdate.event === 'PLATE_SCANNED_MATCH' || activeLiveUpdate.event === 'ALERT_CREATED') {
+        fetchObservations();
+        fetchDirectories();
+      }
     }
   }, [activeLiveUpdate]);
 
+  // Execute Plate Scan & Directory Check
+  const handleScanPlate = async (overridePlate?: string) => {
+    const target = (overridePlate || scanInputPlate || '').toUpperCase().replace(/[\s-]/g, '');
+    if (!target) return;
+
+    setIsScanning(true);
+    setScanResult(null);
+
+    try {
+      const res = await apiClient.post('/anpr/scan-check', {
+        plate_number: target,
+        location: scanLocation,
+        source: 'MANUAL_SCAN',
+        auto_create_alert: scanAutoAlert
+      });
+
+      const data: ScanCheckResult = res.data;
+      setScanResult(data);
+
+      if (data.alert_triggered) {
+        playAlertSound(data.severity);
+        setBannerMessage({
+          type: 'alert',
+          text: `🚨 AUTOMATIC ALERT TRIGGERED: Plate ${data.plate_number} identified in ${data.matched_directory_type}! Alert #${data.alert?.id} broadcasted.`
+        });
+      } else if (data.directory_matched) {
+        playAlertSound('LOW');
+        setBannerMessage({
+          type: 'info',
+          text: `Vehicle ${data.plate_number} identified in ${data.matched_directory_type}. Action: ${data.recommended_action}`
+        });
+      } else {
+        setBannerMessage({
+          type: 'success',
+          text: `Vehicle ${data.plate_number} checked across all 5 directories. Status: Fully Clear & Compliant.`
+        });
+      }
+
+      fetchObservations();
+      fetchDirectories();
+      setTimeout(() => setBannerMessage(null), 6500);
+    } catch (err: any) {
+      console.error('Scan error:', err);
+      setBannerMessage({
+        type: 'alert',
+        text: err.response?.data?.detail || 'Failed to scan and verify plate against directories.'
+      });
+      setTimeout(() => setBannerMessage(null), 4000);
+    } finally {
+      setIsScanning(false);
+    }
+  };
+
+  // Add vehicle to directory
+  const handleAddDirectoryEntry = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!newPlate.trim()) return;
+
+    try {
+      const cleanP = newPlate.toUpperCase().replace(/[\s-]/g, '');
+      await apiClient.post('/anpr/directories', {
+        plate: cleanP,
+        directory_type: newDirType,
+        severity: newSeverity,
+        reason: newReason,
+        vehicle_model: newModel || undefined,
+        owner_name: newOwner || undefined,
+        fir_number: newFIR || undefined,
+        police_station: newStation || undefined,
+        auto_alert: newAutoAlert,
+        notes: newNotes || undefined
+      });
+
+      setShowAddDirModal(false);
+      setNewPlate('');
+      setNewModel('');
+      setNewOwner('');
+      setNewFIR('');
+      setNewNotes('');
+      setBannerMessage({
+        type: 'success',
+        text: `Vehicle ${cleanP} successfully registered into ${newDirType} directory. Auto-alert: ${newAutoAlert ? 'Active' : 'Muted'}.`
+      });
+      setTimeout(() => setBannerMessage(null), 4000);
+      fetchDirectories();
+    } catch (err: any) {
+      alert(err.response?.data?.detail || 'Failed to register vehicle into directory.');
+    }
+  };
+
+  // Delete directory entry
+  const handleDeleteDirectoryEntry = async (id: number, plate: string) => {
+    if (!window.confirm(`Remove vehicle ${plate} from directories?`)) return;
+    try {
+      await apiClient.delete(`/anpr/directories/${id}`);
+      setDirectories(prev => prev.filter(d => d.id !== id));
+      setBannerMessage({ type: 'info', text: `Vehicle ${plate} removed from active directories.` });
+      setTimeout(() => setBannerMessage(null), 3000);
+    } catch (err) {
+      console.error('Error deleting directory entry:', err);
+    }
+  };
+
+  // Toggle entry status (Active / Resolved)
+  const handleToggleEntryStatus = async (entry: DirectoryEntry) => {
+    const nextStatus = entry.status === 'ACTIVE' ? 'RESOLVED' : 'ACTIVE';
+    try {
+      await apiClient.put(`/anpr/directories/${entry.id}`, { status: nextStatus });
+      setDirectories(prev => prev.map(d => d.id === entry.id ? { ...d, status: nextStatus } : d));
+    } catch (err) {
+      console.error('Error updating status:', err);
+    }
+  };
+
+  // Seed default multi-category directories
+  const handleSeedDirectories = async () => {
+    try {
+      const res = await apiClient.post('/anpr/directories/seed');
+      fetchDirectories();
+      setBannerMessage({ type: 'success', text: res.data.message || 'Seeded multi-category directories!' });
+      setTimeout(() => setBannerMessage(null), 4000);
+    } catch (err) {
+      console.error('Error seeding directories:', err);
+    }
+  };
+
+  // Correction feedback
   const handleCorrectPlate = async (obsId: number) => {
     if (!correctedText.trim()) return;
     try {
@@ -230,633 +458,783 @@ export const ANPRMonitoring: React.FC = () => {
     return true;
   });
 
+  // Directory Category Count Helpers
+  const stolenCount = directories.filter(d => d.directory_type === 'STOLEN_VEHICLES' && d.status === 'ACTIVE').length;
+  const watchlistCount = directories.filter(d => d.directory_type === 'SECURITY_WATCHLIST' && d.status === 'ACTIVE').length;
+  const defaulterCount = directories.filter(d => d.directory_type === 'CHALLAN_DEFAULTER' && d.status === 'ACTIVE').length;
+  const complianceCount = directories.filter(d => d.directory_type === 'RTO_COMPLIANCE' && d.status === 'ACTIVE').length;
+  const whitelistCount = directories.filter(d => d.directory_type === 'VIP_WHITELIST' && d.status === 'ACTIVE').length;
+
   return (
-    <div className="p-3 sm:p-6 space-y-4 sm:space-y-6 bg-[#F7F9FB] overflow-x-hidden min-h-screen">
+    <div className="p-3 sm:p-6 space-y-5 bg-[#F7F9FB] overflow-x-hidden min-h-screen">
       {/* Page Header */}
       <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 border-b border-[#DCE4EA] pb-4">
         <div>
           <h1 className="text-base sm:text-lg font-bold text-slate-800 tracking-tight uppercase flex items-center gap-2">
-            <Car className="w-5 h-5 text-[#245B84]" /> HIGH-ACCURACY ANPR MONITORING & DOSSIER SEARCH
+            <Car className="w-5 h-5 text-[#245B84]" /> NUMBER PLATE RECOGNITION & DIRECTORY MANAGEMENT
           </h1>
           <p className="text-xs text-slate-500 font-mono mt-0.5">
-            Real-Time Multi-State License Plate Recognition, OCR Confidence Scoring & Complete Vehicle Dossiers
+            Cross-Reference Scanned Plates Against Stolen, Watchlist, Challan Defaulters & RTO Directories with Automatic Real-Time Alerting
           </p>
         </div>
-        
-        <div className="flex items-center gap-2">
-          {searchPlate && (
-            <button
-              onClick={() => fetchDossier(searchPlate)}
-              className="px-3.5 py-2 bg-blue-600 hover:bg-blue-700 text-white font-bold text-xs rounded-lg flex items-center gap-1.5 shadow-sm font-mono"
-            >
-              <FileText className="w-4 h-4" /> DOSSIER FOR "{searchPlate.toUpperCase()}"
-            </button>
-          )}
 
+        <div className="flex items-center gap-2 flex-wrap">
+          {/* Audio Chime Toggle */}
           <button
-            onClick={() => { setTrackPlateInput(searchPlate || ''); setShowTrackModal(true); }}
-            className="px-3.5 py-2 bg-red-600 hover:bg-red-700 text-white font-bold text-xs rounded-lg flex items-center gap-1.5 shadow-sm font-mono transition-colors"
-            title="Add a license plate to track if the vehicle crossed in any traffic signal"
+            onClick={() => setAudioAlertEnabled(prev => !prev)}
+            className={`px-3 py-1.5 rounded-lg border text-xs font-mono font-bold flex items-center gap-1.5 transition-colors shadow-2xs ${
+              audioAlertEnabled ? 'bg-emerald-50 text-emerald-800 border-emerald-300' : 'bg-slate-100 text-slate-600 border-slate-300'
+            }`}
+            title="Toggle audible siren chimes on directory match alerts"
           >
-            <ShieldAlert className="w-4 h-4 text-white" />
-            <span>+ Track Vehicle at Signals</span>
+            {audioAlertEnabled ? <Volume2 className="w-3.5 h-3.5 text-emerald-600" /> : <VolumeX className="w-3.5 h-3.5 text-slate-400" />}
+            <span>{audioAlertEnabled ? 'Chimes ON' : 'Muted'}</span>
           </button>
 
+          {/* Add to Directory */}
           <button
-            onClick={handleSeedPlates}
-            disabled={seedingPlates}
-            className="px-3.5 py-2 bg-[#245B84] hover:bg-[#1E4A6F] text-white font-bold text-xs rounded-lg flex items-center gap-1.5 shadow-sm font-mono transition-colors"
-            title="Seed diverse test plates across Indian state formats"
+            onClick={() => setShowAddDirModal(true)}
+            className="px-3.5 py-1.5 bg-red-600 hover:bg-red-700 text-white font-bold text-xs rounded-lg flex items-center gap-1.5 shadow-sm font-mono transition-colors"
           >
-            <Sparkles className="w-4 h-4 text-amber-300" />
-            <span>{seedingPlates ? 'Seeding...' : 'Seed Test Plates'}</span>
+            <Plus className="w-4 h-4" /> Add Vehicle to Directory
+          </button>
+
+          {/* Seed Directories */}
+          <button
+            onClick={handleSeedDirectories}
+            className="px-3 py-1.5 bg-[#245B84] hover:bg-[#1E4A6F] text-white font-bold text-xs rounded-lg flex items-center gap-1.5 shadow-sm font-mono transition-colors"
+            title="Seed police stolen registry, watchlist suspects & RTO defaulters"
+          >
+            <Sparkles className="w-3.5 h-3.5 text-amber-300" />
+            <span>Seed Directories</span>
           </button>
         </div>
       </div>
 
-      {/* Tracking Success banner */}
-      {trackingSuccessMsg && (
-        <div className="p-3 bg-red-50 text-red-800 border border-red-200 rounded-lg text-xs font-mono flex items-center gap-2 animate-fadeIn shadow-xs">
-          <ShieldAlert className="w-4 h-4 text-red-600 shrink-0" />
-          <span className="font-bold">{trackingSuccessMsg}</span>
+      {/* Global Notification Banner */}
+      {bannerMessage && (
+        <div className={`p-3.5 rounded-xl border text-xs font-mono flex items-center justify-between gap-2 animate-fadeIn shadow-sm ${
+          bannerMessage.type === 'alert'
+            ? 'bg-red-50 text-red-900 border-red-300 animate-pulse'
+            : bannerMessage.type === 'success'
+            ? 'bg-emerald-50 text-emerald-900 border-emerald-300'
+            : 'bg-blue-50 text-blue-900 border-blue-300'
+        }`}>
+          <div className="flex items-center gap-2">
+            {bannerMessage.type === 'alert' ? (
+              <Siren className="w-5 h-5 text-red-600 shrink-0" />
+            ) : bannerMessage.type === 'success' ? (
+              <CheckCircle2 className="w-5 h-5 text-emerald-600 shrink-0" />
+            ) : (
+              <Shield className="w-5 h-5 text-blue-600 shrink-0" />
+            )}
+            <span className="font-bold">{bannerMessage.text}</span>
+          </div>
+          <button onClick={() => setBannerMessage(null)} className="text-slate-400 hover:text-slate-700">✕</button>
         </div>
       )}
 
-      {/* Success banner if seeded */}
-      {seedSuccessMsg && (
-        <div className="p-3 bg-[#EAF7EF] text-[#2E7D5B] border border-[#D2EADA] rounded-lg text-xs font-mono flex items-center gap-2 animate-fadeIn">
-          <Check className="w-4 h-4" />
-          <span>{seedSuccessMsg}</span>
+      {/* Directory Metrics Summary Cards */}
+      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3">
+        <div
+          onClick={() => { setActiveTab('DIRECTORIES'); setDirTypeFilter('STOLEN_VEHICLES'); }}
+          className="bg-white p-3.5 rounded-xl border border-red-200 shadow-2xs hover:border-red-400 cursor-pointer transition-all"
+        >
+          <div className="flex items-center justify-between">
+            <span className="text-[10px] font-mono font-bold text-red-700 uppercase">Stolen Registry</span>
+            <span className="p-1 rounded bg-red-100 text-red-600"><Siren className="w-3.5 h-3.5" /></span>
+          </div>
+          <h3 className="text-2xl font-black text-red-600 font-mono mt-1">{stolenCount}</h3>
+          <span className="text-[9px] text-slate-500 font-mono">Critical auto-intercept</span>
         </div>
-      )}
 
-      {/* Sample Test Plates Bar (Click to Inspect) */}
-      <div className="bg-white p-3.5 rounded-lg border border-[#DCE4EA] shadow-xs space-y-2">
-        <div className="flex items-center justify-between">
-          <span className="text-[10px] font-mono font-bold text-slate-500 uppercase flex items-center gap-1">
-            <Sparkles className="w-3.5 h-3.5 text-amber-500" /> Quick-Test Sample Plates (Click to Inspect Full Dossier)
-          </span>
-          <span className="text-[10px] text-slate-400 font-mono hidden md:inline">
-            Includes Watchlist Stolen, Violators, Anomalies & EV Registrations
-          </span>
+        <div
+          onClick={() => { setActiveTab('DIRECTORIES'); setDirTypeFilter('SECURITY_WATCHLIST'); }}
+          className="bg-white p-3.5 rounded-xl border border-purple-200 shadow-2xs hover:border-purple-400 cursor-pointer transition-all"
+        >
+          <div className="flex items-center justify-between">
+            <span className="text-[10px] font-mono font-bold text-purple-700 uppercase">Security Watchlist</span>
+            <span className="p-1 rounded bg-purple-100 text-purple-600"><ShieldAlert className="w-3.5 h-3.5" /></span>
+          </div>
+          <h3 className="text-2xl font-black text-purple-600 font-mono mt-1">{watchlistCount}</h3>
+          <span className="text-[9px] text-slate-500 font-mono">Perimeter & suspect watch</span>
         </div>
-        <div className="flex flex-wrap gap-2">
-          {SAMPLE_TEST_PLATES.map((sample) => (
-            <button
-              key={sample.plate}
-              onClick={() => {
-                setSearchPlate(sample.plate);
-                fetchDossier(sample.plate);
-              }}
-              className={`px-2.5 py-1.5 rounded-lg border text-xs font-mono font-bold flex items-center gap-1.5 hover:scale-105 transition-transform shadow-2xs ${sample.color}`}
-            >
-              <span className="px-1.5 py-0.5 bg-black/10 rounded tracking-wider">{sample.plate}</span>
-              <span className="text-[10px] font-medium opacity-80">{sample.label}</span>
-            </button>
-          ))}
+
+        <div
+          onClick={() => { setActiveTab('DIRECTORIES'); setDirTypeFilter('CHALLAN_DEFAULTER'); }}
+          className="bg-white p-3.5 rounded-xl border border-amber-200 shadow-2xs hover:border-amber-400 cursor-pointer transition-all"
+        >
+          <div className="flex items-center justify-between">
+            <span className="text-[10px] font-mono font-bold text-amber-700 uppercase">Impound Defaulters</span>
+            <span className="p-1 rounded bg-amber-100 text-amber-600"><AlertTriangle className="w-3.5 h-3.5" /></span>
+          </div>
+          <h3 className="text-2xl font-black text-amber-600 font-mono mt-1">{defaulterCount}</h3>
+          <span className="text-[9px] text-slate-500 font-mono">Unpaid violation warrants</span>
+        </div>
+
+        <div
+          onClick={() => { setActiveTab('DIRECTORIES'); setDirTypeFilter('RTO_COMPLIANCE'); }}
+          className="bg-white p-3.5 rounded-xl border border-orange-200 shadow-2xs hover:border-orange-400 cursor-pointer transition-all"
+        >
+          <div className="flex items-center justify-between">
+            <span className="text-[10px] font-mono font-bold text-orange-700 uppercase">RTO Compliance</span>
+            <span className="p-1 rounded bg-orange-100 text-orange-600"><FileText className="w-3.5 h-3.5" /></span>
+          </div>
+          <h3 className="text-2xl font-black text-orange-600 font-mono mt-1">{complianceCount}</h3>
+          <span className="text-[9px] text-slate-500 font-mono">Expired insurance / PUC</span>
+        </div>
+
+        <div
+          onClick={() => { setActiveTab('DIRECTORIES'); setDirTypeFilter('VIP_WHITELIST'); }}
+          className="bg-white p-3.5 rounded-xl border border-emerald-200 shadow-2xs hover:border-emerald-400 cursor-pointer transition-all col-span-2 sm:col-span-1"
+        >
+          <div className="flex items-center justify-between">
+            <span className="text-[10px] font-mono font-bold text-emerald-700 uppercase">VIP / Emergency</span>
+            <span className="p-1 rounded bg-emerald-100 text-emerald-600"><CheckCircle2 className="w-3.5 h-3.5" /></span>
+          </div>
+          <h3 className="text-2xl font-black text-emerald-600 font-mono mt-1">{whitelistCount}</h3>
+          <span className="text-[9px] text-slate-500 font-mono">Priority green corridor</span>
         </div>
       </div>
 
-      {/* Model Performance Scorecard Grid */}
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-4">
-        <div className="bg-[#EEF6FC] p-4 rounded border border-[#DCE4EA] flex flex-col justify-between">
-          <p className="text-[10px] font-mono font-bold text-slate-500 uppercase">Exact Plate Accuracy</p>
-          <h3 className="text-2xl font-bold text-[#245B84] font-mono mt-1">
-            {perfStats ? `${(perfStats.exact_accuracy * 100).toFixed(1)}%` : '95.4%'}
-          </h3>
-          <span className="text-[9px] text-[#245B84] font-mono">Validation set accuracy</span>
-        </div>
-        <div className="bg-[#E8F6F5] p-4 rounded border border-[#DCE4EA] flex flex-col justify-between">
-          <p className="text-[10px] font-mono font-bold text-slate-500 uppercase">Character Accuracy</p>
-          <h3 className="text-2xl font-bold text-teal-600 font-mono mt-1">
-            {perfStats ? `${(perfStats.char_accuracy * 100).toFixed(1)}%` : '97.8%'}
-          </h3>
-          <span className="text-[9px] text-teal-600 font-mono">Character classification</span>
-        </div>
-        <div className="bg-[#F3FAF5] p-4 rounded border border-[#DCE4EA] flex flex-col justify-between">
-          <p className="text-[10px] font-mono font-bold text-slate-500 uppercase">Model F1 Score</p>
-          <h3 className="text-2xl font-bold text-emerald-600 font-mono mt-1">
-            {perfStats ? `${(perfStats.f1_score * 100).toFixed(1)}%` : '96.2%'}
-          </h3>
-          <span className="text-[9px] text-emerald-600 font-mono">Precision-Recall blend</span>
-        </div>
-        <div className="bg-[#FFF5DD] p-4 rounded border border-[#DCE4EA] flex flex-col justify-between">
-          <p className="text-[10px] font-mono font-bold text-slate-500 uppercase">OCR Latency</p>
-          <h3 className="text-2xl font-bold text-amber-600 font-mono mt-1">
-            {perfStats ? `${perfStats.latency_ms} ms` : '38 ms'}
-          </h3>
-          <span className="text-[9px] text-amber-600 font-mono">Per crop inference time</span>
-        </div>
-        <div className="bg-[#EEF2F5] p-4 rounded border border-[#DCE4EA] flex flex-col justify-between">
-          <p className="text-[10px] font-mono font-bold text-slate-500 uppercase">Processing Rate</p>
-          <h3 className="text-2xl font-bold text-slate-700 font-mono mt-1">
-            {perfStats ? `${perfStats.fps} FPS` : '30.0 FPS'}
-          </h3>
-          <span className="text-[9px] text-slate-500 font-mono">YOLOv8 + OCR threads</span>
-        </div>
+      {/* Navigation Tabs Bar */}
+      <div className="flex items-center gap-2 border-b border-[#DCE4EA] pb-1">
+        <button
+          onClick={() => setActiveTab('SCANNER')}
+          className={`px-4 py-2 text-xs font-mono font-bold rounded-t-lg transition-all flex items-center gap-2 ${
+            activeTab === 'SCANNER'
+              ? 'bg-white border-t-2 border-t-[#245B84] text-[#245B84] shadow-xs'
+              : 'text-slate-500 hover:text-slate-800'
+          }`}
+        >
+          <Radio className="w-4 h-4 text-[#245B84]" /> Instant Plate Scanner & Auto-Alert
+        </button>
+
+        <button
+          onClick={() => setActiveTab('DIRECTORIES')}
+          className={`px-4 py-2 text-xs font-mono font-bold rounded-t-lg transition-all flex items-center gap-2 ${
+            activeTab === 'DIRECTORIES'
+              ? 'bg-white border-t-2 border-t-[#245B84] text-[#245B84] shadow-xs'
+              : 'text-slate-500 hover:text-slate-800'
+          }`}
+        >
+          <Database className="w-4 h-4 text-purple-600" /> Directory Management ({directories.length})
+        </button>
+
+        <button
+          onClick={() => setActiveTab('OBSERVATIONS')}
+          className={`px-4 py-2 text-xs font-mono font-bold rounded-t-lg transition-all flex items-center gap-2 ${
+            activeTab === 'OBSERVATIONS'
+              ? 'bg-white border-t-2 border-t-[#245B84] text-[#245B84] shadow-xs'
+              : 'text-slate-500 hover:text-slate-800'
+          }`}
+        >
+          <Layers className="w-4 h-4 text-slate-600" /> Live ANPR Sightings ({observations.length})
+        </button>
       </div>
 
-      {/* Filters & Search Panel */}
-      <div className="bg-white p-3 sm:p-4 rounded-lg border border-[#DCE4EA] space-y-3 shadow-xs">
-        <div className="flex flex-col md:flex-row md:items-center justify-between gap-3">
-          <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2.5">
-            <div className="relative">
-              <Search className="w-4 h-4 text-slate-400 absolute left-3 top-2.5" />
-              <input
-                type="text"
-                placeholder="Search number plate..."
-                value={searchPlate}
-                onChange={(e) => setSearchPlate(e.target.value)}
-                className="pl-9 pr-4 py-2 bg-slate-50 border border-[#DCE4EA] rounded text-xs text-slate-800 placeholder-slate-400 w-full sm:w-64 font-mono focus:border-[#245B84] focus:outline-none uppercase font-bold"
-              />
-              {searchPlate && (
-                <button
-                  onClick={() => setSearchPlate('')}
-                  className="absolute right-2.5 top-2.5 text-slate-400 hover:text-slate-600 text-xs font-bold"
-                >
-                  ×
-                </button>
-              )}
+      {/* ========================================================================= */}
+      {/* TAB 1: INSTANT PLATE SCANNER & AUTOMATIC DIRECTORY ALERT TRIGGER */}
+      {/* ========================================================================= */}
+      {activeTab === 'SCANNER' && (
+        <div className="space-y-4">
+          {/* Scanner Input Panel */}
+          <div className="bg-white p-5 rounded-2xl border border-[#DCE4EA] shadow-xs space-y-4">
+            <div className="flex flex-col md:flex-row md:items-center justify-between gap-3 border-b border-slate-100 pb-3">
+              <div>
+                <h2 className="text-sm font-bold text-slate-800 uppercase font-mono flex items-center gap-2">
+                  <Radio className="w-4 h-4 text-red-500 animate-pulse" /> Live Number Plate Recognition & Directory Cross-Check
+                </h2>
+                <p className="text-xs text-slate-500 font-mono mt-0.5">
+                  Type or click a vehicle plate to instantly check all 5 directories and trigger automated real-time dispatch alerts.
+                </p>
+              </div>
+
+              <div className="flex items-center gap-3">
+                <label className="flex items-center gap-2 text-xs font-mono text-slate-700 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={scanAutoAlert}
+                    onChange={(e) => setScanAutoAlert(e.target.checked)}
+                    className="w-4 h-4 text-red-600 rounded focus:ring-red-500"
+                  />
+                  <span className="font-bold">Auto-Trigger Alert on Match</span>
+                </label>
+              </div>
             </div>
 
-            {/* Confidence filters */}
-            <div className="flex flex-wrap bg-[#EEF4F8] p-1 rounded border border-[#DCE4EA] text-[10px] font-mono gap-1">
-              <button
-                onClick={() => setFilterConf('ALL')}
-                className={`px-2.5 py-1 rounded font-bold transition-colors ${filterConf === 'ALL' ? 'bg-[#245B84] text-white' : 'text-slate-650 hover:text-slate-900'}`}
-              >
-                ALL MATCHES
-              </button>
-              <button
-                onClick={() => setFilterConf('HIGH')}
-                className={`px-2.5 py-1 rounded font-bold transition-colors ${filterConf === 'HIGH' ? 'bg-[#DFF1E5] text-[#5E9C72] border border-[#C2E5D0]' : 'text-slate-650 hover:text-slate-900'}`}
-              >
-                HIGH (&gt;90%)
-              </button>
-              <button
-                onClick={() => setFilterConf('MID')}
-                className={`px-2.5 py-1 rounded font-bold transition-colors ${filterConf === 'MID' ? 'bg-[#FFF1C9] text-[#C49A4A] border border-[#FCE1A2]' : 'text-slate-650 hover:text-slate-900'}`}
-              >
-                MID (70-90%)
-              </button>
-              <button
-                onClick={() => setFilterConf('LOW')}
-                className={`px-2.5 py-1 rounded font-bold transition-colors ${filterConf === 'LOW' ? 'bg-[#F7DCDD] text-[#C85D5D] border border-[#F3BFC0]' : 'text-slate-650 hover:text-slate-900'}`}
-              >
-                LOW (&lt;70%)
-              </button>
+            {/* Quick Test Sample Plates */}
+            <div className="space-y-1.5">
+              <span className="text-[10px] font-mono font-bold text-slate-500 uppercase flex items-center gap-1">
+                <Sparkles className="w-3.5 h-3.5 text-amber-500" /> Quick-Test Preset Vehicles (Click to Scan & Verify):
+              </span>
+              <div className="flex flex-wrap gap-2">
+                {SAMPLE_TEST_PLATES.map((sample) => (
+                  <button
+                    key={sample.plate}
+                    onClick={() => {
+                      setScanInputPlate(sample.plate);
+                      handleScanPlate(sample.plate);
+                    }}
+                    className={`px-3 py-1.5 rounded-lg border text-xs font-mono font-bold flex items-center gap-2 hover:scale-105 transition-transform shadow-2xs ${sample.color}`}
+                  >
+                    <span className="px-1.5 py-0.5 bg-black/10 rounded tracking-wider">{sample.plate}</span>
+                    <span className="text-[10px] opacity-80">{sample.label}</span>
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {/* Input Bar */}
+            <div className="grid grid-cols-1 md:grid-cols-12 gap-3 pt-2">
+              <div className="md:col-span-5">
+                <label className="block text-[10px] font-bold text-slate-500 uppercase font-mono mb-1">
+                  License Plate Number to Scan
+                </label>
+                <div className="relative flex items-center">
+                  <input
+                    type="text"
+                    value={scanInputPlate}
+                    onChange={(e) => setScanInputPlate(e.target.value)}
+                    onKeyDown={(e) => { if (e.key === 'Enter') handleScanPlate(); }}
+                    placeholder="e.g. KA05MN3821"
+                    className="w-full bg-[#F6F8FA] border-2 border-slate-300 focus:border-[#245B84] rounded-xl px-3.5 py-2.5 text-sm font-extrabold font-mono tracking-widest text-slate-900 uppercase focus:outline-none shadow-2xs"
+                  />
+                  {scanInputPlate && (
+                    <button
+                      onClick={() => setScanInputPlate('')}
+                      className="absolute right-3 text-slate-400 hover:text-slate-600 text-xs"
+                    >
+                      ✕
+                    </button>
+                  )}
+                </div>
+              </div>
+
+              <div className="md:col-span-4">
+                <label className="block text-[10px] font-bold text-slate-500 uppercase font-mono mb-1">
+                  Surveillance Camera / Location
+                </label>
+                <select
+                  value={scanLocation}
+                  onChange={(e) => setScanLocation(e.target.value)}
+                  className="w-full bg-[#F6F8FA] border border-slate-300 rounded-xl px-3 py-2.5 text-xs font-bold text-slate-800 font-mono focus:outline-none"
+                >
+                  <option value="Anna Salai - Spencers Junction">Anna Salai - Spencers Junction (CCTV-01)</option>
+                  <option value="Chennai Central - Ripon Cross">Chennai Central - Ripon Cross (CCTV-02)</option>
+                  <option value="Gemini Flyover Circle">Gemini Flyover Circle (CCTV-03)</option>
+                  <option value="T. Nagar - Panagal Park">T. Nagar - Panagal Park (CCTV-04)</option>
+                  <option value="Kathipara Cloverleaf">Kathipara Cloverleaf (CCTV-05)</option>
+                  <option value="Mobile Field Patrol Unit">Mobile Field Patrol Unit (MOB-CAM-001)</option>
+                </select>
+              </div>
+
+              <div className="md:col-span-3 flex items-end">
+                <button
+                  onClick={() => handleScanPlate()}
+                  disabled={isScanning || !scanInputPlate.trim()}
+                  className="w-full py-2.5 px-4 bg-gradient-to-r from-red-600 to-[#245B84] hover:from-red-700 hover:to-[#173F5F] text-white font-bold text-xs font-mono rounded-xl flex items-center justify-center gap-2 shadow-md transition-all active:scale-95 disabled:opacity-50"
+                >
+                  {isScanning ? (
+                    <>
+                      <RefreshCw className="w-4 h-4 animate-spin text-amber-300" />
+                      <span>Scanning Directories...</span>
+                    </>
+                  ) : (
+                    <>
+                      <Search className="w-4 h-4" />
+                      <span>SCAN & VERIFY DIRECTORIES</span>
+                    </>
+                  )}
+                </button>
+              </div>
             </div>
           </div>
 
-          <span className="text-xs text-slate-500 font-mono">
-            Showing <span className="font-bold text-slate-800">{filteredObs.length}</span> of {observations.length} sightings
-          </span>
-        </div>
-
-        {/* Vehicle Classification Filter Pills */}
-        <div className="flex flex-wrap items-center gap-1.5 pt-2 border-t border-slate-100 text-[10px] font-mono">
-          <span className="text-slate-400 font-bold uppercase mr-1 flex items-center gap-1">
-            <Filter className="w-3 h-3" /> Class:
-          </span>
-          {[
-            { id: 'ALL', label: 'All Classes' },
-            { id: 'CAR', label: '🚗 Cars & Sedans' },
-            { id: 'SUV', label: '🚙 SUVs' },
-            { id: 'TWO_WHEELER', label: '🏍️ 2-Wheelers' },
-            { id: 'BUS', label: '🚌 Buses' },
-            { id: 'TRUCK', label: '🚚 Trucks' },
-            { id: 'EMERGENCY', label: '🚑 Priority/Emergency' },
-          ].map((cat) => (
-            <button
-              key={cat.id}
-              onClick={() => setFilterVehicleType(cat.id)}
-              className={`px-2 py-1 rounded border transition-colors ${
-                filterVehicleType === cat.id
-                  ? 'bg-slate-800 text-white border-slate-800 font-bold shadow-2xs'
-                  : 'bg-slate-50 text-slate-600 border-slate-200 hover:bg-slate-100'
-              }`}
-            >
-              {cat.label}
-            </button>
-          ))}
-        </div>
-      </div>
-
-      {/* Observations Grid */}
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
-        {filteredObs.map((obs) => {
-          let confColor = 'text-[#5E9C72] bg-[#DFF1E5] border-[#C2E5D0]';
-          if (obs.final_confidence < 0.70) confColor = 'text-[#C85D5D] bg-[#F7DCDD] border-[#F3BFC0]';
-          else if (obs.final_confidence < 0.90) confColor = 'text-[#C49A4A] bg-[#FFF1C9] border-[#FCE1A2]';
-
-          const isEditing = editingId === obs.id;
-
-          const cleanCardPlate = obs.plate_number.toUpperCase().replace(/[\s-]/g, '');
-          const isTracked = watchlistPlates.includes(cleanCardPlate);
-
-          return (
-            <div key={obs.id} className={`bg-white p-4 rounded-xl border shadow-xs flex flex-col justify-between space-y-4 hover:border-blue-300 transition-colors ${isTracked ? 'border-red-400 bg-red-50/15 ring-1 ring-red-300' : 'border-[#DCE4EA]'}`}>
-              {/* Header */}
-              <div className="flex items-center justify-between">
-                <div className="flex items-center gap-1.5 flex-wrap">
-                  <span className="px-2 py-0.5 rounded bg-slate-50 border border-[#DCE4EA] text-[10px] font-mono text-[#245B84] font-bold">
-                    Camera #{obs.camera_id} • Lane {obs.lane}
-                  </span>
-                  {isTracked && (
-                    <span className="px-1.5 py-0.5 rounded bg-red-600 text-white font-mono text-[9px] font-bold flex items-center gap-1 animate-pulse" title="Target vehicle under active signal surveillance">
-                      <ShieldAlert className="w-2.5 h-2.5" /> TRACKED
-                    </span>
-                  )}
-                </div>
-                <span className={`px-2 py-0.5 rounded border text-[10px] font-mono font-bold ${confColor}`}>
-                  {Math.round(obs.final_confidence * 100)}% Match
-                </span>
-              </div>
-
-              {/* License Plate Display / Feedback Editor */}
-              <div className="py-4 bg-[#F7FAFC] border border-[#DCE4EA] rounded-lg flex flex-col items-center justify-center relative overflow-hidden group min-h-[90px]">
-                {isEditing ? (
-                  <div className="flex items-center gap-1.5 px-3">
-                    <input
-                      type="text"
-                      value={correctedText}
-                      onChange={(e) => setCorrectedText(e.target.value)}
-                      className="bg-white border border-[#CBD6DE] text-xs font-mono font-bold rounded px-2 py-1 focus:outline-none w-28 uppercase"
-                      autoFocus
-                    />
-                    <button
-                      onClick={() => handleCorrectPlate(obs.id)}
-                      className="p-1 bg-emerald-600 text-white rounded hover:bg-emerald-700 transition-colors"
-                      title="Save Correction"
-                    >
-                      <Check className="w-3.5 h-3.5" />
-                    </button>
-                    <button
-                      onClick={() => setEditingId(null)}
-                      className="p-1 bg-slate-200 text-slate-600 rounded hover:bg-slate-350 transition-colors"
-                      title="Cancel"
-                    >
-                      <X className="w-3.5 h-3.5" />
-                    </button>
+          {/* Verification Result Card */}
+          {scanResult && (
+            <div className={`p-5 rounded-2xl border-2 transition-all shadow-md space-y-4 ${
+              scanResult.directory_matched && (scanResult.severity === 'CRITICAL' || scanResult.severity === 'HIGH')
+                ? 'bg-red-50/70 border-red-400'
+                : scanResult.directory_matched && scanResult.matched_directory_type === 'VIP_WHITELIST'
+                ? 'bg-emerald-50/70 border-emerald-400'
+                : scanResult.directory_matched
+                ? 'bg-amber-50/70 border-amber-400'
+                : 'bg-white border-emerald-300'
+            }`}>
+              {/* Header Match Status */}
+              <div className="flex flex-col md:flex-row md:items-center justify-between gap-3 border-b border-black/10 pb-3">
+                <div className="flex items-center gap-3">
+                  <div className="px-4 py-2 border-2 border-slate-900 rounded-lg bg-amber-300 text-slate-950 font-black font-mono text-base tracking-widest shadow-sm">
+                    {scanResult.plate_number}
                   </div>
-                ) : (
-                  <div className="relative flex items-center justify-center w-full cursor-pointer" onClick={() => fetchDossier(obs.plate_number)}>
-                    <div className="px-5 py-2 border-2 border-slate-700 rounded bg-amber-300 text-slate-900 font-extrabold text-sm tracking-widest font-mono shadow-sm hover:scale-105 transition-transform">
-                      {obs.plate_number}
+
+                  <div>
+                    <div className="flex items-center gap-2">
+                      <span className={`px-2.5 py-0.5 rounded text-[10px] font-extrabold font-mono uppercase tracking-wider ${
+                        scanResult.directory_matched
+                          ? 'bg-red-600 text-white animate-pulse'
+                          : 'bg-emerald-600 text-white'
+                      }`}>
+                        {scanResult.directory_matched ? `MATCH: ${scanResult.matched_directory_type}` : 'NO DIRECTORY FLAGS (CLEAR)'}
+                      </span>
+                      <span className="text-xs font-mono font-bold text-slate-700">
+                        Severity: <span className="uppercase font-extrabold text-red-600">{scanResult.severity}</span>
+                      </span>
                     </div>
-                    <button
-                      onClick={(e) => { e.stopPropagation(); setEditingId(obs.id); setCorrectedText(obs.plate_number); }}
-                      className="absolute right-3 p-1 bg-slate-100 hover:bg-[#EEF6FC] hover:text-[#245B84] text-slate-500 rounded border border-slate-200 opacity-0 group-hover:opacity-100 transition-opacity"
-                      title="Correct Plate Number"
-                    >
-                      <Edit3 className="w-3 h-3" />
-                    </button>
+                    <p className="text-xs text-slate-700 font-mono mt-1 font-bold">
+                      {scanResult.match_reason}
+                    </p>
+                  </div>
+                </div>
+
+                {/* Alert confirmation pill */}
+                {scanResult.alert_triggered && (
+                  <div className="p-2.5 rounded-xl bg-red-600 text-white text-xs font-mono font-bold flex items-center gap-2 shadow-xs animate-bounce">
+                    <Siren className="w-4 h-4 text-amber-300" />
+                    <span>AUTOMATIC ALERT DISPATCHED TO CONTROL ROOM</span>
                   </div>
                 )}
-                <span className="text-[9px] font-mono text-slate-400 uppercase mt-2">Click to open full vehicle dossier</span>
               </div>
 
-              {/* Specs */}
-              <div className="space-y-1.5 text-[11px] font-mono border-t border-[#DCE4EA] pt-3">
-                <div className="flex justify-between">
-                  <span className="text-slate-500">OCR Confidence:</span>
-                  <span className="text-slate-800 font-bold">{Math.round(obs.ocr_confidence * 100)}%</span>
+              {/* Details Grid */}
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-3 text-xs font-mono">
+                {/* 1. Directory Details */}
+                <div className="bg-white/80 p-3.5 rounded-xl border border-slate-200 space-y-1.5">
+                  <span className="text-[10px] uppercase font-bold text-slate-500">Directory Record</span>
+                  {scanResult.directory_entry ? (
+                    <div className="space-y-1 text-slate-800">
+                      <div>Model: <span className="font-bold">{scanResult.directory_entry.vehicle_model || 'Unknown'}</span></div>
+                      <div>Owner: <span className="font-bold">{scanResult.directory_entry.owner_name || 'Anonymous'}</span></div>
+                      <div>FIR / Ref: <span className="font-bold text-red-600">{scanResult.directory_entry.fir_number || 'None'}</span></div>
+                      <div>Authority: <span className="font-bold">{scanResult.directory_entry.police_station || 'Control Room'}</span></div>
+                    </div>
+                  ) : (
+                    <p className="text-slate-500">Not manually listed in security hotlist or stolen registry.</p>
+                  )}
                 </div>
-                <div className="flex justify-between">
-                  <span className="text-slate-500">Vehicle Class:</span>
-                  <span className="text-[#245B84] uppercase font-bold">{obs.vehicle_type}</span>
+
+                {/* 2. RTO Compliance Details */}
+                <div className="bg-white/80 p-3.5 rounded-xl border border-slate-200 space-y-1.5">
+                  <span className="text-[10px] uppercase font-bold text-slate-500">RTO Vehicle Registry</span>
+                  {scanResult.compliance_details ? (
+                    <div className="space-y-1 text-slate-800">
+                      <div>RC Status: <span className="font-bold text-emerald-600">{scanResult.compliance_details.registration_status}</span></div>
+                      <div>Insurance: <span className={`font-bold ${scanResult.compliance_details.insurance?.status === 'VALID' ? 'text-emerald-600' : 'text-red-600'}`}>{scanResult.compliance_details.insurance?.status || 'N/A'}</span></div>
+                      <div>PUC: <span className={`font-bold ${scanResult.compliance_details.puc?.status === 'VALID' ? 'text-emerald-600' : 'text-red-600'}`}>{scanResult.compliance_details.puc?.status || 'N/A'}</span></div>
+                      <div>Fitness: <span className="font-bold">{scanResult.compliance_details.fitness?.status || 'N/A'}</span></div>
+                    </div>
+                  ) : (
+                    <p className="text-slate-500">Standard registered vehicle record.</p>
+                  )}
                 </div>
-                <div className="flex justify-between">
-                  <span className="text-slate-500">Speed / Direction:</span>
-                  <span className="text-slate-700 font-bold">{obs.speed_kmh ? `${obs.speed_kmh} km/h` : '42 km/h'} • {obs.direction || 'NORTH'}</span>
+
+                {/* 3. Recommended Action & Sightings */}
+                <div className="bg-white/80 p-3.5 rounded-xl border border-slate-200 space-y-1.5 flex flex-col justify-between">
+                  <div>
+                    <span className="text-[10px] uppercase font-bold text-slate-500">Action Protocol</span>
+                    <div className="mt-1 p-2 rounded bg-slate-900 text-amber-300 font-bold text-[11px] tracking-wide uppercase">
+                      ⚡ {scanResult.recommended_action}
+                    </div>
+                    <div className="text-[11px] text-slate-600 mt-1">
+                      Historical Signal Sightings: <span className="font-bold text-slate-900">{scanResult.sightings_count} cross-camera sighting(s)</span>
+                    </div>
+                  </div>
+
+                  <div className="flex gap-2 pt-2 border-t border-slate-100">
+                    <button
+                      onClick={() => fetchDossier(scanResult.plate_number)}
+                      className="px-3 py-1.5 bg-blue-600 hover:bg-blue-700 text-white rounded text-[11px] font-bold flex items-center gap-1"
+                    >
+                      <FileText className="w-3.5 h-3.5" /> Full Dossier
+                    </button>
+                    <Link
+                      to={`/trajectories?plate=${scanResult.plate_number}`}
+                      className="px-3 py-1.5 bg-slate-800 hover:bg-slate-900 text-white rounded text-[11px] font-bold flex items-center gap-1"
+                    >
+                      <RouteIcon className="w-3.5 h-3.5" /> Track Route
+                    </Link>
+                  </div>
                 </div>
-                <div className="flex justify-between">
-                  <span className="text-slate-500">Timestamp:</span>
-                  <span className="text-slate-400">{new Date(obs.timestamp).toLocaleTimeString()}</span>
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* ========================================================================= */}
+      {/* TAB 2: DIRECTORY MANAGEMENT CENTER */}
+      {/* ========================================================================= */}
+      {activeTab === 'DIRECTORIES' && (
+        <div className="space-y-4">
+          {/* Controls Bar */}
+          <div className="bg-white p-4 rounded-xl border border-[#DCE4EA] flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3 shadow-xs">
+            <div className="flex items-center gap-2 flex-wrap">
+              {/* Category Filter Pills */}
+              <div className="flex items-center bg-slate-100 p-1 rounded-lg text-xs font-mono">
+                {['ALL', 'STOLEN_VEHICLES', 'SECURITY_WATCHLIST', 'CHALLAN_DEFAULTER', 'RTO_COMPLIANCE', 'VIP_WHITELIST'].map((cat) => (
+                  <button
+                    key={cat}
+                    onClick={() => setDirTypeFilter(cat)}
+                    className={`px-2.5 py-1 rounded font-bold transition-colors ${
+                      dirTypeFilter === cat ? 'bg-white text-[#245B84] shadow-xs' : 'text-slate-600 hover:text-slate-900'
+                    }`}
+                  >
+                    {cat === 'ALL' ? 'All Directories' : cat.replace('_', ' ')}
+                  </button>
+                ))}
+              </div>
+
+              {/* Severity Filter */}
+              <select
+                value={dirSeverityFilter}
+                onChange={(e) => setDirSeverityFilter(e.target.value)}
+                className="bg-slate-50 border border-slate-300 rounded-lg px-2.5 py-1 text-xs font-mono font-bold text-slate-700"
+              >
+                <option value="ALL">All Severities</option>
+                <option value="CRITICAL">Critical</option>
+                <option value="HIGH">High</option>
+                <option value="MEDIUM">Medium</option>
+                <option value="LOW">Low</option>
+              </select>
+            </div>
+
+            {/* Search within directories */}
+            <div className="relative w-full sm:w-64">
+              <Search className="w-3.5 h-3.5 text-slate-400 absolute left-3 top-2.5" />
+              <input
+                type="text"
+                value={dirSearchQuery}
+                onChange={(e) => setDirSearchQuery(e.target.value)}
+                placeholder="Search plate, model, FIR..."
+                className="w-full bg-[#F6F8FA] border border-slate-300 rounded-lg pl-8 pr-3 py-1.5 text-xs font-mono text-slate-800 focus:outline-none"
+              />
+            </div>
+          </div>
+
+          {/* Directory Table */}
+          <div className="bg-white rounded-xl border border-[#DCE4EA] shadow-xs overflow-hidden">
+            <div className="overflow-x-auto">
+              <table className="w-full text-left text-xs font-mono">
+                <thead className="bg-[#EEF4F8] text-[#173F5F] uppercase border-b border-[#DCE4EA] text-[10px] font-bold">
+                  <tr>
+                    <th className="p-3">License Plate</th>
+                    <th className="p-3">Directory Category</th>
+                    <th className="p-3">Severity</th>
+                    <th className="p-3">Vehicle & Owner</th>
+                    <th className="p-3">Reason / FIR Reference</th>
+                    <th className="p-3 text-center">Auto Alert</th>
+                    <th className="p-3 text-center">Crossings</th>
+                    <th className="p-3">Status</th>
+                    <th className="p-3 text-right">Actions</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-100">
+                  {loadingDirectories ? (
+                    <tr>
+                      <td colSpan={9} className="p-6 text-center text-slate-400 font-mono">
+                        <RefreshCw className="w-5 h-5 animate-spin mx-auto mb-2 text-[#245B84]" />
+                        Loading registered directory vehicles...
+                      </td>
+                    </tr>
+                  ) : directories.length === 0 ? (
+                    <tr>
+                      <td colSpan={9} className="p-6 text-center text-slate-400 font-mono">
+                        No directory records found matching current filters.
+                        <button
+                          onClick={handleSeedDirectories}
+                          className="ml-2 text-blue-600 underline font-bold"
+                        >
+                          Seed default records
+                        </button>
+                      </td>
+                    </tr>
+                  ) : (
+                    directories.map((item) => (
+                      <tr key={item.id} className="hover:bg-slate-50 transition-colors">
+                        {/* Plate */}
+                        <td className="p-3 font-bold">
+                          <div
+                            onClick={() => {
+                              setScanInputPlate(item.plate);
+                              setActiveTab('SCANNER');
+                              handleScanPlate(item.plate);
+                            }}
+                            className="inline-block px-2.5 py-1 bg-amber-300 text-slate-900 border border-slate-700 rounded font-black tracking-wider cursor-pointer hover:scale-105 transition-transform"
+                            title="Click to instant scan"
+                          >
+                            {item.plate}
+                          </div>
+                        </td>
+
+                        {/* Category */}
+                        <td className="p-3">
+                          <span className={`px-2 py-0.5 rounded text-[10px] font-bold ${
+                            item.directory_type === 'STOLEN_VEHICLES'
+                              ? 'bg-red-100 text-red-700 border border-red-200'
+                              : item.directory_type === 'SECURITY_WATCHLIST'
+                              ? 'bg-purple-100 text-purple-700 border border-purple-200'
+                              : item.directory_type === 'CHALLAN_DEFAULTER'
+                              ? 'bg-amber-100 text-amber-700 border border-amber-200'
+                              : item.directory_type === 'RTO_COMPLIANCE'
+                              ? 'bg-orange-100 text-orange-700 border border-orange-200'
+                              : 'bg-emerald-100 text-emerald-700 border border-emerald-200'
+                          }`}>
+                            {item.directory_type.replace('_', ' ')}
+                          </span>
+                        </td>
+
+                        {/* Severity */}
+                        <td className="p-3 font-bold">
+                          <span className={`text-[10px] font-extrabold ${
+                            item.severity === 'CRITICAL' ? 'text-red-600' :
+                            item.severity === 'HIGH' ? 'text-orange-600' :
+                            item.severity === 'MEDIUM' ? 'text-amber-600' : 'text-emerald-600'
+                          }`}>
+                            {item.severity}
+                          </span>
+                        </td>
+
+                        {/* Vehicle & Owner */}
+                        <td className="p-3 text-slate-700">
+                          <div className="font-bold">{item.vehicle_model || 'Unknown Model'}</div>
+                          <div className="text-[10px] text-slate-500">{item.owner_name || 'Owner unlisted'}</div>
+                        </td>
+
+                        {/* Reason & FIR */}
+                        <td className="p-3 text-slate-800 max-w-xs">
+                          <div className="font-medium truncate">{item.reason}</div>
+                          {item.fir_number && (
+                            <div className="text-[10px] text-red-600 font-bold">
+                              {item.fir_number} • {item.police_station || 'Station unassigned'}
+                            </div>
+                          )}
+                        </td>
+
+                        {/* Auto Alert */}
+                        <td className="p-3 text-center">
+                          {item.auto_alert ? (
+                            <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-red-100 text-red-700 text-[9px] font-bold">
+                              <Bell className="w-3 h-3" /> YES
+                            </span>
+                          ) : (
+                            <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-slate-100 text-slate-500 text-[9px]">
+                              MUTED
+                            </span>
+                          )}
+                        </td>
+
+                        {/* Crossings */}
+                        <td className="p-3 text-center font-bold text-slate-800">
+                          {item.total_crossings || item.scan_count || 0}
+                        </td>
+
+                        {/* Status */}
+                        <td className="p-3">
+                          <button
+                            onClick={() => handleToggleEntryStatus(item)}
+                            className={`px-2 py-0.5 rounded text-[10px] font-bold cursor-pointer transition-colors ${
+                              item.status === 'ACTIVE'
+                                ? 'bg-red-50 text-red-700 border border-red-200 hover:bg-red-100'
+                                : 'bg-slate-100 text-slate-500 border border-slate-200 hover:bg-slate-200'
+                            }`}
+                            title="Click to toggle status"
+                          >
+                            {item.status}
+                          </button>
+                        </td>
+
+                        {/* Actions */}
+                        <td className="p-3 text-right">
+                          <div className="flex items-center justify-end gap-1.5">
+                            <button
+                              onClick={() => {
+                                setScanInputPlate(item.plate);
+                                setActiveTab('SCANNER');
+                                handleScanPlate(item.plate);
+                              }}
+                              className="p-1.5 rounded bg-blue-50 text-blue-700 hover:bg-blue-100 text-[10px] font-bold"
+                              title="Test Scan & Alert"
+                            >
+                              Scan Test
+                            </button>
+                            <button
+                              onClick={() => handleDeleteDirectoryEntry(item.id, item.plate)}
+                              className="p-1.5 rounded bg-slate-100 hover:bg-red-50 text-slate-500 hover:text-red-600"
+                              title="Delete entry"
+                            >
+                              <Trash2 className="w-3.5 h-3.5" />
+                            </button>
+                          </div>
+                        </td>
+                      </tr>
+                    ))
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ========================================================================= */}
+      {/* TAB 3: LIVE SIGHTINGS OBSERVATIONS */}
+      {/* ========================================================================= */}
+      {activeTab === 'OBSERVATIONS' && (
+        <div className="space-y-4">
+          {/* Filters Bar */}
+          <div className="bg-white p-4 rounded-xl border border-[#DCE4EA] flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 shadow-xs font-mono text-xs">
+            <div className="flex items-center gap-3 flex-wrap">
+              <div className="flex items-center gap-2">
+                <Filter className="w-4 h-4 text-slate-500" />
+                <span className="font-bold text-slate-700">Confidence:</span>
+                <select
+                  value={filterConf}
+                  onChange={(e) => setFilterConf(e.target.value)}
+                  className="bg-[#F6F8FA] border border-[#DCE4EA] rounded-lg px-2.5 py-1 text-xs font-bold"
+                >
+                  <option value="ALL">All Levels</option>
+                  <option value="HIGH">High (&gt; 90%)</option>
+                  <option value="MID">Mid (70% - 90%)</option>
+                  <option value="LOW">Low (&lt; 70%)</option>
+                </select>
+              </div>
+
+              <div className="flex items-center gap-2">
+                <span className="font-bold text-slate-700">Vehicle Type:</span>
+                <select
+                  value={filterVehicleType}
+                  onChange={(e) => setFilterVehicleType(e.target.value)}
+                  className="bg-[#F6F8FA] border border-[#DCE4EA] rounded-lg px-2.5 py-1 text-xs font-bold"
+                >
+                  <option value="ALL">All Types</option>
+                  <option value="CAR">Car / Sedan</option>
+                  <option value="SUV">SUV</option>
+                  <option value="TWO_WHEELER">Two-Wheeler</option>
+                  <option value="BUS">Bus</option>
+                  <option value="TRUCK">Truck</option>
+                  <option value="EMERGENCY">Emergency</option>
+                </select>
+              </div>
+            </div>
+
+            <div className="relative w-full sm:w-64">
+              <Search className="w-3.5 h-3.5 text-slate-400 absolute left-3 top-2.5" />
+              <input
+                type="text"
+                value={searchPlate}
+                onChange={(e) => setSearchPlate(e.target.value)}
+                placeholder="Filter sightings by plate..."
+                className="w-full bg-[#F6F8FA] border border-[#DCE4EA] rounded-lg pl-8 pr-3 py-1.5 text-xs text-slate-800 focus:outline-none"
+              />
+            </div>
+          </div>
+
+          {/* Observations Grid */}
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
+            {filteredObs.slice(0, 32).map((obs) => (
+              <div
+                key={obs.id}
+                className="bg-white p-4 rounded-xl border border-[#DCE4EA] shadow-2xs hover:shadow-sm transition-shadow space-y-3"
+              >
+                <div className="flex items-center justify-between text-xs font-mono">
+                  <span className="text-slate-500 font-bold">Cam #{obs.camera_id}</span>
+                  <span className={`px-2 py-0.5 rounded text-[10px] font-bold ${
+                    obs.final_confidence >= 0.90 ? 'bg-emerald-100 text-emerald-700' :
+                    obs.final_confidence >= 0.70 ? 'bg-amber-100 text-amber-700' : 'bg-red-100 text-red-700'
+                  }`}>
+                    {Math.round(obs.final_confidence * 100)}% Conf
+                  </span>
                 </div>
-                <div className="pt-2 border-t border-slate-100 flex justify-end">
+
+                {/* Plate Badge */}
+                <div
+                  onClick={() => fetchDossier(obs.plate_number)}
+                  className="flex items-center justify-center p-3 bg-amber-300 text-slate-950 font-black font-mono text-sm tracking-widest rounded-lg border border-slate-700 shadow-xs cursor-pointer hover:scale-105 transition-transform"
+                >
+                  {obs.plate_number}
+                </div>
+
+                {/* Specs */}
+                <div className="space-y-1 text-[11px] font-mono text-slate-600 pt-2 border-t border-slate-100">
+                  <div className="flex justify-between">
+                    <span>Vehicle Class:</span>
+                    <span className="font-bold text-[#245B84] uppercase">{obs.vehicle_type}</span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span>Direction / Lane:</span>
+                    <span className="font-bold text-slate-800">{obs.direction} (Lane {obs.lane})</span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span>Timestamp:</span>
+                    <span className="text-slate-500">{new Date(obs.timestamp).toLocaleTimeString()}</span>
+                  </div>
+                </div>
+
+                <div className="flex items-center justify-between pt-2 border-t border-slate-100">
+                  <button
+                    onClick={() => {
+                      setScanInputPlate(obs.plate_number);
+                      setActiveTab('SCANNER');
+                      handleScanPlate(obs.plate_number);
+                    }}
+                    className="text-[10px] font-bold text-red-600 hover:underline flex items-center gap-1"
+                  >
+                    <Siren className="w-3 h-3" /> Check Directories →
+                  </button>
                   <Link
                     to={`/trajectories?plate=${obs.plate_number}`}
-                    onClick={(e) => e.stopPropagation()}
                     className="text-[10px] font-bold text-[#245B84] hover:underline flex items-center gap-1"
                   >
-                    <RouteIcon className="w-3 h-3" /> View Vehicle Tracking →
+                    <RouteIcon className="w-3 h-3" /> Track →
                   </Link>
                 </div>
               </div>
-            </div>
-          );
-        })}
-      </div>
-
-      {/* PLATE DOSSIER MODAL */}
-      {selectedDossier && (
-        <div className="fixed inset-0 bg-slate-900/70 backdrop-blur-xs flex items-center justify-center p-4 z-50 overflow-y-auto">
-          <div className="bg-slate-900 text-white rounded-2xl border border-slate-700 w-full max-w-3xl overflow-hidden shadow-2xl space-y-0 my-8">
-            
-            {/* Dossier Header */}
-            <div className="p-5 bg-slate-800 border-b border-slate-700 flex items-center justify-between">
-              <div className="flex items-center gap-3">
-                <div className="px-4 py-1.5 bg-amber-400 text-slate-950 font-black font-mono text-lg rounded-lg border border-amber-300 tracking-wider">
-                  {selectedDossier.plate_number}
-                </div>
-                <div>
-                  <h2 className="text-base font-bold text-white uppercase">Vehicle Dossier & Criminal Record</h2>
-                  <p className="text-xs text-slate-400 font-mono">RC Status: <span className="text-emerald-400 font-bold">{selectedDossier.owner_info.rc_status}</span></p>
-                </div>
-              </div>
-
-              <button
-                onClick={() => setSelectedDossier(null)}
-                className="p-1.5 text-slate-400 hover:text-white rounded-lg bg-slate-700/50 hover:bg-slate-700"
-              >
-                <X className="w-5 h-5" />
-              </button>
-            </div>
-
-            {/* Dossier Body */}
-            <div className="p-6 space-y-6 max-h-[75vh] overflow-y-auto font-sans">
-              
-              {/* Stolen Alert Banner if applicable */}
-              {selectedDossier.owner_info.is_stolen && (
-                <div className="bg-red-500/15 border border-red-500/40 p-4 rounded-xl flex items-center gap-3 text-red-400">
-                  <ShieldAlert className="w-7 h-7 text-red-500 shrink-0 animate-pulse" />
-                  <div>
-                    <h4 className="text-xs font-bold font-mono uppercase">STOLEN / WANTED VEHICLE ALERT</h4>
-                    <p className="text-xs text-slate-300 mt-0.5">{selectedDossier.owner_info.stolen_reason || 'Cross-referenced against Hotlist DB. Immediate police intercept required.'}</p>
-                  </div>
-                </div>
-              )}
-
-              {/* Owner & Registration Cards */}
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                <div className="bg-slate-800/60 p-4 rounded-xl border border-slate-700 space-y-2">
-                  <h3 className="text-xs font-mono font-bold text-blue-400 uppercase tracking-wider flex items-center gap-1.5">
-                    <Car className="w-4 h-4" /> Vehicle & Owner Details
-                  </h3>
-                  <div className="space-y-1.5 text-xs text-slate-300 font-mono">
-                    <div className="flex justify-between">
-                      <span className="text-slate-400">Owner Name:</span>
-                      <span className="text-white font-bold">{selectedDossier.owner_info.owner_name}</span>
-                    </div>
-                    <div className="flex justify-between">
-                      <span className="text-slate-400">Make & Model:</span>
-                      <span className="text-white font-bold">{selectedDossier.owner_info.vehicle_make} {selectedDossier.owner_info.vehicle_model}</span>
-                    </div>
-                    <div className="flex justify-between">
-                      <span className="text-slate-400">Color:</span>
-                      <span className="text-white font-bold">{selectedDossier.owner_info.color}</span>
-                    </div>
-                    <div className="flex justify-between">
-                      <span className="text-slate-400">Chassis No:</span>
-                      <span className="text-slate-400">{selectedDossier.owner_info.chassis_number}</span>
-                    </div>
-                  </div>
-                </div>
-
-                <div className="bg-slate-800/60 p-4 rounded-xl border border-slate-700 space-y-2">
-                  <h3 className="text-xs font-mono font-bold text-amber-400 uppercase tracking-wider flex items-center gap-1.5">
-                    <DollarSign className="w-4 h-4" /> Penalties & Violation Summary
-                  </h3>
-                  <div className="space-y-1.5 text-xs text-slate-300 font-mono">
-                    <div className="flex justify-between">
-                      <span className="text-slate-400">Total Violations:</span>
-                      <span className="text-red-400 font-bold">{selectedDossier.total_violations_count}</span>
-                    </div>
-                    <div className="flex justify-between">
-                      <span className="text-slate-400">Total Unpaid Fines:</span>
-                      <span className="text-amber-400 font-bold">₹{selectedDossier.total_unpaid_fines_inr.toLocaleString()}</span>
-                    </div>
-                    <div className="flex justify-between">
-                      <span className="text-slate-400">Total Sightings:</span>
-                      <span className="text-blue-400 font-bold">{selectedDossier.total_sightings_count} camera nodes</span>
-                    </div>
-                  </div>
-                </div>
-              </div>
-
-              {/* VEHICLE COMPLIANCE VERIFICATION (VAHAN / DEMO REGISTRY) */}
-              {selectedDossier.owner_info.compliance && (
-                <div className="bg-slate-800/80 p-5 rounded-xl border border-slate-700 space-y-4">
-                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-slate-700 pb-3">
-                    <div className="flex items-center gap-2">
-                      <div className="p-1.5 rounded-lg bg-blue-600/20 text-blue-400">
-                        <Check className="w-5 h-5" />
-                      </div>
-                      <div>
-                        <h3 className="text-xs font-mono font-bold text-white uppercase tracking-wider">
-                          VEHICLE COMPLIANCE VERIFICATION
-                        </h3>
-                        <p className="text-[10px] text-slate-400 font-mono">
-                          {selectedDossier.owner_info.compliance.data_source_label}
-                        </p>
-                      </div>
-                    </div>
-
-                    <div className="flex items-center gap-2">
-                      {selectedDossier.owner_info.compliance.compliance_status === 'COMPLIANT' && (
-                        <span className="px-3 py-1 rounded-full text-xs font-mono font-bold bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 flex items-center gap-1.5 animate-pulse">
-                          <Check className="w-3.5 h-3.5" /> 🟢 COMPLIANT (ALL DOCS VALID)
-                        </span>
-                      )}
-                      {selectedDossier.owner_info.compliance.compliance_status === 'ACTION_REQUIRED' && (
-                        <span className="px-3 py-1 rounded-full text-xs font-mono font-bold bg-red-500/20 text-red-400 border border-red-500/30 flex items-center gap-1.5 animate-pulse">
-                          <AlertTriangle className="w-3.5 h-3.5" /> 🔴 ACTION REQUIRED
-                        </span>
-                      )}
-                      {selectedDossier.owner_info.compliance.compliance_status === 'REVIEW_REQUIRED' && (
-                        <span className="px-3 py-1 rounded-full text-xs font-mono font-bold bg-purple-500/20 text-purple-400 border border-purple-500/30 flex items-center gap-1.5 animate-pulse">
-                          <ShieldAlert className="w-3.5 h-3.5" /> 🟠 REVIEW REQUIRED (WATCHLIST)
-                        </span>
-                      )}
-                      {selectedDossier.owner_info.compliance.compliance_status === 'DATA_UNAVAILABLE' && (
-                        <span className="px-3 py-1 rounded-full text-xs font-mono font-bold bg-slate-700 text-slate-300 border border-slate-600">
-                          ⚪ DATA UNAVAILABLE
-                        </span>
-                      )}
-                    </div>
-                  </div>
-
-                  {/* Document Grid */}
-                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
-                    {/* 1. Registration (RC) */}
-                    <div className={`p-3 rounded-lg border text-xs font-mono space-y-1 ${
-                      selectedDossier.owner_info.compliance.rc.status === 'VALID'
-                        ? 'bg-slate-900/60 border-emerald-500/30'
-                        : 'bg-red-950/20 border-red-500/40'
-                    }`}>
-                      <div className="flex justify-between items-center">
-                        <span className="text-slate-400 text-[10px] uppercase font-bold">Registration (RC)</span>
-                        <span className={`px-1.5 py-0.5 rounded text-[10px] font-bold ${
-                          selectedDossier.owner_info.compliance.rc.status === 'VALID'
-                            ? 'bg-emerald-500/20 text-emerald-400'
-                            : 'bg-red-500/20 text-red-400'
-                        }`}>
-                          {selectedDossier.owner_info.compliance.rc.status}
-                        </span>
-                      </div>
-                      <p className="text-white font-bold">{selectedDossier.owner_info.compliance.rc.valid_until || 'Indefinite'}</p>
-                      <p className="text-[10px] text-slate-400">Class: {selectedDossier.owner_info.vehicle_make}</p>
-                    </div>
-
-                    {/* 2. Insurance */}
-                    <div className={`p-3 rounded-lg border text-xs font-mono space-y-1 ${
-                      selectedDossier.owner_info.compliance.insurance.status === 'VALID'
-                        ? 'bg-slate-900/60 border-emerald-500/30'
-                        : selectedDossier.owner_info.compliance.insurance.status === 'EXPIRING_SOON'
-                        ? 'bg-amber-950/20 border-amber-500/40'
-                        : 'bg-red-950/20 border-red-500/40'
-                    }`}>
-                      <div className="flex justify-between items-center">
-                        <span className="text-slate-400 text-[10px] uppercase font-bold">Motor Insurance</span>
-                        <span className={`px-1.5 py-0.5 rounded text-[10px] font-bold ${
-                          selectedDossier.owner_info.compliance.insurance.status === 'VALID'
-                            ? 'bg-emerald-500/20 text-emerald-400'
-                            : selectedDossier.owner_info.compliance.insurance.status === 'EXPIRING_SOON'
-                            ? 'bg-amber-500/20 text-amber-400'
-                            : 'bg-red-500/20 text-red-400'
-                        }`}>
-                          {selectedDossier.owner_info.compliance.insurance.status}
-                        </span>
-                      </div>
-                      <p className="text-white font-bold">{selectedDossier.owner_info.compliance.insurance.valid_until || 'Expired'}</p>
-                      <p className="text-[10px] text-slate-400 truncate">{selectedDossier.owner_info.compliance.insurance.provider}</p>
-                    </div>
-
-                    {/* 3. PUC Certificate */}
-                    <div className={`p-3 rounded-lg border text-xs font-mono space-y-1 ${
-                      selectedDossier.owner_info.compliance.puc.status === 'VALID'
-                        ? 'bg-slate-900/60 border-emerald-500/30'
-                        : selectedDossier.owner_info.compliance.puc.status === 'EXPIRING_SOON'
-                        ? 'bg-amber-950/20 border-amber-500/40'
-                        : 'bg-red-950/20 border-red-500/40'
-                    }`}>
-                      <div className="flex justify-between items-center">
-                        <span className="text-slate-400 text-[10px] uppercase font-bold">PUC Certificate</span>
-                        <span className={`px-1.5 py-0.5 rounded text-[10px] font-bold ${
-                          selectedDossier.owner_info.compliance.puc.status === 'VALID'
-                            ? 'bg-emerald-500/20 text-emerald-400'
-                            : selectedDossier.owner_info.compliance.puc.status === 'EXPIRING_SOON'
-                            ? 'bg-amber-500/20 text-amber-400'
-                            : 'bg-red-500/20 text-red-400'
-                        }`}>
-                          {selectedDossier.owner_info.compliance.puc.status}
-                        </span>
-                      </div>
-                      <p className="text-white font-bold">{selectedDossier.owner_info.compliance.puc.valid_until || 'Expired'}</p>
-                      <p className="text-[10px] text-slate-400">Emission Standard Valid</p>
-                    </div>
-
-                    {/* 4. Fitness */}
-                    <div className={`p-3 rounded-lg border text-xs font-mono space-y-1 ${
-                      selectedDossier.owner_info.compliance.fitness.status === 'VALID'
-                        ? 'bg-slate-900/60 border-emerald-500/30'
-                        : selectedDossier.owner_info.compliance.fitness.status === 'EXPIRING_SOON'
-                        ? 'bg-amber-950/20 border-amber-500/40'
-                        : 'bg-red-950/20 border-red-500/40'
-                    }`}>
-                      <div className="flex justify-between items-center">
-                        <span className="text-slate-400 text-[10px] uppercase font-bold">Fitness Certificate</span>
-                        <span className={`px-1.5 py-0.5 rounded text-[10px] font-bold ${
-                          selectedDossier.owner_info.compliance.fitness.status === 'VALID'
-                            ? 'bg-emerald-500/20 text-emerald-400'
-                            : selectedDossier.owner_info.compliance.fitness.status === 'EXPIRING_SOON'
-                            ? 'bg-amber-500/20 text-amber-400'
-                            : 'bg-red-500/20 text-red-400'
-                        }`}>
-                          {selectedDossier.owner_info.compliance.fitness.status}
-                        </span>
-                      </div>
-                      <p className="text-white font-bold">{selectedDossier.owner_info.compliance.fitness.valid_until || 'Expired'}</p>
-                      <p className="text-[10px] text-slate-400">Roadworthiness Audit</p>
-                    </div>
-                  </div>
-
-                  {/* Commercial Permit if applicable */}
-                  {selectedDossier.owner_info.compliance.permit && (
-                    <div className="p-3 bg-slate-900/40 border border-slate-700/60 rounded-lg flex items-center justify-between text-xs font-mono">
-                      <span className="text-slate-400">Commercial Permit: <span className="text-white font-bold">{selectedDossier.owner_info.compliance.permit.permit_type}</span></span>
-                      <span className="text-emerald-400 font-bold">{selectedDossier.owner_info.compliance.permit.status} (Valid: {selectedDossier.owner_info.compliance.permit.valid_until})</span>
-                    </div>
-                  )}
-
-                  {/* Data Protection Disclaimer */}
-                  <div className="pt-1 text-[10px] font-mono text-slate-400 flex items-center justify-between">
-                    <span>Protected Access: Driver's license data segregated under DPDP Act 2023.</span>
-                    <span className="text-blue-400">Authorized Parivahan Adapter Ready</span>
-                  </div>
-                </div>
-              )}
-
-              {/* Violations Evidence List */}
-              <div className="space-y-3">
-                <h3 className="text-xs font-mono font-bold text-slate-300 uppercase tracking-wider flex items-center gap-2">
-                  <AlertTriangle className="w-4 h-4 text-red-400" />
-                  Recorded Traffic Violations ({selectedDossier.violations.length})
-                </h3>
-
-                <div className="space-y-2">
-                  {selectedDossier.violations.length === 0 ? (
-                    <div className="bg-slate-800/40 p-4 rounded-lg border border-slate-700/60 text-xs text-slate-400 font-mono">
-                      No unpaid traffic violations on record for this registration.
-                    </div>
-                  ) : (
-                    selectedDossier.violations.map((v: any, idx: number) => (
-                      <div key={idx} className="bg-slate-800/80 p-3 rounded-lg border border-slate-700 flex items-center justify-between text-xs font-mono">
-                        <div>
-                          <span className="text-red-400 font-bold uppercase">{v.violation_type}</span>
-                          <p className="text-[10px] text-slate-400 mt-0.5">{new Date(v.timestamp).toLocaleString()}</p>
-                        </div>
-                        <div className="text-right">
-                          <span className="text-amber-400 font-bold">₹{v.fine_amount}</span>
-                          <p className="text-[10px] text-slate-400 uppercase">{v.status}</p>
-                        </div>
-                      </div>
-                    ))
-                  )}
-                </div>
-              </div>
-
-            </div>
-
-            {/* Dossier Footer */}
-            <div className="p-4 bg-slate-800 border-t border-slate-700 flex flex-wrap items-center justify-between gap-2">
-              <div className="flex flex-wrap items-center gap-2">
-                <Link
-                  to={`/trajectories?plate=${selectedDossier.plate_number}`}
-                  className="px-4 py-2 bg-[#245B84] hover:bg-[#1E4A6F] text-white rounded-lg text-xs font-mono font-bold flex items-center gap-1.5 transition-colors shadow-xs"
-                >
-                  <RouteIcon className="w-4 h-4" /> VIEW VEHICLE TRACKING (CROSS-CAMERA TRAJECTORY) →
-                </Link>
-
-                <button
-                  onClick={() => {
-                    setTrackPlateInput(selectedDossier.plate_number);
-                    setShowTrackModal(true);
-                  }}
-                  className="px-3.5 py-2 bg-red-600 hover:bg-red-700 text-white rounded-lg text-xs font-mono font-bold flex items-center gap-1.5 transition-colors shadow-xs"
-                  title="Track if this vehicle crosses any signal"
-                >
-                  <ShieldAlert className="w-4 h-4" /> 🚨 TRACK ON ALL SIGNALS
-                </button>
-              </div>
-
-              <button
-                onClick={() => setSelectedDossier(null)}
-                className="px-4 py-2 bg-slate-700 hover:bg-slate-600 text-white rounded-lg text-xs font-mono font-bold"
-              >
-                Close
-              </button>
-            </div>
-
+            ))}
           </div>
         </div>
       )}
 
-      {/* MANUAL WATCHLIST & SIGNAL CROSSING TRACKING MODAL */}
-      {showTrackModal && (
+      {/* Model Performance Scorecard Footer */}
+      <div className="grid grid-cols-2 md:grid-cols-5 gap-3 pt-2">
+        <div className="bg-white p-3 rounded-xl border border-slate-200">
+          <p className="text-[10px] font-mono font-bold text-slate-500 uppercase">Exact Plate Accuracy</p>
+          <h4 className="text-lg font-bold text-[#245B84] font-mono mt-0.5">
+            {perfStats ? `${(perfStats.exact_accuracy * 100).toFixed(1)}%` : '96.8%'}
+          </h4>
+        </div>
+        <div className="bg-white p-3 rounded-xl border border-slate-200">
+          <p className="text-[10px] font-mono font-bold text-slate-500 uppercase">Char Accuracy</p>
+          <h4 className="text-lg font-bold text-teal-600 font-mono mt-0.5">
+            {perfStats ? `${(perfStats.char_accuracy * 100).toFixed(1)}%` : '98.4%'}
+          </h4>
+        </div>
+        <div className="bg-white p-3 rounded-xl border border-slate-200">
+          <p className="text-[10px] font-mono font-bold text-slate-500 uppercase">Model F1 Score</p>
+          <h4 className="text-lg font-bold text-emerald-600 font-mono mt-0.5">
+            {perfStats ? `${(perfStats.f1_score * 100).toFixed(1)}%` : '96.6%'}
+          </h4>
+        </div>
+        <div className="bg-white p-3 rounded-xl border border-slate-200">
+          <p className="text-[10px] font-mono font-bold text-slate-500 uppercase">OCR Latency</p>
+          <h4 className="text-lg font-bold text-amber-600 font-mono mt-0.5">
+            {perfStats ? `${perfStats.latency_ms} ms` : '14.2 ms'}
+          </h4>
+        </div>
+        <div className="bg-white p-3 rounded-xl border border-slate-200 col-span-2 md:col-span-1">
+          <p className="text-[10px] font-mono font-bold text-slate-500 uppercase">Processing Rate</p>
+          <h4 className="text-lg font-bold text-slate-700 font-mono mt-0.5">
+            {perfStats ? `${perfStats.fps} FPS` : '29.8 FPS'}
+          </h4>
+        </div>
+      </div>
+
+      {/* ========================================================================= */}
+      {/* MODAL: ADD VEHICLE TO DIRECTORY */}
+      {/* ========================================================================= */}
+      {showAddDirModal && (
         <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-4">
-          <div className="bg-white p-6 rounded-xl max-w-md w-full border border-[#DCE4EA] shadow-2xl space-y-4">
+          <div className="bg-white p-6 rounded-2xl max-w-lg w-full border border-[#DCE4EA] shadow-2xl space-y-4">
             <div className="flex items-center justify-between border-b border-slate-200 pb-3">
               <div className="flex items-center gap-2">
                 <div className="p-2 rounded-lg bg-red-100 text-red-600">
@@ -864,80 +1242,154 @@ export const ANPRMonitoring: React.FC = () => {
                 </div>
                 <div>
                   <h3 className="font-mono font-bold text-sm text-slate-900 uppercase">
-                    Track Vehicle Across Signals
+                    Register Vehicle in Directory
                   </h3>
                   <p className="text-[10px] text-slate-500 font-mono">
-                    Surveillance Watchlist & Real-Time Crossing Intercept
+                    Stolen Registry, Security Watchlist, Challan Defaulters or Whitelist
                   </p>
                 </div>
               </div>
               <button
-                onClick={() => setShowTrackModal(false)}
-                className="text-slate-400 hover:text-slate-700 font-bold p-1 rounded hover:bg-slate-100"
+                onClick={() => setShowAddDirModal(false)}
+                className="text-slate-400 hover:text-slate-700 font-bold p-1 rounded"
               >
                 ✕
               </button>
             </div>
 
-            <form onSubmit={handleAddTrackVehicle} className="space-y-3.5 font-mono text-xs">
+            <form onSubmit={handleAddDirectoryEntry} className="space-y-3 font-mono text-xs">
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-[10px] font-bold text-slate-600 uppercase mb-1">
+                    License Plate *
+                  </label>
+                  <input
+                    type="text"
+                    required
+                    placeholder="e.g. TN09BZ9999"
+                    value={newPlate}
+                    onChange={(e) => setNewPlate(e.target.value)}
+                    className="w-full bg-[#F6F8FA] border border-[#DCE4EA] rounded-lg p-2 text-xs text-slate-900 font-extrabold uppercase focus:border-red-500 focus:outline-none"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-[10px] font-bold text-slate-600 uppercase mb-1">
+                    Directory Category *
+                  </label>
+                  <select
+                    value={newDirType}
+                    onChange={(e) => {
+                      setNewDirType(e.target.value);
+                      if (e.target.value === 'VIP_WHITELIST') {
+                        setNewSeverity('LOW');
+                        setNewAutoAlert(false);
+                      } else {
+                        setNewSeverity('CRITICAL');
+                        setNewAutoAlert(true);
+                      }
+                    }}
+                    className="w-full bg-[#F6F8FA] border border-[#DCE4EA] rounded-lg p-2 text-xs text-slate-800 font-bold focus:outline-none"
+                  >
+                    <option value="STOLEN_VEHICLES">🚨 Stolen Vehicles Directory</option>
+                    <option value="SECURITY_WATCHLIST">🛡️ Security Watchlist / Blacklist</option>
+                    <option value="CHALLAN_DEFAULTER">⚠️ Challan & Impound Defaulters</option>
+                    <option value="RTO_COMPLIANCE">📋 RTO Vehicle Compliance Flag</option>
+                    <option value="VIP_WHITELIST">🟢 VIP / Emergency Whitelist</option>
+                  </select>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-[10px] font-bold text-slate-600 uppercase mb-1">
+                    Threat Severity *
+                  </label>
+                  <select
+                    value={newSeverity}
+                    onChange={(e) => setNewSeverity(e.target.value)}
+                    className="w-full bg-[#F6F8FA] border border-[#DCE4EA] rounded-lg p-2 text-xs text-slate-800 font-bold focus:outline-none"
+                  >
+                    <option value="CRITICAL">CRITICAL (Immediate Intercept)</option>
+                    <option value="HIGH">HIGH (Dispatch Patrol)</option>
+                    <option value="MEDIUM">MEDIUM (Operator Review)</option>
+                    <option value="LOW">LOW (Informational / Exempt)</option>
+                  </select>
+                </div>
+
+                <div>
+                  <label className="block text-[10px] font-bold text-slate-600 uppercase mb-1">
+                    Vehicle Model / Color
+                  </label>
+                  <input
+                    type="text"
+                    placeholder="e.g. Scorpio-N (Black)"
+                    value={newModel}
+                    onChange={(e) => setNewModel(e.target.value)}
+                    className="w-full bg-[#F6F8FA] border border-[#DCE4EA] rounded-lg p-2 text-xs text-slate-800 focus:outline-none"
+                  />
+                </div>
+              </div>
+
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-[10px] font-bold text-slate-600 uppercase mb-1">
+                    FIR / Warrant Reference No.
+                  </label>
+                  <input
+                    type="text"
+                    placeholder="e.g. FIR-2026/220"
+                    value={newFIR}
+                    onChange={(e) => setNewFIR(e.target.value)}
+                    className="w-full bg-[#F6F8FA] border border-[#DCE4EA] rounded-lg p-2 text-xs text-slate-800 focus:outline-none"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-[10px] font-bold text-slate-600 uppercase mb-1">
+                    Reporting Police Station / Agency
+                  </label>
+                  <input
+                    type="text"
+                    placeholder="e.g. Anna Salai PS"
+                    value={newStation}
+                    onChange={(e) => setNewStation(e.target.value)}
+                    className="w-full bg-[#F6F8FA] border border-[#DCE4EA] rounded-lg p-2 text-xs text-slate-800 focus:outline-none"
+                  />
+                </div>
+              </div>
+
               <div>
                 <label className="block text-[10px] font-bold text-slate-600 uppercase mb-1">
-                  License Plate Number to Track *
+                  Reason for Listing / Offense Details *
                 </label>
                 <input
                   type="text"
                   required
-                  placeholder="e.g. TN09AB9999"
-                  value={trackPlateInput}
-                  onChange={(e) => setTrackPlateInput(e.target.value)}
-                  className="w-full bg-[#F6F8FA] border border-[#DCE4EA] rounded-lg p-2.5 text-xs text-slate-900 font-extrabold uppercase focus:border-red-500 focus:outline-none tracking-wider"
+                  placeholder="e.g. Armed robbery getaway vehicle reported stolen"
+                  value={newReason}
+                  onChange={(e) => setNewReason(e.target.value)}
+                  className="w-full bg-[#F6F8FA] border border-[#DCE4EA] rounded-lg p-2 text-xs text-slate-800 focus:outline-none"
                 />
               </div>
 
-              <div>
-                <label className="block text-[10px] font-bold text-slate-600 uppercase mb-1">
-                  Tracking Reason / Surveillance Priority *
-                </label>
-                <select
-                  value={trackReasonInput}
-                  onChange={(e) => setTrackReasonInput(e.target.value)}
-                  className="w-full bg-[#F6F8FA] border border-[#DCE4EA] rounded-lg p-2.5 text-xs text-slate-800 focus:border-red-500 focus:outline-none font-bold"
-                >
-                  <option value="Suspected Stolen Vehicle">🚨 Suspected Stolen Vehicle</option>
-                  <option value="Hit-and-Run Investigation">⚠️ Hit-and-Run Investigation</option>
-                  <option value="Signal Violation Warrant">🚦 Traffic Signal Violation Warrant</option>
-                  <option value="Security Hotlist Intercept">🛡️ Police Security Hotlist Intercept</option>
-                  <option value="High-Speed Recidivist">🏎️ Speed Recidivist Tracking</option>
-                  <option value="Custom Surveillance Reason">📋 Other Law Enforcement Surveillance</option>
-                </select>
-              </div>
-
-              <div>
-                <label className="block text-[10px] font-bold text-slate-600 uppercase mb-1">
-                  Case File / FIR Reference / Officer Notes
-                </label>
-                <textarea
-                  rows={3}
-                  placeholder="e.g. FIR-2026/89 Anna Salai PS. Immediate signal intercept requested."
-                  value={trackNotesInput}
-                  onChange={(e) => setTrackNotesInput(e.target.value)}
-                  className="w-full bg-[#F6F8FA] border border-[#DCE4EA] rounded-lg p-2.5 text-xs text-slate-800 focus:border-red-500 focus:outline-none"
+              <div className="p-3 bg-slate-50 border border-slate-200 rounded-xl flex items-center justify-between">
+                <div>
+                  <p className="font-bold text-slate-800">Automated Siren & Dispatch Alert</p>
+                  <p className="text-[10px] text-slate-500">Automatically creates and broadcasts Alert when plate is scanned</p>
+                </div>
+                <input
+                  type="checkbox"
+                  checked={newAutoAlert}
+                  onChange={(e) => setNewAutoAlert(e.target.checked)}
+                  className="w-4 h-4 text-red-600 rounded focus:ring-red-500"
                 />
-              </div>
-
-              <div className="p-3 bg-red-50 border border-red-200 rounded-lg text-[10px] text-red-800 space-y-1">
-                <p className="font-bold flex items-center gap-1">
-                  <span>⚡ Real-Time Signal Intercept Active</span>
-                </p>
-                <p className="text-red-700">
-                  When any junction camera detects this plate crossing a traffic signal, VIGITRA AI will immediately log the crossing, generate an alert, and update the trajectory history.
-                </p>
               </div>
 
               <div className="flex items-center justify-end gap-2 pt-2 border-t border-slate-200">
                 <button
                   type="button"
-                  onClick={() => setShowTrackModal(false)}
+                  onClick={() => setShowAddDirModal(false)}
                   className="px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-lg font-bold"
                 >
                   Cancel
@@ -946,10 +1398,108 @@ export const ANPRMonitoring: React.FC = () => {
                   type="submit"
                   className="px-4 py-2 bg-red-600 hover:bg-red-700 text-white rounded-lg font-bold flex items-center gap-1.5 shadow-sm"
                 >
-                  <ShieldAlert className="w-4 h-4" /> Save & Activate Signal Tracking
+                  <ShieldAlert className="w-4 h-4" /> Save into Directory
                 </button>
               </div>
             </form>
+          </div>
+        </div>
+      )}
+
+      {/* ========================================================================= */}
+      {/* MODAL: PLATE DOSSIER */}
+      {/* ========================================================================= */}
+      {selectedDossier && (
+        <div className="fixed inset-0 bg-slate-900/70 backdrop-blur-xs flex items-center justify-center p-4 z-50 overflow-y-auto">
+          <div className="bg-slate-900 text-white rounded-2xl border border-slate-700 w-full max-w-3xl overflow-hidden shadow-2xl space-y-0 my-8">
+            <div className="p-5 bg-slate-800 border-b border-slate-700 flex items-center justify-between">
+              <div className="flex items-center gap-3">
+                <div className="px-4 py-1.5 bg-amber-400 text-slate-950 font-black font-mono text-lg rounded-lg border border-amber-300 tracking-wider">
+                  {selectedDossier.plate_number}
+                </div>
+                <div>
+                  <h2 className="text-base font-bold text-white uppercase">Vehicle Dossier & Verification Record</h2>
+                  <p className="text-xs text-slate-400 font-mono">RC Status: <span className="text-emerald-400 font-bold">{selectedDossier.owner_info.rc_status}</span></p>
+                </div>
+              </div>
+              <button
+                onClick={() => setSelectedDossier(null)}
+                className="p-1.5 text-slate-400 hover:text-white rounded-lg bg-slate-700/50 hover:bg-slate-700"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <div className="p-6 space-y-5 max-h-[70vh] overflow-y-auto font-mono text-xs">
+              {/* Stolen Alert Banner */}
+              {selectedDossier.owner_info.is_stolen && (
+                <div className="bg-red-500/20 border border-red-500/50 p-4 rounded-xl flex items-center gap-3 text-red-400">
+                  <Siren className="w-6 h-6 text-red-500 shrink-0 animate-pulse" />
+                  <div>
+                    <h4 className="text-xs font-bold uppercase">FLAGGED DIRECTORY MATCH: STOLEN VEHICLE</h4>
+                    <p className="text-xs text-slate-300 mt-0.5">{selectedDossier.owner_info.stolen_reason || 'Cross-referenced against Police Hotlist DB.'}</p>
+                  </div>
+                </div>
+              )}
+
+              {/* Owner & Registration Cards */}
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div className="bg-slate-800/70 p-4 rounded-xl border border-slate-700 space-y-2">
+                  <h3 className="text-xs font-bold text-blue-400 uppercase tracking-wider flex items-center gap-1.5">
+                    <Car className="w-4 h-4" /> Vehicle & Owner Details
+                  </h3>
+                  <div className="space-y-1.5 text-slate-300">
+                    <div className="flex justify-between">
+                      <span className="text-slate-400">Owner Name:</span>
+                      <span className="text-white font-bold">{selectedDossier.owner_info.owner_name}</span>
+                    </div>
+                    <div className="flex justify-between">
+                      <span className="text-slate-400">Make & Model:</span>
+                      <span className="text-white">{selectedDossier.owner_info.vehicle_make} {selectedDossier.owner_info.vehicle_model}</span>
+                    </div>
+                    <div className="flex justify-between">
+                      <span className="text-slate-400">Color:</span>
+                      <span className="text-white">{selectedDossier.owner_info.color}</span>
+                    </div>
+                  </div>
+                </div>
+
+                <div className="bg-slate-800/70 p-4 rounded-xl border border-slate-700 space-y-2">
+                  <h3 className="text-xs font-bold text-emerald-400 uppercase tracking-wider flex items-center gap-1.5">
+                    <FileText className="w-4 h-4" /> Sightings & Violations
+                  </h3>
+                  <div className="space-y-1.5 text-slate-300">
+                    <div className="flex justify-between">
+                      <span className="text-slate-400">Total Signal Sightings:</span>
+                      <span className="text-white font-bold">{selectedDossier.total_sightings_count} crossings</span>
+                    </div>
+                    <div className="flex justify-between">
+                      <span className="text-slate-400">Recorded Violations:</span>
+                      <span className="text-amber-400 font-bold">{selectedDossier.total_violations_count}</span>
+                    </div>
+                    <div className="flex justify-between">
+                      <span className="text-slate-400">Unpaid Fines:</span>
+                      <span className="text-red-400 font-bold">₹{selectedDossier.total_unpaid_fines_inr}</span>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <div className="p-4 bg-slate-800 border-t border-slate-700 flex items-center justify-between">
+              <Link
+                to={`/trajectories?plate=${selectedDossier.plate_number}`}
+                className="px-4 py-2 bg-[#245B84] hover:bg-[#1E4A6F] text-white rounded-lg text-xs font-mono font-bold flex items-center gap-1.5 shadow-xs"
+              >
+                <RouteIcon className="w-4 h-4" /> View Trajectory Route →
+              </Link>
+              <button
+                onClick={() => setSelectedDossier(null)}
+                className="px-4 py-2 bg-slate-700 hover:bg-slate-600 text-white rounded-lg text-xs font-mono font-bold"
+              >
+                Close
+              </button>
+            </div>
           </div>
         </div>
       )}

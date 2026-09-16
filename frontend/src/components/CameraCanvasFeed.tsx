@@ -11,6 +11,8 @@ interface CameraCanvasFeedProps {
   queueLength?: number;
   occupancyPct?: number;
   emergencyDetected?: boolean;
+  signalState?: 'GREEN' | 'YELLOW' | 'AMBER' | 'RED';
+  signalCountdown?: number;
 }
 
 export type AspectRatioMode = 'AUTO' | '16:9' | '4:3' | '16:10' | '3:4';
@@ -24,6 +26,8 @@ export const CameraCanvasFeed: React.FC<CameraCanvasFeedProps> = ({
   queueLength = 4,
   occupancyPct = 42.5,
   emergencyDetected = false,
+  signalState,
+  signalCountdown,
 }) => {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const videoRef = useRef<HTMLVideoElement | null>(null);
@@ -121,6 +125,7 @@ export const CameraCanvasFeed: React.FC<CameraCanvasFeedProps> = ({
       bodyColor: string;
       offset: number;
       isEmergency?: boolean;
+      dynamicSpeedKmh?: number;
     }
 
     const simVehicles: ApproachVehicle[] = [
@@ -134,6 +139,19 @@ export const CameraCanvasFeed: React.FC<CameraCanvasFeedProps> = ({
     const render = () => {
       step += 1;
       ctx.clearRect(0, 0, W, H);
+
+      // Derive Active Signal State & Running Countdown Timer
+      const activeSignal: 'GREEN' | 'AMBER' | 'RED' = signalState
+        ? (signalState === 'YELLOW' ? 'AMBER' : signalState)
+        : (step % 400 < 220) ? 'GREEN' : (step % 400 < 260) ? 'AMBER' : 'RED';
+
+      const secLeft = (signalCountdown !== undefined)
+        ? Math.max(1, signalCountdown)
+        : (activeSignal === 'GREEN') 
+          ? Math.max(1, 28 - Math.floor((step % 220) / 7.8)) 
+          : (activeSignal === 'AMBER') 
+          ? Math.max(1, 4 - Math.floor((step % 40) / 10)) 
+          : Math.max(1, 18 - Math.floor((step % 140) / 7.7));
 
       // ==========================================
       // 1. SKY & URBAN HORIZON (Front-Angle Background)
@@ -252,24 +270,49 @@ export const CameraCanvasFeed: React.FC<CameraCanvasFeedProps> = ({
       }
 
       // ==========================================
-      // 3. STOP LINE & ZEBRA PEDESTRIAN CROSSING
+      // 3. 60m DETECTION RADIUS & STOP LINE
       // ==========================================
+      // 60m Detection Radius Boundary Line
+      const radiusY = Math.floor(H * 0.64);
+      const radLeftX = horizonLeftX + (bottomLeftX - horizonLeftX) * ((radiusY - horizonY) / (H - horizonY));
+      const radRightX = horizonRightX + (bottomRightX - horizonRightX) * ((radiusY - horizonY) / (H - horizonY));
+
+      ctx.strokeStyle = 'rgba(16, 185, 129, 0.75)';
+      ctx.lineWidth = 3.5;
+      ctx.setLineDash([10, 6]);
+      ctx.beginPath();
+      ctx.moveTo(radLeftX + 6, radiusY);
+      ctx.lineTo(radRightX - 6, radiusY);
+      ctx.stroke();
+      ctx.setLineDash([]);
+
+      ctx.fillStyle = '#34D399';
+      ctx.font = 'bold 11px monospace';
+      ctx.textAlign = 'center';
+      ctx.fillText('⚡ 60m DETECTION RADIUS (AUTO-SWITCHES SIGNAL WHEN CLEARED)', (radLeftX + radRightX) / 2, radiusY - 8);
+      ctx.textAlign = 'left';
+
       const stopLeftX = horizonLeftX + (bottomLeftX - horizonLeftX) * ((stopLineY - horizonY) / (H - horizonY));
       const stopRightX = horizonRightX + (bottomRightX - horizonRightX) * ((stopLineY - horizonY) / (H - horizonY));
 
-      // White Stop Line
-      ctx.strokeStyle = '#F8FAFC';
-      ctx.lineWidth = 8;
+      // Stop Line (Reflecting Signal State & Running Countdown)
+      ctx.strokeStyle = (activeSignal === 'RED') ? '#EF4444' : (activeSignal === 'AMBER') ? '#F59E0B' : '#F8FAFC';
+      ctx.lineWidth = (activeSignal === 'RED') ? 10 : 8;
       ctx.beginPath();
       ctx.moveTo(stopLeftX + 6, stopLineY);
       ctx.lineTo(stopRightX - 6, stopLineY);
       ctx.stroke();
 
       // Stop Line Text
-      ctx.fillStyle = '#CBD5E1';
+      ctx.fillStyle = (activeSignal === 'RED') ? '#FCA5A5' : (activeSignal === 'AMBER') ? '#FDE68A' : '#CBD5E1';
       ctx.font = 'bold 12px monospace';
       ctx.textAlign = 'center';
-      ctx.fillText('STOP LINE • ANPR TRIGGER ZONE', (stopLeftX + stopRightX) / 2, stopLineY - 10);
+      const stopText = (activeSignal === 'RED')
+        ? `🛑 RED SIGNAL: TRAFFIC HALTED AT STOP LINE (0 KM/H) • ⏱ ${secLeft}s WAIT`
+        : (activeSignal === 'AMBER')
+        ? `⚠️ AMBER CLEARANCE: PREPARE TO STOP • ⏱ ${secLeft}s`
+        : `🟢 GREEN WAVE: TRAFFIC FLOWING (48 KM/H) • ⏱ ${secLeft}s LEFT`;
+      ctx.fillText(stopText, (stopLeftX + stopRightX) / 2, stopLineY - 10);
       ctx.textAlign = 'left';
 
       // Zebra Crossing Stripes (Foreground ahead of stop line)
@@ -324,8 +367,6 @@ export const CameraCanvasFeed: React.FC<CameraCanvasFeedProps> = ({
       ctx.strokeRect(headX, headY, headW, headH);
 
       // Signal Visors & Lights (Red, Amber, Green)
-      const activeSignal = (step % 400 < 220) ? 'GREEN' : (step % 400 < 260) ? 'AMBER' : 'RED';
-      
       // Red Light
       ctx.fillStyle = (activeSignal === 'RED') ? '#EF4444' : '#3F1214';
       ctx.beginPath();
@@ -356,25 +397,43 @@ export const CameraCanvasFeed: React.FC<CameraCanvasFeedProps> = ({
         ctx.fill();
       }
 
-      // Digital Signal Countdown Timer
+      // Digital Signal Countdown Timer (Live running counter)
       ctx.fillStyle = '#020617';
       ctx.fillRect(headX + headW + 4, headY + 22, 38, 38);
       ctx.strokeStyle = '#334155';
       ctx.strokeRect(headX + headW + 4, headY + 22, 38, 38);
-      ctx.fillStyle = (activeSignal === 'GREEN') ? '#10B981' : '#EF4444';
+      ctx.fillStyle = (activeSignal === 'GREEN') ? '#10B981' : (activeSignal === 'AMBER') ? '#F59E0B' : '#EF4444';
       ctx.font = 'bold 16px monospace';
       ctx.textAlign = 'center';
-      const secLeft = (activeSignal === 'GREEN') ? 28 - Math.floor((step % 220) / 7.8) : (activeSignal === 'AMBER') ? 4 - Math.floor((step % 40) / 10) : 18 - Math.floor((step % 140) / 7.7);
       ctx.fillText(`${Math.max(1, secLeft)}`, headX + headW + 23, headY + 46);
       ctx.textAlign = 'left';
 
       // ==========================================
       // 5. APPROACHING VEHICLES (Front-Angle / Signal Post View)
       // ==========================================
-      // Sort vehicles by progress t so distant vehicles render behind near ones
+      // Vehicles actively interact with running signal countdown:
+      // When RED: vehicles halt behind the stop line (t ~ 0.74) and speed drops to 0 km/h
+      // When AMBER: vehicles decelerate to 14 km/h
+      // When GREEN: vehicles flow smoothly at normal speed (46 km/h)
       const sortedVehicles = simVehicles.map(v => {
-        const rawT = ((step * v.baseSpeed + v.offset) % 1.0);
-        return { ...v, t: rawT };
+        const speedMult = (activeSignal === 'AMBER') ? 0.35 : (activeSignal === 'RED') ? 0.75 : 1.0;
+        const rawT = ((step * (v.baseSpeed * speedMult) + v.offset) % 1.0);
+        let effectiveT = rawT;
+        let effectiveSpeed = v.speedKmh;
+
+        if (activeSignal === 'RED') {
+          const maxStopT = 0.73 - (v.lane * 0.04);
+          if (rawT >= maxStopT && rawT <= 0.96) {
+            effectiveT = maxStopT;
+            effectiveSpeed = 0;
+          } else if (rawT < maxStopT && rawT > maxStopT - 0.22) {
+            effectiveSpeed = Math.floor(v.speedKmh * 0.3);
+          }
+        } else if (activeSignal === 'AMBER') {
+          effectiveSpeed = 14;
+        }
+
+        return { ...v, t: effectiveT, dynamicSpeedKmh: effectiveSpeed };
       }).sort((a, b) => a.t - b.t);
 
       sortedVehicles.forEach(v => {
@@ -622,7 +681,9 @@ export const CameraCanvasFeed: React.FC<CameraCanvasFeedProps> = ({
           ctx.fillStyle = '#020617';
           const hudFontSz = Math.max(9, Math.floor(12 * scale));
           ctx.font = `bold ${hudFontSz}px monospace`;
-          ctx.fillText(`#${v.id} ${v.label} ${v.conf.toFixed(0)}% • ${v.speedKmh} km/h`, tagX + 5, tagY + tagH * 0.72);
+          const displaySpeed = (v.dynamicSpeedKmh !== undefined) ? v.dynamicSpeedKmh : v.speedKmh;
+          const statusSuffix = (displaySpeed === 0) ? ' [HALTED]' : (displaySpeed <= 15) ? ' [DECEL]' : '';
+          ctx.fillText(`#${v.id} ${v.label} ${v.conf.toFixed(0)}% • ${displaySpeed} km/h${statusSuffix}`, tagX + 5, tagY + tagH * 0.72);
 
           // 3. ANPR OCR Target Box framing the front plate
           ctx.strokeStyle = '#38BDF8';

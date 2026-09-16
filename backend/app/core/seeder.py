@@ -254,17 +254,43 @@ def auto_seed_database(db: Session, force: bool = False) -> None:
                     db.add(r)
             db.commit()
 
-        # 5. Seed Blacklist Watchlist
+        # 5. Seed Multi-Category Directories (Stolen, Watchlist, Challan Defaulters, Compliance, Whitelist)
         blacklist_plates = [
-            ("KA05MN3821", "Stolen Vehicle Alert", "operator", "Blue Yamaha FZ motorcycle reported stolen."),
-            ("TN01AB1234", "Unpaid Traffic Fines", "admin", "White Swift DZire sedan with 14 outstanding red-light violations."),
-            ("MH12PQ9999", "Security Watchlist", "admin", "Black SUV flagged for unauthorized perimeter access."),
-            ("DL03CC4455", "Hit and Run Suspect", "operator", "Silver sedan involved in Anna Salai hit and run incident.")
+            ("KA05MN3821", "STOLEN_VEHICLES", "CRITICAL", "Stolen Blue Yamaha FZ motorcycle", "Yamaha FZ v3", "Karthik Raja", "FIR-2026/104", "Anna Salai PS", "Armed theft reported near Gemini circle."),
+            ("TN09BZ9999", "STOLEN_VEHICLES", "CRITICAL", "Stolen Black Mahindra Scorpio SUV", "Mahindra Scorpio-N", "Suresh Kumar", "FIR-2026/220", "T. Nagar PS", "Reported stolen from commercial parking lot."),
+            ("MH12PQ9999", "SECURITY_WATCHLIST", "CRITICAL", "Security Watchlist: Perimeter breach alert", "Toyota Fortuner", "Unknown Suspect", "WARRANT-2026/41", "Perimeter Task Force", "Black SUV flagged for perimeter access."),
+            ("DL03CC4455", "SECURITY_WATCHLIST", "CRITICAL", "Hit and Run Suspect Vehicle", "Honda City", "Ramesh Chand", "FIR-2026/309", "Chennai Central PS", "Silver sedan involved in Anna Salai hit and run."),
+            ("TN01AB1234", "CHALLAN_DEFAULTER", "HIGH", "14 Outstanding Red-Light Jump & Speed Warrants", "Maruti Swift Dzire", "P. Balaji", "NOTICE-TN-9912", "Traffic HQ", "Outstanding unpaid fines exceeding ₹18,500."),
+            ("HR26BC9999", "CHALLAN_DEFAULTER", "HIGH", "Excessive Speed Repeat Offender", "Hyundai Creta", "Vikram Malhotra", "NOTICE-HR-4401", "Expressway Traffic Cell", "Recorded repeated speeds > 130 km/h."),
+            ("TNXX1002", "RTO_COMPLIANCE", "HIGH", "Expired Mandatory Third-Party Insurance", "Hyundai Creta", "Sanjay Narayanan", None, "RTO South Chennai", "Motor Vehicle Act Sec 146 compliance violation."),
+            ("TN01EM9999", "VIP_WHITELIST", "LOW", "Greater Chennai Police Patrol Cruiser", "Toyota Innova Crysta", "Tamil Nadu Police", None, "Police HQ", "Authorized patrol unit — green corridor priority."),
+            ("KA01AM1080", "VIP_WHITELIST", "LOW", "108 Emergency Medical Service Ambulance", "Force Traveller Ambulance", "GVK EMRI 108", None, "Emergency Dispatch", "Emergency priority life-support ambulance.")
         ]
-        for plate, reason, cb, notes in blacklist_plates:
-            if not db.query(Blacklist).filter(Blacklist.plate == plate).first():
-                b = Blacklist(plate=plate, reason=reason, created_by=cb, notes=notes)
+        for plate, dtype, sev, reason, vmodel, owner, fir, station, notes in blacklist_plates:
+            b = db.query(Blacklist).filter(Blacklist.plate == plate).first()
+            if not b:
+                b = Blacklist(
+                    plate=plate,
+                    directory_type=dtype,
+                    severity=sev,
+                    reason=reason,
+                    vehicle_model=vmodel,
+                    owner_name=owner,
+                    fir_number=fir,
+                    police_station=station,
+                    auto_alert=(dtype != "VIP_WHITELIST"),
+                    created_by="system_seeder",
+                    notes=notes
+                )
                 db.add(b)
+            else:
+                b.directory_type = dtype
+                b.severity = sev
+                b.vehicle_model = vmodel
+                b.owner_name = owner
+                b.fir_number = fir
+                b.police_station = station
+                b.auto_alert = (dtype != "VIP_WHITELIST")
         db.commit()
 
         # 6. Seed Plate Observations if empty or low

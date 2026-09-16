@@ -26,11 +26,20 @@ from app.schemas.schemas import (
     RouteAnomalyOut, AlertOut, AlertStatusUpdate,
     CameraUpdate, CameraStreamAction, AIFeedbackCreate, AIFeedbackOut,
     AIModelPerformanceOut, ScenarioSimulationInput, ScenarioSimulationOutput,
-    WeatherObservationOut, JunctionConfigUpdate
+    WeatherObservationOut, JunctionConfigUpdate,
+    DirectoryEntryCreate, DirectoryEntryUpdate, DirectoryEntryOut,
+    PlateScanCheckRequest, PlateScanCheckResponse
 )
+from app.services.compliance.directory_service import directory_service
 from app.traffic.signal_controller import signal_optimizer, signal_registry, WEIGHTS
 from app.database.mongodb import mongo_manager
+from app.websocket.manager import ws_manager
 from pydantic import BaseModel
+
+class VehiclePassInput(BaseModel):
+    approach: Optional[str] = None
+    vehicle_id: Optional[str] = None
+    action: Optional[str] = "PASSED_RADIUS"
 
 class ManualControlInput(BaseModel):
     phase: str
@@ -663,6 +672,127 @@ def return_to_auto(
     if not success:
         raise HTTPException(status_code=400, detail="Failed to return to auto mode")
     return {"status": "SUCCESS", "message": "Intersection reverted to automatic adaptive mode."}
+
+@router.post("/intersections/{id}/vehicle-pass")
+async def report_vehicle_passed_radius(
+    id: int,
+    payload: Optional[VehiclePassInput] = None,
+    db: Session = Depends(get_db)
+):
+    """
+    Called when a vehicle passes the detection radius on an approach.
+    Decrements approach occupancy. If 0 vehicles remain on the active approach,
+    automatically changes the signal and switches to the next approach.
+    """
+    controller = signal_registry.get_controller(id, db=db)
+    approach = payload.approach if payload else None
+    vehicle_id = payload.vehicle_id if payload else None
+    result = controller.vehicle_passed_radius(db, approach_key=approach, vehicle_id=vehicle_id)
+
+    # Broadcast updated signal telemetry via WebSocket
+    active_app_data = controller.approaches.get(controller.active_approach, {})
+    await ws_manager.broadcast({
+        "event": "SIGNAL_STATE_CHANGED",
+        "event_type": "VEHICLE_PASSED_RADIUS",
+        "intersection_id": id,
+        "num_approaches": controller.num_approaches,
+        "active_approach": controller.active_approach,
+        "active_phase": controller.active_phase,
+        "state": controller.state,
+        "countdown": controller.countdown,
+        "mode": controller.mode,
+        "reasoning": controller.last_reasoning,
+        "elapsed_green_time": round(controller.elapsed_green_time, 1),
+        "radius_event": {
+            "approach": result["approach"],
+            "vehicles_remaining": result["vehicles_remaining"],
+            "auto_switched": result["auto_switched_to_next"]
+        },
+        "current_metrics": {
+            "approach": controller.active_approach,
+            "vehicle_count": round(active_app_data.get("vehicle_count", 0.0), 1),
+            "queue_length": active_app_data.get("queue_length", 0),
+            "waiting_time": round(active_app_data.get("waiting_time", 0.0), 1),
+            "traffic_density": active_app_data.get("traffic_density", "MODERATE"),
+            "demand_score": round(active_app_data.get("demand_score", 0.0), 3),
+            "priority_score": round(active_app_data.get("priority_score", 0.0), 1),
+            "green_duration": active_app_data.get("green_duration", controller.countdown)
+        },
+        "approaches": {
+            name: {
+                "name": app.get("name") or f"{name.title()} Approach",
+                "direction": app.get("direction", name),
+                "signal": controller.get_approach_signal(name),
+                "vehicle_count": round(app.get("vehicle_count", 0.0), 1),
+                "queue_length": app.get("queue_length", 0),
+                "waiting_time": round(app.get("waiting_time", 0.0), 1),
+                "traffic_density": app.get("traffic_density", "MODERATE"),
+                "priority_score": round(app.get("priority_score", 0.0), 1),
+                "camera_status": app.get("camera_status", "DATA_AVAILABLE")
+            } for name, app in controller.approaches.items()
+        }
+    })
+
+    return result
+
+@router.post("/intersections/{id}/clear-approach")
+async def clear_intersection_approach(
+    id: int,
+    payload: Optional[VehiclePassInput] = None,
+    db: Session = Depends(get_db)
+):
+    """
+    Simulates all vehicles on the approach passing the radius (0 vehicles remaining).
+    Immediately triggers zero-waste safe auto-switching to the next approach.
+    """
+    controller = signal_registry.get_controller(id, db=db)
+    approach = payload.approach if payload else None
+    result = controller.clear_approach_vehicles(db, approach_key=approach)
+
+    active_app_data = controller.approaches.get(controller.active_approach, {})
+    await ws_manager.broadcast({
+        "event": "SIGNAL_STATE_CHANGED",
+        "event_type": "APPROACH_CLEARED",
+        "intersection_id": id,
+        "num_approaches": controller.num_approaches,
+        "active_approach": controller.active_approach,
+        "active_phase": controller.active_phase,
+        "state": controller.state,
+        "countdown": controller.countdown,
+        "mode": controller.mode,
+        "reasoning": controller.last_reasoning,
+        "elapsed_green_time": round(controller.elapsed_green_time, 1),
+        "radius_event": {
+            "approach": result["approach"],
+            "vehicles_remaining": 0,
+            "auto_switched": result["auto_switched_to_next"]
+        },
+        "current_metrics": {
+            "approach": controller.active_approach,
+            "vehicle_count": round(active_app_data.get("vehicle_count", 0.0), 1),
+            "queue_length": active_app_data.get("queue_length", 0),
+            "waiting_time": round(active_app_data.get("waiting_time", 0.0), 1),
+            "traffic_density": active_app_data.get("traffic_density", "MODERATE"),
+            "demand_score": round(active_app_data.get("demand_score", 0.0), 3),
+            "priority_score": round(active_app_data.get("priority_score", 0.0), 1),
+            "green_duration": active_app_data.get("green_duration", controller.countdown)
+        },
+        "approaches": {
+            name: {
+                "name": app.get("name") or f"{name.title()} Approach",
+                "direction": app.get("direction", name),
+                "signal": controller.get_approach_signal(name),
+                "vehicle_count": round(app.get("vehicle_count", 0.0), 1),
+                "queue_length": app.get("queue_length", 0),
+                "waiting_time": round(app.get("waiting_time", 0.0), 1),
+                "traffic_density": app.get("traffic_density", "MODERATE"),
+                "priority_score": round(app.get("priority_score", 0.0), 1),
+                "camera_status": app.get("camera_status", "DATA_AVAILABLE")
+            } for name, app in controller.approaches.items()
+        }
+    })
+
+    return result
 
 @router.get("/intersections/{id}/decision-history")
 def get_decision_history(id: int, limit: int = 50, db: Session = Depends(get_db)):
@@ -1972,15 +2102,39 @@ def update_alert_status(alert_id: int, status_in: AlertStatusUpdate, db: Session
     db.refresh(alert)
     return alert
 
-# 10. Watchlist & Signal Crossing Tracking
+# 10. Number Plate Directory Management & Signal Crossing Tracking
 @router.get("/watchlist", response_model=List[BlacklistOut])
 @router.get("/blacklist", response_model=List[BlacklistOut])
-def get_blacklist(db: Session = Depends(get_db)):
+@router.get("/anpr/directories", response_model=List[BlacklistOut])
+def get_blacklist(
+    directory_type: Optional[str] = None,
+    severity: Optional[str] = None,
+    status_filter: Optional[str] = None,
+    search: Optional[str] = None,
+    db: Session = Depends(get_db)
+):
     """
-    Returns all actively tracked watchlist vehicles, enriched with real-time signal crossing
-    counts, last detected intersection/signal, and sighting status.
+    Returns all registered directory & watchlist vehicles across categories:
+    STOLEN_VEHICLES, SECURITY_WATCHLIST, CHALLAN_DEFAULTER, RTO_COMPLIANCE, VIP_WHITELIST.
+    Enriched with real-time signal crossing counts, last detected intersection, and sighting status.
     """
-    items = db.query(Blacklist).order_by(Blacklist.created_at.desc()).all()
+    query = db.query(Blacklist)
+    if directory_type and directory_type != "ALL":
+        query = query.filter(Blacklist.directory_type == directory_type)
+    if severity and severity != "ALL":
+        query = query.filter(Blacklist.severity == severity)
+    if status_filter and status_filter != "ALL":
+        query = query.filter(Blacklist.status == status_filter)
+    if search:
+        search_clean = search.upper().replace(" ", "").replace("-", "")
+        query = query.filter(
+            (Blacklist.plate.like(f"%{search_clean}%")) |
+            (Blacklist.reason.ilike(f"%{search}%")) |
+            (Blacklist.vehicle_model.ilike(f"%{search}%")) |
+            (Blacklist.fir_number.ilike(f"%{search}%"))
+        )
+
+    items = query.order_by(Blacklist.created_at.desc()).all()
     results = []
     for item in items:
         clean_p = item.plate.upper().replace(" ", "").replace("-", "")
@@ -2004,6 +2158,15 @@ def get_blacklist(db: Session = Depends(get_db)):
             id=item.id,
             plate=item.plate,
             reason=item.reason,
+            directory_type=getattr(item, "directory_type", "SECURITY_WATCHLIST") or "SECURITY_WATCHLIST",
+            severity=getattr(item, "severity", "CRITICAL") or "CRITICAL",
+            vehicle_model=getattr(item, "vehicle_model", None),
+            owner_name=getattr(item, "owner_name", None),
+            fir_number=getattr(item, "fir_number", None),
+            police_station=getattr(item, "police_station", None),
+            auto_alert=getattr(item, "auto_alert", True) if getattr(item, "auto_alert", None) is not None else True,
+            scan_count=getattr(item, "scan_count", 0) or crossings_count,
+            last_scanned_at=getattr(item, "last_scanned_at", None),
             created_by=item.created_by or "operator",
             created_at=item.created_at,
             status=item.status or "ACTIVE",
@@ -2017,20 +2180,36 @@ def get_blacklist(db: Session = Depends(get_db)):
 
 @router.post("/watchlist", response_model=BlacklistOut, status_code=status.HTTP_201_CREATED)
 @router.post("/blacklist", response_model=BlacklistOut, status_code=status.HTTP_201_CREATED)
+@router.post("/anpr/directories", response_model=BlacklistOut, status_code=status.HTTP_201_CREATED)
 async def add_to_blacklist(entry_in: BlacklistCreate, db: Session = Depends(get_db)):
     """
-    Manually registers a target vehicle license plate into the surveillance watchlist
-    to track if the vehicle has crossed or crosses any traffic signal junction.
+    Registers a target vehicle license plate into the surveillance directories
+    (Stolen Vehicles, Security Watchlist, Challan Defaulters, Compliance Flags, Whitelist).
     """
     from app.services.compliance.providers.demo_vehicle_provider import demo_vehicle_provider
     from app.websocket.manager import ws_manager
 
     clean_p = entry_in.plate.upper().replace(" ", "").replace("-", "")
     existing = db.query(Blacklist).filter(Blacklist.plate == clean_p).first()
-    
+
+    dir_type = entry_in.directory_type or "SECURITY_WATCHLIST"
+    sev = entry_in.severity or ("LOW" if dir_type == "VIP_WHITELIST" else "CRITICAL")
+
     if existing:
         existing.reason = entry_in.reason
+        existing.directory_type = dir_type
+        existing.severity = sev
         existing.status = "ACTIVE"
+        if entry_in.vehicle_model:
+            existing.vehicle_model = entry_in.vehicle_model
+        if entry_in.owner_name:
+            existing.owner_name = entry_in.owner_name
+        if entry_in.fir_number:
+            existing.fir_number = entry_in.fir_number
+        if entry_in.police_station:
+            existing.police_station = entry_in.police_station
+        if entry_in.auto_alert is not None:
+            existing.auto_alert = entry_in.auto_alert
         if entry_in.notes:
             existing.notes = entry_in.notes
         db.commit()
@@ -2040,6 +2219,13 @@ async def add_to_blacklist(entry_in: BlacklistCreate, db: Session = Depends(get_
         entry = Blacklist(
             plate=clean_p,
             reason=entry_in.reason,
+            directory_type=dir_type,
+            severity=sev,
+            vehicle_model=entry_in.vehicle_model,
+            owner_name=entry_in.owner_name,
+            fir_number=entry_in.fir_number,
+            police_station=entry_in.police_station,
+            auto_alert=entry_in.auto_alert if entry_in.auto_alert is not None else True,
             created_by="operator",
             status="ACTIVE",
             notes=entry_in.notes
@@ -2048,21 +2234,21 @@ async def add_to_blacklist(entry_in: BlacklistCreate, db: Session = Depends(get_
         db.commit()
         db.refresh(entry)
 
-    # Sync with demo vehicle registry so compliance engine flags it on signal passage
+    # Sync with demo vehicle registry
     if clean_p in demo_vehicle_provider._memory_cache:
         demo_vehicle_provider._memory_cache[clean_p]["watchlist"] = {
             "matched": True,
-            "reference": f"WATCHLIST-{entry.id}",
+            "reference": f"DIR-{entry.id}",
+            "directory_type": dir_type,
             "reason": entry_in.reason
         }
     else:
-        # Create a fictional vehicle entry for this newly tracked plate
         demo_vehicle_provider._memory_cache[clean_p] = {
             "vehicle_number": clean_p,
             "registration_status": "ACTIVE",
             "vehicle_class": "MOTOR CAR (LMV)",
-            "manufacturer": "GENERIC",
-            "model": "SURVEILLANCE TARGET",
+            "manufacturer": entry_in.vehicle_model or "GENERIC",
+            "model": entry_in.vehicle_model or "SURVEILLANCE TARGET",
             "registration_date": "2023-01-01",
             "fuel_type": "PETROL",
             "rc": {"status": "VALID", "valid_until": "2038-01-01"},
@@ -2072,12 +2258,13 @@ async def add_to_blacklist(entry_in: BlacklistCreate, db: Session = Depends(get_
             "permit": None,
             "watchlist": {
                 "matched": True,
-                "reference": f"WATCHLIST-{entry.id}",
+                "reference": f"DIR-{entry.id}",
+                "directory_type": dir_type,
                 "reason": entry_in.reason
             },
             "owner_reference": f"TARGET-{entry.id}",
-            "authorized_owner_display_name": "Target Under Surveillance",
-            "notes": entry_in.notes or "Manually flagged for traffic signal crossing tracking"
+            "authorized_owner_display_name": entry_in.owner_name or "Target Under Surveillance",
+            "notes": entry_in.notes or f"Flagged in {dir_type}"
         }
 
     # Query if this vehicle has already crossed any signal camera
@@ -2096,41 +2283,45 @@ async def add_to_blacklist(entry_in: BlacklistCreate, db: Session = Depends(get_
             last_loc = f"Signal Camera #{last_obs.camera_id}"
         last_time = last_obs.timestamp.isoformat()
 
-        # Generate immediate notification that tracked vehicle was sighted at a signal
-        alert_msg = f"TRACKED VEHICLE SIGHTED: Target plate {clean_p} has crossed {crossings_count} traffic signal(s). Most recent: {last_loc} at {last_time}."
-        alert = Alert(
-            type="WATCHLIST_MATCH",
-            severity="HIGH",
-            camera_id=last_obs.camera_id,
-            location=last_loc,
-            vehicle_plate=clean_p,
-            message=alert_msg,
-            status="NEW",
-            confidence=last_obs.final_confidence or 0.95
-        )
-        db.add(alert)
-        db.commit()
+        # If auto_alert enabled and crossings exist, generate immediate notification
+        if entry.auto_alert and dir_type != "VIP_WHITELIST":
+            alert_msg = f"DIRECTORY MATCH: Vehicle {clean_p} ({dir_type}) sighted at {last_loc}. Reason: {entry.reason}."
+            alert = Alert(
+                type=dir_type,
+                severity=sev if sev != "NORMAL" else "HIGH",
+                camera_id=last_obs.camera_id,
+                location=last_loc,
+                vehicle_plate=clean_p,
+                message=alert_msg,
+                status="NEW",
+                confidence=last_obs.final_confidence or 0.95
+            )
+            db.add(alert)
+            db.commit()
 
-        await ws_manager.broadcast({
-            "event": "ALERT_CREATED",
-            "alert": {
-                "id": alert.id,
-                "type": alert.type,
-                "severity": alert.severity,
-                "location": alert.location,
-                "vehicle_plate": alert.vehicle_plate,
-                "message": alert.message,
-                "timestamp": alert.timestamp.isoformat()
-            }
-        })
+            await ws_manager.broadcast({
+                "event": "ALERT_CREATED",
+                "alert": {
+                    "id": alert.id,
+                    "type": alert.type,
+                    "severity": alert.severity,
+                    "location": alert.location,
+                    "vehicle_plate": alert.vehicle_plate,
+                    "message": alert.message,
+                    "timestamp": alert.timestamp.isoformat()
+                }
+            })
 
-    # Broadcast real-time watchlist updated event
+    # Broadcast real-time directory updated event
     await ws_manager.broadcast({
-        "event": "WATCHLIST_UPDATED",
+        "event": "DIRECTORY_UPDATED",
         "entry": {
             "id": entry.id,
             "plate": clean_p,
+            "directory_type": dir_type,
+            "severity": sev,
             "reason": entry.reason,
+            "vehicle_model": entry.vehicle_model,
             "notes": entry.notes,
             "total_crossings": crossings_count,
             "last_crossing_location": last_loc,
@@ -2142,6 +2333,14 @@ async def add_to_blacklist(entry_in: BlacklistCreate, db: Session = Depends(get_
         id=entry.id,
         plate=clean_p,
         reason=entry.reason,
+        directory_type=dir_type,
+        severity=sev,
+        vehicle_model=entry.vehicle_model,
+        owner_name=entry.owner_name,
+        fir_number=entry.fir_number,
+        police_station=entry.police_station,
+        auto_alert=entry.auto_alert,
+        scan_count=crossings_count,
         created_by="operator",
         created_at=entry.created_at,
         status=entry.status or "ACTIVE",
@@ -2151,6 +2350,192 @@ async def add_to_blacklist(entry_in: BlacklistCreate, db: Session = Depends(get_
         last_crossing_time=last_time,
         sighted=crossings_count > 0
     )
+
+@router.put("/anpr/directories/{blacklist_id}", response_model=BlacklistOut)
+@router.put("/watchlist/{blacklist_id}", response_model=BlacklistOut)
+async def update_directory_entry(blacklist_id: int, update_in: DirectoryEntryUpdate, db: Session = Depends(get_db)):
+    """Updates an existing directory entry (status, notes, severity, auto_alert, etc.)."""
+    from app.websocket.manager import ws_manager
+
+    entry = db.query(Blacklist).filter(Blacklist.id == blacklist_id).first()
+    if not entry:
+        raise HTTPException(status_code=404, detail="Directory entry not found")
+
+    if update_in.reason is not None:
+        entry.reason = update_in.reason
+    if update_in.directory_type is not None:
+        entry.directory_type = update_in.directory_type
+    if update_in.severity is not None:
+        entry.severity = update_in.severity
+    if update_in.vehicle_model is not None:
+        entry.vehicle_model = update_in.vehicle_model
+    if update_in.owner_name is not None:
+        entry.owner_name = update_in.owner_name
+    if update_in.fir_number is not None:
+        entry.fir_number = update_in.fir_number
+    if update_in.police_station is not None:
+        entry.police_station = update_in.police_station
+    if update_in.auto_alert is not None:
+        entry.auto_alert = update_in.auto_alert
+    if update_in.status is not None:
+        entry.status = update_in.status
+    if update_in.notes is not None:
+        entry.notes = update_in.notes
+
+    db.commit()
+    db.refresh(entry)
+
+    await ws_manager.broadcast({
+        "event": "DIRECTORY_UPDATED",
+        "entry": {"id": entry.id, "plate": entry.plate, "status": entry.status}
+    })
+
+    return BlacklistOut(
+        id=entry.id,
+        plate=entry.plate,
+        reason=entry.reason,
+        directory_type=entry.directory_type,
+        severity=entry.severity,
+        vehicle_model=entry.vehicle_model,
+        owner_name=entry.owner_name,
+        fir_number=entry.fir_number,
+        police_station=entry.police_station,
+        auto_alert=entry.auto_alert,
+        scan_count=entry.scan_count,
+        last_scanned_at=entry.last_scanned_at,
+        created_by=entry.created_by,
+        created_at=entry.created_at,
+        status=entry.status,
+        notes=entry.notes
+    )
+
+@router.delete("/watchlist/{blacklist_id}", status_code=status.HTTP_204_NO_CONTENT)
+@router.delete("/blacklist/{blacklist_id}", status_code=status.HTTP_204_NO_CONTENT)
+@router.delete("/anpr/directories/{blacklist_id}", status_code=status.HTTP_204_NO_CONTENT)
+def remove_from_blacklist(blacklist_id: int, db: Session = Depends(get_db)):
+    entry = db.query(Blacklist).filter(Blacklist.id == blacklist_id).first()
+    if not entry:
+        raise HTTPException(status_code=404, detail="Directory entry not found")
+
+    clean_p = entry.plate.upper().replace(" ", "").replace("-", "")
+    from app.services.compliance.providers.demo_vehicle_provider import demo_vehicle_provider
+    if clean_p in demo_vehicle_provider._memory_cache:
+        demo_vehicle_provider._memory_cache[clean_p]["watchlist"] = {
+            "matched": False,
+            "reference": None,
+            "reason": None
+        }
+
+    db.delete(entry)
+    db.commit()
+    return
+
+@router.post("/anpr/directories/seed")
+def seed_multi_category_directories(db: Session = Depends(get_db)):
+    """
+    Seeds comprehensive realistic entries across all 5 directories:
+    Stolen Vehicles, Security Watchlist, Challan Defaulters, Compliance Flags, and VIP Whitelist.
+    """
+    seed_entries = [
+        # 1. Stolen Vehicles Directory (CRITICAL)
+        ("KA05MN3821", "STOLEN_VEHICLES", "CRITICAL", "Stolen Blue Yamaha FZ motorcycle", "Yamaha FZ v3 (Blue)", "Karthik Raja", "FIR-2026/104", "Anna Salai PS", "Armed theft reported near Gemini circle."),
+        ("TN09BZ9999", "STOLEN_VEHICLES", "CRITICAL", "Stolen Black Mahindra Scorpio SUV", "Mahindra Scorpio-N (Black)", "Suresh Kumar", "FIR-2026/220", "T. Nagar PS", "Reported stolen from commercial parking lot."),
+        # 2. Security Watchlist (CRITICAL)
+        ("MH12PQ9999", "SECURITY_WATCHLIST", "CRITICAL", "Flagged Black Fortuner for unauthorized perimeter access", "Toyota Fortuner (Black)", "Unknown Suspect", "WARRANT-2026/41", "Perimeter Task Force", "Subject to vehicle search upon detection."),
+        ("DL03CC4455", "SECURITY_WATCHLIST", "CRITICAL", "Hit and run investigation suspect vehicle", "Honda City (Silver)", "Ramesh Chand", "FIR-2026/309", "Chennai Central PS", "Hit-and-run collision on EVR Periyar Salai."),
+        # 3. Challan & Impound Defaulters (HIGH)
+        ("TN01AB1234", "CHALLAN_DEFAULTER", "HIGH", "14 Outstanding Red-Light Jump & Speeding Warrants", "Maruti Swift Dzire (White)", "P. Balaji", "NOTICE-TN-9912", "Traffic Headquarters", "Accumulated unpaid fine exceeding ₹18,500."),
+        ("HR26BC9999", "CHALLAN_DEFAULTER", "HIGH", "9 Repeated Expressway Speed Violations", "Hyundai Creta (Grey)", "Vikram Malhotra", "NOTICE-HR-4401", "Expressway Traffic Cell", "Recorded repeated speeds > 130 km/h."),
+        # 4. RTO Compliance Flags (HIGH/MEDIUM)
+        ("TNXX1002", "RTO_COMPLIANCE", "HIGH", "Expired Mandatory Third-Party Insurance", "Hyundai Creta SX (White)", "Sanjay Narayanan", None, "RTO South Chennai", "Motor Vehicle Act Sec 146 compliance violation."),
+        ("TNXX1003", "RTO_COMPLIANCE", "MEDIUM", "Pollution Under Control (PUC) Expired", "Maruti Suzuki Dzire (Silver)", "Deepa R.", None, "RTO Central", "Air pollution certificate past due by 4 months."),
+        ("TNXX1004", "RTO_COMPLIANCE", "HIGH", "Commercial Fitness Certificate Expired", "Mahindra Bolero Maxi Truck", "Madhav Logistics Ltd", None, "RTO West", "Hazardous commercial freight operation."),
+        # 5. VIP / Emergency Whitelist (LOW / EXEMPT)
+        ("TN01EM9999", "VIP_WHITELIST", "LOW", "Greater Chennai Police Patrol Cruiser", "Toyota Innova Crysta (White/Blue)", "Tamil Nadu Police", None, "Police HQ", "Authorized patrol unit — green corridor priority."),
+        ("KA01AM1080", "VIP_WHITELIST", "LOW", "108 Emergency Medical Service Ambulance", "Force Traveller Ambulance (White/Red)", "GVK EMRI 108", None, "Emergency Dispatch", "Emergency priority life-support ambulance.")
+    ]
+
+    added_count = 0
+    for plate, dtype, sev, reason, vmodel, owner, fir, station, notes in seed_entries:
+        clean_p = plate.upper().replace(" ", "").replace("-", "")
+        existing = db.query(Blacklist).filter(Blacklist.plate == clean_p).first()
+        if not existing:
+            rec = Blacklist(
+                plate=clean_p,
+                directory_type=dtype,
+                severity=sev,
+                reason=reason,
+                vehicle_model=vmodel,
+                owner_name=owner,
+                fir_number=fir,
+                police_station=station,
+                auto_alert=(dtype != "VIP_WHITELIST"),
+                created_by="system_seeder",
+                status="ACTIVE",
+                notes=notes
+            )
+            db.add(rec)
+            added_count += 1
+        else:
+            # Upgrade existing records with rich directory metadata
+            existing.directory_type = dtype
+            existing.severity = sev
+            existing.vehicle_model = vmodel
+            existing.owner_name = owner
+            existing.fir_number = fir
+            existing.police_station = station
+            existing.auto_alert = (dtype != "VIP_WHITELIST")
+            existing.notes = notes
+
+    db.commit()
+    return {"message": f"Successfully seeded {added_count} multi-category directory records.", "total_records": db.query(Blacklist).count()}
+
+@router.post("/anpr/scan-check", response_model=PlateScanCheckResponse)
+async def scan_and_check_plate(scan_in: PlateScanCheckRequest, db: Session = Depends(get_db)):
+    """
+    Scans a number plate (from manual input or image frame), checks it across all directories
+    (Stolen, Watchlist, Challan Defaulters, Compliance, Whitelist), and automatically triggers an alert if matched.
+    """
+    import base64
+    import numpy as np
+    from app.cv.anpr import anpr_engine
+
+    target_plate = scan_in.plate_number
+    confidence = 0.95
+    detected_via = scan_in.source or "MANUAL_SCAN"
+
+    # If image base64 provided, run ANPR OCR extraction
+    if scan_in.image_base64:
+        try:
+            raw_b64 = scan_in.image_base64
+            if "," in raw_b64:
+                raw_b64 = raw_b64.split(",")[1]
+            img_bytes = base64.b64decode(raw_b64)
+            nparr = np.frombuffer(img_bytes, np.uint8)
+            img = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
+            if img is not None:
+                plate_res = anpr_engine.extract_plate(img)
+                if plate_res and plate_res.get("plate_number"):
+                    target_plate = plate_res["plate_number"]
+                    confidence = round(plate_res.get("final_confidence", 0.94), 2)
+                    detected_via = "IMAGE_OCR_EXTRACTION"
+        except Exception as ocre:
+            logger.warning(f"ANPR image decode fallback: {ocre}")
+
+    if not target_plate:
+        raise HTTPException(status_code=400, detail="Please provide a valid plate number or readable vehicle image.")
+
+    result = await directory_service.check_plate_in_directories(
+        plate_number=target_plate,
+        db=db,
+        camera_id=scan_in.camera_id or 1,
+        location=scan_in.location or "Main Surveillance Junction",
+        source=detected_via,
+        confidence=confidence,
+        auto_create_alert=bool(scan_in.auto_create_alert)
+    )
+
+    return PlateScanCheckResponse(**result)
 
 @router.get("/watchlist/{plate_number}/crossings")
 def get_watchlist_vehicle_crossings(plate_number: str, db: Session = Depends(get_db)):
@@ -2189,26 +2574,6 @@ def get_watchlist_vehicle_crossings(plate_number: str, db: Session = Depends(get
         "total_crossings": len(output),
         "crossings": output
     }
-
-@router.delete("/watchlist/{blacklist_id}", status_code=status.HTTP_204_NO_CONTENT)
-@router.delete("/blacklist/{blacklist_id}", status_code=status.HTTP_204_NO_CONTENT)
-def remove_from_blacklist(blacklist_id: int, db: Session = Depends(get_db)):
-    entry = db.query(Blacklist).filter(Blacklist.id == blacklist_id).first()
-    if not entry:
-        raise HTTPException(status_code=404, detail="Watch entry not found")
-    
-    clean_p = entry.plate.upper().replace(" ", "").replace("-", "")
-    from app.services.compliance.providers.demo_vehicle_provider import demo_vehicle_provider
-    if clean_p in demo_vehicle_provider._memory_cache:
-        demo_vehicle_provider._memory_cache[clean_p]["watchlist"] = {
-            "matched": False,
-            "reference": None,
-            "reason": None
-        }
-
-    db.delete(entry)
-    db.commit()
-    return
 
 # 11. Route Anomalies
 @router.get("/anomalies", response_model=List[RouteAnomalyOut])

@@ -31,7 +31,7 @@ export const Sidebar: React.FC = () => {
     { name: 'Live Cameras', path: '/cameras', icon: Video },
     { name: 'Traffic Map', path: '/heatmap', icon: Map },
     { name: 'Vehicle Tracking', path: '/trajectories', icon: Route },
-    { name: 'Number Plate Search', path: '/anpr', icon: Search },
+    { name: 'ANPR & Directories', path: '/anpr', icon: Search, badge: 'ALERT' },
     { name: 'Signal Control', path: '/signals', icon: TrafficCone },
     { name: 'Alerts', path: '/alerts', icon: Bell, badge: 'LIVE' },
     { name: 'Region Forecast', path: '/forecast', icon: TrendingUp },
