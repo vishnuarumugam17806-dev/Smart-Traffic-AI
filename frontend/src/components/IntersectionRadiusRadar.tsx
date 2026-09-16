@@ -67,7 +67,7 @@ export const IntersectionRadiusRadar: React.FC<IntersectionRadiusRadarProps> = (
   const [localApproaches, setLocalApproaches] = useState<ApproachConfig[]>(approaches);
   const [totalPassedCount, setTotalPassedCount] = useState<number>(0);
   const [lastEventText, setLastEventText] = useState<string>(
-    'System monitoring 60m radius zone. When vehicle passes radius and approach has 0 vehicles, signal auto-switches.'
+    'System monitoring 20m radius zone. When vehicle passes radius and approach has 0 vehicles, signal auto-switches.'
   );
 
   // 360-Degree Continuous Scanning Needle & Animation Loop Refs
@@ -125,7 +125,7 @@ export const IntersectionRadiusRadar: React.FC<IntersectionRadiusRadarProps> = (
         initial.push({
           id: vId++,
           approach: app.key,
-          distMeters: 25 + i * 16, // Distance from intersection center (meters)
+          distMeters: 6 + i * 4, // Distance from intersection center (meters)
           speedKmh: 35 + Math.floor(Math.random() * 15),
           color: colors[i % colors.length],
           type: i === 0 ? 'SEDAN' : i === 1 ? 'SUV' : 'BUS',
@@ -138,7 +138,7 @@ export const IntersectionRadiusRadar: React.FC<IntersectionRadiusRadarProps> = (
   }, [junctionId]);
 
   // Radius parameter in meters
-  const DETECTION_RADIUS_M = 60.0;
+  const DETECTION_RADIUS_M = 20.0;
 
   // Handle a vehicle passing the radius boundary
   const handlePassVehicle = async () => {
@@ -181,7 +181,7 @@ export const IntersectionRadiusRadar: React.FC<IntersectionRadiusRadarProps> = (
           showAutoSwitchNotice(activeAppKey, res.data.reasoning);
         } else {
           setLastEventText(
-            `Vehicle passed 60m radius on ${activeAppKey}. ${remaining} vehicle(s) remaining in approach zone.`
+            `Vehicle passed 20m radius on ${activeAppKey}. ${remaining} vehicle(s) remaining in approach zone.`
           );
         }
       }
@@ -191,11 +191,11 @@ export const IntersectionRadiusRadar: React.FC<IntersectionRadiusRadarProps> = (
       if (remainingOnActive === 0) {
         showAutoSwitchNotice(
           activeAppKey,
-          `Vehicle passed 60m radius. Approach ${activeAppKey} has 0 vehicles. Automatically switching signal to next approach.`
+          `Vehicle passed 20m radius. Approach ${activeAppKey} has 0 vehicles. Automatically switching signal to next approach.`
         );
       } else {
         setLastEventText(
-          `Vehicle passed 60m radius on ${activeAppKey}. ${remainingOnActive} vehicle(s) remaining in approach zone.`
+          `Vehicle passed 20m radius on ${activeAppKey}. ${remainingOnActive} vehicle(s) remaining in approach zone.`
         );
       }
     }
@@ -236,14 +236,14 @@ export const IntersectionRadiusRadar: React.FC<IntersectionRadiusRadarProps> = (
     const newVeh: SimVehicle = {
       id: Date.now() % 10000,
       approach: activeAppKey,
-      distMeters: 75 + Math.random() * 15,
+      distMeters: 25 + Math.random() * 5,
       speedKmh: 42,
       color: '#38BDF8',
       type: 'SEDAN',
       passedRadius: false
     };
     setVehicles((prev) => [...prev, newVeh]);
-    setLastEventText(`Spawned new vehicle on ${activeAppKey} approach at 80m distance from intersection.`);
+    setLastEventText(`Spawned new vehicle on ${activeAppKey} approach at 25m distance from intersection.`);
   };
 
   const showAutoSwitchNotice = (approach: string, reason?: string) => {
@@ -275,9 +275,9 @@ export const IntersectionRadiusRadar: React.FC<IntersectionRadiusRadarProps> = (
       const cx = width / 2;
       const cy = height / 2;
 
-      // Scale: 100m mapped to outer radius
+      // Scale: 30m mapped to outer radius
       const maxRadiusPx = Math.min(cx, cy) - 46;
-      const radiusScale = maxRadiusPx / 100.0;
+      const radiusScale = maxRadiusPx / 30.0;
       const detRadiusPx = DETECTION_RADIUS_M * radiusScale;
 
       ctx.clearRect(0, 0, width, height);
@@ -330,8 +330,8 @@ export const IntersectionRadiusRadar: React.FC<IntersectionRadiusRadarProps> = (
         }
       }
 
-      // 3. Concentric Distance Grid Circles (20m, 40m, 60m Detection Radius, 80m, 100m)
-      const distances = [20, 40, DETECTION_RADIUS_M, 80, 100];
+      // 3. Concentric Distance Grid Circles (5m, 10m, 15m, 20m Detection Radius, 25m, 30m)
+      const distances = [5, 10, 15, DETECTION_RADIUS_M, 25, 30];
       distances.forEach((d) => {
         const r = d * radiusScale;
         const isDetectionRadius = d === DETECTION_RADIUS_M;
@@ -339,7 +339,7 @@ export const IntersectionRadiusRadar: React.FC<IntersectionRadiusRadarProps> = (
         ctx.beginPath();
         ctx.arc(cx, cy, r, 0, Math.PI * 2);
         if (isDetectionRadius) {
-          // Highlighted 60m Detection Radius Ring
+          // Highlighted 20m Detection Radius Ring
           ctx.strokeStyle = '#10B981';
           ctx.lineWidth = 2.5;
           ctx.setLineDash([6, 4]);
@@ -362,7 +362,7 @@ export const IntersectionRadiusRadar: React.FC<IntersectionRadiusRadarProps> = (
         ctx.textAlign = 'left';
         ctx.textBaseline = 'alphabetic';
         ctx.fillText(
-          isDetectionRadius ? `60m DETECTION RADIUS` : `${d}m`,
+          isDetectionRadius ? `20m DETECTION RADIUS` : `${d}m`,
           cx + 6,
           cy - r + (isDetectionRadius ? 12 : -3)
         );
@@ -682,14 +682,14 @@ export const IntersectionRadiusRadar: React.FC<IntersectionRadiusRadarProps> = (
           <div>
             <div className="flex items-center gap-2">
               <h3 className="font-extrabold text-xs tracking-wider text-slate-100 uppercase">
-                INTERSECTION DETECTION RADIUS (60m) & ZERO-WASTE AUTO-SWITCH RADAR
+                INTERSECTION DETECTION RADIUS (20m) & ZERO-WASTE AUTO-SWITCH RADAR
               </h3>
               <span className="px-2 py-0.5 rounded text-[9px] font-extrabold bg-emerald-500/20 text-emerald-300 border border-emerald-500/30">
                 PROXIMITY ENGINE ACTIVE
               </span>
             </div>
             <p className="text-[10px] text-slate-400">
-              Detects vehicles crossing the 60m radius zone. When all vehicles pass and 0 remain, signal automatically switches to the next approach.
+              Detects vehicles crossing the 20m radius zone. When all vehicles pass and 0 remain, signal automatically switches to the next approach.
             </p>
           </div>
         </div>
@@ -745,7 +745,7 @@ export const IntersectionRadiusRadar: React.FC<IntersectionRadiusRadarProps> = (
 
           <div className="absolute bottom-4 right-4 pointer-events-none">
             <div className="px-2.5 py-1 rounded bg-slate-900/90 backdrop-blur-xs border border-slate-700 text-[9px] text-slate-300 space-y-0.5">
-              <div>🎯 <strong>60m RADIUS</strong> GEOFENCE ACTIVE</div>
+              <div>🎯 <strong>20m RADIUS</strong> GEOFENCE ACTIVE</div>
               <div>⚡ AUTO-SWITCH ON <strong>0 VEHICLES</strong></div>
             </div>
           </div>
@@ -767,7 +767,7 @@ export const IntersectionRadiusRadar: React.FC<IntersectionRadiusRadarProps> = (
             {/* Metrics Dashboard */}
             <div className="grid grid-cols-2 gap-2.5 text-xs">
               <div className="p-2.5 bg-slate-950 rounded-lg border border-slate-800">
-                <span className="text-[10px] text-slate-400 uppercase block">Vehicles in 60m Radius</span>
+                <span className="text-[10px] text-slate-400 uppercase block">Vehicles in 20m Radius</span>
                 <span className="text-lg font-black text-emerald-400">{vehiclesInActiveRadius} veh</span>
               </div>
               <div className="p-2.5 bg-slate-950 rounded-lg border border-slate-800">
@@ -776,7 +776,7 @@ export const IntersectionRadiusRadar: React.FC<IntersectionRadiusRadarProps> = (
               </div>
               <div className="p-2.5 bg-slate-950 rounded-lg border border-slate-800">
                 <span className="text-[10px] text-slate-400 uppercase block">Detection Radius</span>
-                <span className="text-base font-bold text-slate-200">60.0 meters</span>
+                <span className="text-base font-bold text-slate-200">20.0 meters</span>
               </div>
               <div className="p-2.5 bg-slate-950 rounded-lg border border-slate-800">
                 <span className="text-[10px] text-slate-400 uppercase block">Auto-Switch Behavior</span>

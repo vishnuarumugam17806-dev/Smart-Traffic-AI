@@ -270,10 +270,10 @@ export const CameraCanvasFeed: React.FC<CameraCanvasFeedProps> = ({
       }
 
       // ==========================================
-      // 3. 60m DETECTION RADIUS & STOP LINE
+      // 3. 20m DETECTION RADIUS & STOP LINE
       // ==========================================
-      // 60m Detection Radius Boundary Line
-      const radiusY = Math.floor(H * 0.64);
+      // 20m Detection Radius Boundary Line
+      const radiusY = Math.floor(H * 0.74);
       const radLeftX = horizonLeftX + (bottomLeftX - horizonLeftX) * ((radiusY - horizonY) / (H - horizonY));
       const radRightX = horizonRightX + (bottomRightX - horizonRightX) * ((radiusY - horizonY) / (H - horizonY));
 
@@ -289,7 +289,7 @@ export const CameraCanvasFeed: React.FC<CameraCanvasFeedProps> = ({
       ctx.fillStyle = '#34D399';
       ctx.font = 'bold 11px monospace';
       ctx.textAlign = 'center';
-      ctx.fillText('⚡ 60m DETECTION RADIUS (AUTO-SWITCHES SIGNAL WHEN CLEARED)', (radLeftX + radRightX) / 2, radiusY - 8);
+      ctx.fillText('⚡ 20m DETECTION RADIUS (AUTO-SWITCHES SIGNAL WHEN CLEARED)', (radLeftX + radRightX) / 2, radiusY - 8);
       ctx.textAlign = 'left';
 
       const stopLeftX = horizonLeftX + (bottomLeftX - horizonLeftX) * ((stopLineY - horizonY) / (H - horizonY));

@@ -300,7 +300,7 @@ class SignalController:
             "demand_score": 0.25,
             "priority_score": 25.0,
             "green_duration": 30,
-            "detection_radius_m": 60.0,
+            "detection_radius_m": getattr(settings, "DETECTION_RADIUS_M", 20.0),
             "passed_radius_count": 0,
             "last_passed_radius_time": None,
             "is_queue_available": True,
@@ -371,7 +371,7 @@ class SignalController:
                 self.countdown = settings.YELLOW_TIME
                 switched = True
                 reason = (
-                    f"Vehicle passed intersection radius (60m). Approach {key} has 0 vehicles remaining. "
+                    f"Vehicle passed intersection radius (20m). Approach {key} has 0 vehicles remaining. "
                     f"Signal automatically changing and switching to next approach."
                 )
                 self.last_reasoning = reason
@@ -513,7 +513,7 @@ class SignalController:
                 self.state = "YELLOW"
                 self.countdown = settings.YELLOW_TIME
                 self.last_reasoning = (
-                    f"Radius Auto-Switch: All vehicles passed detection radius (60m). Approach {self.active_approach} "
+                    f"Radius Auto-Switch: All vehicles passed detection radius (20m). Approach {self.active_approach} "
                     f"has 0 vehicles remaining. Automatically switching signal to next approach."
                 )
                 logger.info(f"Approach {self.active_approach} empty inside radius. Triggered auto-switch to next approach.")

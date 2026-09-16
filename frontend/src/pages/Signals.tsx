@@ -408,7 +408,7 @@ export const Signals: React.FC = () => {
     displayedCameras
   ]);
 
-  // Quick Action: Simulate 1 vehicle passing 60m radius on specified approach
+  // Quick Action: Simulate 1 vehicle passing 20m radius on specified approach
   const handlePassVehicle = async (approachKey: string) => {
     try {
       const res = await apiClient.post(`/intersections/${selectedJunctionId}/vehicle-pass`, {
@@ -417,7 +417,7 @@ export const Signals: React.FC = () => {
       const remaining = res.data?.vehicles_remaining ?? 0;
       setVehiclePassNotice({
         approach: approachKey,
-        text: `⚡ Vehicle passed 60m radius (${remaining} veh remaining)`
+        text: `⚡ Vehicle passed 20m radius (${remaining} veh remaining)`
       });
       setTimeout(() => setVehiclePassNotice(null), 2500);
       fetchJunctionData();
@@ -754,7 +754,7 @@ export const Signals: React.FC = () => {
         </div>
       </div>
 
-      {/* SECTION: INTERACTIVE DETECTION RADIUS (60m) & ZERO-WASTE AUTO-SWITCH RADAR */}
+      {/* SECTION: INTERACTIVE DETECTION RADIUS (20m) & ZERO-WASTE AUTO-SWITCH RADAR */}
       <IntersectionRadiusRadar
         junctionId={selectedJunctionId}
         junctionName={activeJunction?.name || `Junction #${selectedJunctionId}`}
@@ -914,7 +914,7 @@ export const Signals: React.FC = () => {
                     <div className="absolute inset-x-0 bottom-10 z-10 pointer-events-none flex flex-col items-center">
                       <div className="w-full py-0.5 bg-emerald-600/75 backdrop-blur-xs border-y border-emerald-400 flex items-center justify-center gap-2 shadow-[0_0_15px_rgba(16,185,129,0.5)]">
                         <span className="text-[9px] font-mono font-black text-emerald-100 tracking-wider flex items-center gap-1">
-                          🟢 FLOW CORRIDOR ACTIVE [48 KM/H] • 60m DETECTION RADAR ARMED
+                          🟢 FLOW CORRIDOR ACTIVE [48 KM/H] • 20m DETECTION RADAR ARMED
                         </span>
                       </div>
                     </div>
@@ -1003,7 +1003,7 @@ export const Signals: React.FC = () => {
                               handlePassVehicle(dirKey);
                             }}
                             className="px-2 py-1 bg-emerald-600 hover:bg-emerald-500 text-white font-mono text-[9px] font-bold rounded shadow-md border border-emerald-400 transition-all flex items-center gap-1 active:scale-95 cursor-pointer"
-                            title="Simulate 1 vehicle crossing 60m radius and passing the stop line"
+                            title="Simulate 1 vehicle crossing 20m radius and passing the stop line"
                           >
                             <Zap className="w-2.5 h-2.5 text-yellow-300" />
                             <span>PASS VEHICLE (-1)</span>

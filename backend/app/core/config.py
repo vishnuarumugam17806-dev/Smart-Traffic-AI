@@ -85,6 +85,7 @@ class Settings(BaseSettings):
     CONGESTION_SPEED_THRESHOLD_KMH: float = 10.0  # Speed below which vehicles are considered queued
     MAX_EXPECTED_QUEUE: int = 50          # Max expected queue count for normalization scaling
     MAX_EXPECTED_VEHICLES: int = 60       # Max expected vehicle count for normalization scaling
+    DETECTION_RADIUS_M: float = 20.0      # Detection radius in meters for approach clearance
 
     # Vision & Processing
     DETECTION_FPS: int = 10
