@@ -103,6 +103,20 @@ export interface Violation {
   timestamp: string;
 }
 
+export interface Alert {
+  id: number;
+  type: string;
+  severity: 'CRITICAL' | 'HIGH' | 'MEDIUM' | 'LOW';
+  timestamp: string;
+  camera_id?: number | null;
+  location?: string | null;
+  vehicle_plate?: string | null;
+  message: string;
+  status: string;
+  confidence?: number;
+  is_read?: boolean;
+}
+
 export interface NumberPlate {
   id: number;
   plate_number: string;
