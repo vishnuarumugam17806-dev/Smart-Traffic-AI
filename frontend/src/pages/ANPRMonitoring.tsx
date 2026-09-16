@@ -89,6 +89,7 @@ interface PlateDossier {
     rc_status: string;
     is_stolen: boolean;
     stolen_reason?: string;
+    fuel_type?: string;
     compliance?: any;
   };
   total_sightings_count: number;
@@ -104,6 +105,8 @@ const SAMPLE_TEST_PLATES = [
   { plate: "MH12PQ9999", label: "🛡️ Security Watchlist (Fortuner SUV)", category: "SECURITY_WATCHLIST", color: "bg-purple-50 text-purple-800 border-purple-300" },
   { plate: "TN01AB1234", label: "⚠️ Challan Defaulter (14 Red-Light Fines)", category: "CHALLAN_DEFAULTER", color: "bg-amber-50 text-amber-800 border-amber-300" },
   { plate: "TNXX1002", label: "📋 RTO Flag (Insurance Expired Creta)", category: "RTO_COMPLIANCE", color: "bg-orange-50 text-orange-800 border-orange-300" },
+  { plate: "TNXX1003", label: "💨 RTO Flag (PUC Emission Expired Dzire)", category: "RTO_COMPLIANCE", color: "bg-orange-50 text-orange-800 border-orange-300" },
+  { plate: "TNXX1004", label: "🚚 RTO Flag (Fitness Expired Commercial Truck)", category: "RTO_COMPLIANCE", color: "bg-orange-50 text-orange-800 border-orange-300" },
   { plate: "TN01EM9999", label: "🟢 VIP Police Cruiser (Exempt/Convoy)", category: "VIP_WHITELIST", color: "bg-emerald-50 text-emerald-800 border-emerald-300" },
   { plate: "TNXX1001", label: "🟢 Clean Compliant (Nexon EV Valid Docs)", category: "COMPLIANT", color: "bg-emerald-50 text-emerald-800 border-emerald-300" },
 ];
@@ -815,17 +818,52 @@ export const ANPRMonitoring: React.FC = () => {
                 </div>
 
                 {/* 2. RTO Compliance Details */}
-                <div className="bg-white/80 p-3.5 rounded-xl border border-slate-200 space-y-1.5">
-                  <span className="text-[10px] uppercase font-bold text-slate-500">RTO Vehicle Registry</span>
+                <div className="bg-white/80 p-3.5 rounded-xl border border-slate-200 space-y-2">
+                  <div className="flex items-center justify-between">
+                    <span className="text-[10px] uppercase font-bold text-slate-500">Official RTO Document Verification</span>
+                    {scanResult.compliance_details?.compliance_status === 'ACTION_REQUIRED' ? (
+                      <span className="px-1.5 py-0.5 bg-red-100 text-red-700 font-bold rounded text-[9px]">ACTION REQUIRED</span>
+                    ) : scanResult.compliance_details ? (
+                      <span className="px-1.5 py-0.5 bg-emerald-100 text-emerald-700 font-bold rounded text-[9px]">DOCUMENTS VALID</span>
+                    ) : null}
+                  </div>
                   {scanResult.compliance_details ? (
-                    <div className="space-y-1 text-slate-800">
-                      <div>RC Status: <span className="font-bold text-emerald-600">{scanResult.compliance_details.registration_status}</span></div>
-                      <div>Insurance: <span className={`font-bold ${scanResult.compliance_details.insurance?.status === 'VALID' ? 'text-emerald-600' : 'text-red-600'}`}>{scanResult.compliance_details.insurance?.status || 'N/A'}</span></div>
-                      <div>PUC: <span className={`font-bold ${scanResult.compliance_details.puc?.status === 'VALID' ? 'text-emerald-600' : 'text-red-600'}`}>{scanResult.compliance_details.puc?.status || 'N/A'}</span></div>
-                      <div>Fitness: <span className="font-bold">{scanResult.compliance_details.fitness?.status || 'N/A'}</span></div>
+                    <div className="space-y-1.5 text-slate-800 text-[11px] font-mono">
+                      <div className="flex justify-between items-center bg-slate-50 p-1.5 rounded">
+                        <span className="text-slate-600">RC Status:</span>
+                        <span className="font-bold text-emerald-600">{scanResult.compliance_details.registration_status} (Active)</span>
+                      </div>
+                      <div className="flex justify-between items-center bg-slate-50 p-1.5 rounded">
+                        <span className="text-slate-600">Insurance:</span>
+                        <div className="text-right">
+                          <span className={`font-bold ${scanResult.compliance_details.insurance?.status === 'VALID' ? 'text-emerald-600' : 'text-red-600'}`}>
+                            {scanResult.compliance_details.insurance?.status === 'VALID' ? '✅ VALID' : '⚠️ EXPIRED'}
+                          </span>
+                          {scanResult.compliance_details.insurance?.valid_until && (
+                            <span className="text-[10px] text-slate-500 block">exp: {scanResult.compliance_details.insurance.valid_until}</span>
+                          )}
+                        </div>
+                      </div>
+                      <div className="flex justify-between items-center bg-slate-50 p-1.5 rounded">
+                        <span className="text-slate-600">PUC Emission:</span>
+                        <div className="text-right">
+                          <span className={`font-bold ${scanResult.compliance_details.puc?.status === 'VALID' ? 'text-emerald-600' : 'text-red-600'}`}>
+                            {scanResult.compliance_details.puc?.status === 'VALID' ? '✅ VALID' : '⚠️ EXPIRED'}
+                          </span>
+                          {scanResult.compliance_details.puc?.valid_until && (
+                            <span className="text-[10px] text-slate-500 block">exp: {scanResult.compliance_details.puc.valid_until}</span>
+                          )}
+                        </div>
+                      </div>
+                      <div className="flex justify-between items-center bg-slate-50 p-1.5 rounded">
+                        <span className="text-slate-600">Commercial Fitness:</span>
+                        <span className={`font-bold ${scanResult.compliance_details.fitness?.status === 'VALID' ? 'text-emerald-600' : scanResult.compliance_details.fitness?.status === 'EXPIRED' ? 'text-red-600' : 'text-slate-700'}`}>
+                          {scanResult.compliance_details.fitness?.status === 'VALID' ? '✅ VALID' : scanResult.compliance_details.fitness?.status === 'EXPIRED' ? '⚠️ EXPIRED' : scanResult.compliance_details.fitness?.status || 'N/A'}
+                        </span>
+                      </div>
                     </div>
                   ) : (
-                    <p className="text-slate-500">Standard registered vehicle record.</p>
+                    <p className="text-slate-500 text-xs">Standard registered vehicle record.</p>
                   )}
                 </div>
 
@@ -1480,6 +1518,172 @@ export const ANPRMonitoring: React.FC = () => {
                     <div className="flex justify-between">
                       <span className="text-slate-400">Unpaid Fines:</span>
                       <span className="text-red-400 font-bold">₹{selectedDossier.total_unpaid_fines_inr}</span>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              {/* Document Verification & RTO Compliance Cards */}
+              <div className="bg-slate-800/90 p-4 rounded-xl border border-slate-700 space-y-3">
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-slate-700/80 pb-2.5">
+                  <div>
+                    <h3 className="text-xs font-bold text-amber-400 uppercase tracking-wider flex items-center gap-1.5">
+                      <Shield className="w-4 h-4 text-amber-400" />
+                      Official Vehicle Document Verification (RTO & Parivahan Records)
+                    </h3>
+                    <p className="text-[10px] text-slate-400 font-mono mt-0.5">
+                      Source: {selectedDossier.owner_info.compliance?.data_source_label || 'DEMO VEHICLE REGISTRY (Fictional Records)'}
+                    </p>
+                  </div>
+                  {selectedDossier.owner_info.compliance?.compliance_status === 'ACTION_REQUIRED' ? (
+                    <span className="px-2.5 py-1 bg-red-900/60 text-red-300 border border-red-600/50 rounded text-[10px] font-bold tracking-wider uppercase flex items-center gap-1 w-fit">
+                      <AlertTriangle className="w-3 h-3 text-red-400" /> COMPLIANCE VIOLATION (ACTION REQUIRED)
+                    </span>
+                  ) : selectedDossier.owner_info.compliance?.compliance_status === 'REVIEW_REQUIRED' ? (
+                    <span className="px-2.5 py-1 bg-purple-900/60 text-purple-300 border border-purple-600/50 rounded text-[10px] font-bold tracking-wider uppercase flex items-center gap-1 w-fit">
+                      <ShieldAlert className="w-3 h-3 text-purple-400" /> SECURITY REVIEW REQUIRED
+                    </span>
+                  ) : (
+                    <span className="px-2.5 py-1 bg-emerald-900/60 text-emerald-300 border border-emerald-600/50 rounded text-[10px] font-bold tracking-wider uppercase flex items-center gap-1 w-fit">
+                      <CheckCircle2 className="w-3 h-3 text-emerald-400" /> ALL DOCUMENTS VALID & ACTIVE
+                    </span>
+                  )}
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs font-mono">
+                  {/* 1. RC (Registration Certificate) */}
+                  <div className="bg-slate-900/80 p-3 rounded-lg border border-slate-700/60 space-y-1.5">
+                    <div className="flex items-center justify-between">
+                      <span className="text-slate-400 font-bold uppercase text-[10px]">1. Registration (RC)</span>
+                      <span className={`px-2 py-0.5 rounded text-[10px] font-bold ${
+                        selectedDossier.owner_info.compliance?.rc?.status === 'VALID' || selectedDossier.owner_info.rc_status === 'ACTIVE'
+                          ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/40'
+                          : 'bg-red-500/20 text-red-300 border border-red-500/40'
+                      }`}>
+                        {selectedDossier.owner_info.compliance?.rc?.status || selectedDossier.owner_info.rc_status || 'ACTIVE'}
+                      </span>
+                    </div>
+                    <div className="text-slate-300 text-[11px] space-y-1">
+                      <div className="flex justify-between">
+                        <span className="text-slate-500">Registration Date:</span>
+                        <span className="text-slate-200">{selectedDossier.owner_info.registration_date || 'N/A'}</span>
+                      </div>
+                      <div className="flex justify-between">
+                        <span className="text-slate-500">Valid Until:</span>
+                        <span className="text-emerald-400 font-bold">{selectedDossier.owner_info.compliance?.rc?.valid_until || '2036-05-30'}</span>
+                      </div>
+                      <div className="flex justify-between">
+                        <span className="text-slate-500">Chassis No:</span>
+                        <span className="text-slate-300">{selectedDossier.owner_info.chassis_number || 'MA3XXXXXXXXX'}</span>
+                      </div>
+                      <div className="flex justify-between">
+                        <span className="text-slate-500">Engine No:</span>
+                        <span className="text-slate-300">{selectedDossier.owner_info.engine_number || 'ENGXXXXXXXX'}</span>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* 2. Insurance Policy */}
+                  <div className="bg-slate-900/80 p-3 rounded-lg border border-slate-700/60 space-y-1.5">
+                    <div className="flex items-center justify-between">
+                      <span className="text-slate-400 font-bold uppercase text-[10px]">2. Motor Insurance</span>
+                      <span className={`px-2 py-0.5 rounded text-[10px] font-bold ${
+                        selectedDossier.owner_info.compliance?.insurance?.status === 'VALID'
+                          ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/40'
+                          : 'bg-red-500/20 text-red-300 border border-red-500/40 animate-pulse'
+                      }`}>
+                        {selectedDossier.owner_info.compliance?.insurance?.status || 'N/A'}
+                      </span>
+                    </div>
+                    <div className="text-slate-300 text-[11px] space-y-1">
+                      <div className="flex justify-between">
+                        <span className="text-slate-500">Provider:</span>
+                        <span className="text-slate-200 font-bold truncate max-w-[140px] text-right">
+                          {selectedDossier.owner_info.compliance?.insurance?.provider || 'New India Assurance'}
+                        </span>
+                      </div>
+                      <div className="flex justify-between">
+                        <span className="text-slate-500">Valid Until:</span>
+                        <span className={`font-bold ${
+                          selectedDossier.owner_info.compliance?.insurance?.status === 'VALID'
+                            ? 'text-emerald-400'
+                            : 'text-red-400 underline'
+                        }`}>
+                          {selectedDossier.owner_info.compliance?.insurance?.valid_until || 'N/A'}
+                        </span>
+                      </div>
+                      {selectedDossier.owner_info.compliance?.insurance?.status === 'EXPIRED' && (
+                        <p className="text-[10px] text-red-400 font-bold bg-red-950/40 p-1 rounded border border-red-800/40">
+                          ⚠️ Section 146 Motor Vehicles Act: Impound / Challan Due
+                        </p>
+                      )}
+                    </div>
+                  </div>
+
+                  {/* 3. PUC Emission Certificate */}
+                  <div className="bg-slate-900/80 p-3 rounded-lg border border-slate-700/60 space-y-1.5">
+                    <div className="flex items-center justify-between">
+                      <span className="text-slate-400 font-bold uppercase text-[10px]">3. Emission (PUC)</span>
+                      <span className={`px-2 py-0.5 rounded text-[10px] font-bold ${
+                        selectedDossier.owner_info.compliance?.puc?.status === 'VALID'
+                          ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/40'
+                          : 'bg-red-500/20 text-red-300 border border-red-500/40 animate-pulse'
+                      }`}>
+                        {selectedDossier.owner_info.compliance?.puc?.status || 'N/A'}
+                      </span>
+                    </div>
+                    <div className="text-slate-300 text-[11px] space-y-1">
+                      <div className="flex justify-between">
+                        <span className="text-slate-500">Certificate Validity:</span>
+                        <span className={`font-bold ${
+                          selectedDossier.owner_info.compliance?.puc?.status === 'VALID'
+                            ? 'text-emerald-400'
+                            : 'text-red-400 underline'
+                        }`}>
+                          {selectedDossier.owner_info.compliance?.puc?.valid_until || 'N/A'}
+                        </span>
+                      </div>
+                      <div className="flex justify-between">
+                        <span className="text-slate-500">Fuel Classification:</span>
+                        <span className="text-slate-200">{selectedDossier.owner_info.fuel_type || 'PETROL'}</span>
+                      </div>
+                      {selectedDossier.owner_info.compliance?.puc?.status === 'EXPIRED' && (
+                        <p className="text-[10px] text-red-400 font-bold bg-red-950/40 p-1 rounded border border-red-800/40">
+                          ⚠️ Central Motor Vehicle Rule 115 Violation (Air Quality Standard)
+                        </p>
+                      )}
+                    </div>
+                  </div>
+
+                  {/* 4. Fitness & Commercial Permit */}
+                  <div className="bg-slate-900/80 p-3 rounded-lg border border-slate-700/60 space-y-1.5">
+                    <div className="flex items-center justify-between">
+                      <span className="text-slate-400 font-bold uppercase text-[10px]">4. Fitness & Permit</span>
+                      <span className={`px-2 py-0.5 rounded text-[10px] font-bold ${
+                        selectedDossier.owner_info.compliance?.fitness?.status === 'VALID'
+                          ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/40'
+                          : 'bg-red-500/20 text-red-300 border border-red-500/40'
+                      }`}>
+                        {selectedDossier.owner_info.compliance?.fitness?.status || 'VALID'}
+                      </span>
+                    </div>
+                    <div className="text-slate-300 text-[11px] space-y-1">
+                      <div className="flex justify-between">
+                        <span className="text-slate-500">Fitness Validity:</span>
+                        <span className={`font-bold ${
+                          selectedDossier.owner_info.compliance?.fitness?.status === 'VALID'
+                            ? 'text-emerald-400'
+                            : 'text-red-400'
+                        }`}>
+                          {selectedDossier.owner_info.compliance?.fitness?.valid_until || 'N/A'}
+                        </span>
+                      </div>
+                      <div className="flex justify-between">
+                        <span className="text-slate-500">Permit Status:</span>
+                        <span className="text-slate-200">
+                          {selectedDossier.owner_info.compliance?.permit?.permit_type || 'STANDARD PRIVATE LMV'}
+                        </span>
+                      </div>
                     </div>
                   </div>
                 </div>

@@ -20,6 +20,7 @@ __pycache__/
 
 # Databases & local state
 *.db
+*.db-journal
 vigitra.db
 backend/vigitra.db
 

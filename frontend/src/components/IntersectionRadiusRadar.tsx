@@ -42,6 +42,7 @@ interface IntersectionRadiusRadarProps {
   approaches: ApproachConfig[];
   onTriggerPass?: (approach: string) => void;
   onTriggerClear?: (approach: string) => void;
+  onApproachSwitch?: (nextApproach: string, nextState?: string) => void;
   onRefresh?: () => void;
 }
 
@@ -103,6 +104,7 @@ export const IntersectionRadiusRadar: React.FC<IntersectionRadiusRadarProps> = (
   approaches,
   onTriggerPass,
   onTriggerClear,
+  onApproachSwitch,
   onRefresh,
 }) => {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
@@ -213,6 +215,56 @@ export const IntersectionRadiusRadar: React.FC<IntersectionRadiusRadarProps> = (
     }, 4000);
   };
 
+  // Intelligent next approach selector:
+  // 1. Prioritize other approach that has unpassed vehicles waiting inside/near radar radius
+  // 2. Next prioritize approach with highest queue or priority score
+  // 3. Fallback to sequential round-robin (e.g. NORTH -> EAST -> SOUTH -> WEST -> NORTH)
+  const getNextBestApproach = (currentKey: string): string => {
+    const apps = (localApproaches && localApproaches.length > 0) ? localApproaches : approaches;
+    if (!apps || apps.length <= 1) return currentKey;
+
+    const upperCurrent = currentKey.toUpperCase();
+    const otherApps = apps.filter((a) => a.key.toUpperCase() !== upperCurrent);
+
+    // Count unpassed vehicles per approach currently on the radar
+    const unpassedCounts: Record<string, number> = {};
+    vehiclesRef.current.forEach((v) => {
+      if (!v.passedRadius) {
+        const k = v.approach.toUpperCase();
+        unpassedCounts[k] = (unpassedCounts[k] || 0) + 1;
+      }
+    });
+
+    // 1. Approaches with unpassed vehicles in radar simulation
+    const withVehicles = otherApps.filter((a) => (unpassedCounts[a.key.toUpperCase()] || 0) > 0);
+    if (withVehicles.length > 0) {
+      withVehicles.sort(
+        (a, b) => (unpassedCounts[b.key.toUpperCase()] || 0) - (unpassedCounts[a.key.toUpperCase()] || 0)
+      );
+      return withVehicles[0].key;
+    }
+
+    // 2. Approaches with queue/vehicle count or priority score from API
+    const withDemand = otherApps.filter(
+      (a) => (a.vehicle_count || 0) > 0 || (a.queue_length || 0) > 0 || (a.priority_score || 0) > 0
+    );
+    if (withDemand.length > 0) {
+      withDemand.sort(
+        (a, b) => ((b.priority_score || 0) + (b.vehicle_count || 0)) - ((a.priority_score || 0) + (a.vehicle_count || 0))
+      );
+      return withDemand[0].key;
+    }
+
+    // 3. Sequential round-robin
+    const currIdx = apps.findIndex((a) => a.key.toUpperCase() === upperCurrent);
+    if (currIdx !== -1) {
+      const nextIdx = (currIdx + 1) % apps.length;
+      return apps[nextIdx].key;
+    }
+
+    return otherApps[0].key;
+  };
+
   // Handle a vehicle passing the radius boundary (Manual button trigger)
   const handlePassVehicle = async () => {
     const activeAppKey = activeApproach.toUpperCase();
@@ -255,7 +307,9 @@ export const IntersectionRadiusRadar: React.FC<IntersectionRadiusRadarProps> = (
       if (res.data) {
         const remaining = res.data.vehicles_remaining;
         if (res.data.auto_switched_to_next || remaining === 0) {
+          const nextApp = res.data.next_approach || getNextBestApproach(activeAppKey);
           showAutoSwitchNotice(activeAppKey, res.data.reasoning);
+          if (onApproachSwitch) onApproachSwitch(nextApp, 'GREEN');
         } else {
           setLastEventText(
             `ANPR: ${passedPlate} passed 20m radius (${targetVeh.speedKmh} km/h). ${remaining} veh remaining.`
@@ -269,10 +323,12 @@ export const IntersectionRadiusRadar: React.FC<IntersectionRadiusRadarProps> = (
       ).length;
 
       if (remaining === 0) {
+        const nextApp = getNextBestApproach(activeAppKey);
         showAutoSwitchNotice(
           activeAppKey,
-          `Vehicle ${passedPlate} passed 20m radius. Approach ${activeAppKey} empty (0 veh). Auto-switching to next approach.`
+          `Vehicle ${passedPlate} passed 20m radius. Approach ${activeAppKey} empty (0 veh). Auto-switching to ${nextApp} approach.`
         );
+        if (onApproachSwitch) onApproachSwitch(nextApp, 'GREEN');
       } else {
         setLastEventText(
           `ANPR: ${passedPlate} passed 20m radius (${targetVeh.speedKmh} km/h). ${remaining} veh remaining.`
@@ -294,18 +350,28 @@ export const IntersectionRadiusRadar: React.FC<IntersectionRadiusRadarProps> = (
       )
     );
 
+    const nextApp = getNextBestApproach(activeAppKey);
+
+    // Trigger instant automatic transmission in UI
+    if (onApproachSwitch) onApproachSwitch(nextApp, 'GREEN');
+    if (onTriggerClear) onTriggerClear(activeAppKey);
+
     try {
       const res = await apiClient.post(`/intersections/${junctionId}/clear-approach`, {
         approach: activeAppKey
       });
       if (res.data) {
         showAutoSwitchNotice(activeAppKey, res.data.reasoning);
+        const resolvedNext = res.data.next_approach || nextApp;
+        if (onApproachSwitch) {
+          onApproachSwitch(resolvedNext, 'GREEN');
+        }
       }
       if (onRefresh) onRefresh();
     } catch (e) {
       showAutoSwitchNotice(
         activeAppKey,
-        `All vehicles passed radius. 0 vehicles remaining on ${activeAppKey}. Signal automatically changing and switching to next approach.`
+        `All vehicles passed radius. 0 vehicles remaining on ${activeAppKey}. Automatically switched signal to ${nextApp} approach.`
       );
     }
   };
@@ -350,12 +416,17 @@ export const IntersectionRadiusRadar: React.FC<IntersectionRadiusRadarProps> = (
         (v) => v.approach.toUpperCase() === curApproach && !v.passedRadius
       );
 
-      if (unpassedOnActive.length === 0) return;
+      // AUTOMATIC TRANSMISSION: When 0 vehicles remain in the 20m radius on active green approach!
+      if (unpassedOnActive.length === 0) {
+        const now = Date.now();
+        if (now - lastAutoPassTimeRef.current > 1500) {
+          lastAutoPassTimeRef.current = now;
+          handleClearApproach();
+        }
+        return;
+      }
 
-      // Find the foremost vehicle (lowest distMeters)
-      const foremost = unpassedOnActive.reduce((min, v) => (v.distMeters < min.distMeters ? v : min), unpassedOnActive[0]);
-
-      // Move vehicles forward
+      // Move vehicles forward towards the intersection
       const dt = 0.2; // 200ms
       setVehicles((prev) => {
         let vehicleCrossed: SimVehicle | null = null;
@@ -376,9 +447,19 @@ export const IntersectionRadiusRadar: React.FC<IntersectionRadiusRadarProps> = (
         if (vehicleCrossed) {
           const v = vehicleCrossed as SimVehicle;
           const now = Date.now();
-          if (now - lastAutoPassTimeRef.current > 1200) {
+          if (now - lastAutoPassTimeRef.current > 800) {
             lastAutoPassTimeRef.current = now;
             handlePassVehicleSpecific(v);
+
+            // Check if 0 vehicles remain after this passage
+            const remainingCount = updated.filter(
+              (veh) => veh.approach.toUpperCase() === curApproach && !veh.passedRadius && veh.id !== v.id
+            ).length;
+            if (remainingCount === 0) {
+              setTimeout(() => {
+                handleClearApproach();
+              }, 400);
+            }
           }
         }
 
@@ -387,7 +468,7 @@ export const IntersectionRadiusRadar: React.FC<IntersectionRadiusRadarProps> = (
     }, 200);
 
     return () => clearInterval(autoInterval);
-  }, [isSimActive, isAutoPilot, junctionId]);
+  }, [isSimActive, isAutoPilot, junctionId, localApproaches]);
 
   // Traffic dynamic replenishment: Spawn new incoming arrivals so radar stays alive
   useEffect(() => {
@@ -406,7 +487,7 @@ export const IntersectionRadiusRadar: React.FC<IntersectionRadiusRadarProps> = (
       if (activeCount < 3) {
         handleAddVehicle(randomApp.key);
       }
-    }, 6000);
+    }, 3500);
 
     return () => clearInterval(arrivalInterval);
   }, [isSimActive, isAutoPilot]);

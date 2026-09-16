@@ -335,18 +335,47 @@ class SignalController:
             app["queue_timestamp"] = now_str
             app["last_observation_time"] = now_str
 
+    def get_next_approach_for_clearance(self, current_key: str) -> str:
+        """
+        Determines next approach when current approach clears:
+        1. Approach with highest priority score or vehicle count/queue
+        2. Round-robin sequence (NORTH -> EAST -> SOUTH -> WEST -> NORTH)
+        """
+        keys_list = list(self.approaches.keys())
+        if len(keys_list) <= 1:
+            return current_key
+
+        curr_idx = keys_list.index(current_key) if current_key in keys_list else 0
+        round_robin_next = keys_list[(curr_idx + 1) % len(keys_list)]
+
+        other_keys = [k for k in keys_list if k != current_key]
+        with_demand = [
+            k for k in other_keys
+            if self.approaches[k].get("vehicle_count", 0) > 0 or self.approaches[k].get("queue_length", 0) > 0
+        ]
+        if with_demand:
+            return max(
+                with_demand,
+                key=lambda k: (
+                    self.approaches[k].get("priority_score", 0),
+                    self.approaches[k].get("vehicle_count", 0)
+                )
+            )
+
+        return round_robin_next
+
     def vehicle_passed_radius(
         self,
         db: Session,
-        approach_key: Optional[str] = None,
+        approach_key: str,
         vehicle_id: Optional[str] = None
     ) -> Dict[str, Any]:
         """
-        Invoked when a vehicle passes the intersection detection radius.
-        Decrements approach occupancy. If no vehicles remain on the approach,
-        automatically triggers an immediate safe transition to the next approach.
+        Records a vehicle physically crossing the 20m intersection radius into the intersection.
+        Decrements approach queue and vehicle count in real-time (Zero-Waste Adaptive Clearance).
+        When the approach reaches 0 vehicles remaining inside radius, automatically advances signal safely.
         """
-        key = (approach_key or self.active_approach).upper()
+        key = approach_key.upper()
         if key not in self.approaches:
             key = self.active_approach
 
@@ -362,11 +391,16 @@ class SignalController:
         switched = False
         reason = ""
 
-        # If this approach is active GREEN and now has NO vehicles remaining
-        if self.mode == "AUTOMATIC" and self.state == "GREEN" and key == self.active_approach:
+        # If this approach is active and now has NO vehicles remaining
+        if key == self.active_approach:
             if app["vehicle_count"] <= 0.05:
                 app["vehicle_count"] = 0.0
                 app["queue_length"] = 0
+                next_key = self.get_next_approach_for_clearance(key)
+
+                self.mode = "AUTOMATIC"
+                self.manual_target_approach = None
+                self.radius_next_approach = next_key
                 self.state = "YELLOW"
                 self.countdown = settings.YELLOW_TIME
                 switched = True
@@ -385,6 +419,7 @@ class SignalController:
             "queue_length": app["queue_length"],
             "passed_radius_count": app["passed_radius_count"],
             "auto_switched_to_next": switched,
+            "next_approach": getattr(self, "radius_next_approach", self.active_approach),
             "state": self.state,
             "countdown": self.countdown,
             "reasoning": reason or f"Vehicle passed radius on {key} approach ({app['vehicle_count']:.0f} remaining)."
@@ -405,22 +440,27 @@ class SignalController:
         app["queue_length"] = 0
         app["last_passed_radius_time"] = datetime.now(timezone.utc).isoformat()
 
-        switched = False
-        if self.mode == "AUTOMATIC" and self.state == "GREEN" and key == self.active_approach:
-            self.state = "YELLOW"
-            self.countdown = settings.YELLOW_TIME
-            switched = True
-            self.last_reasoning = (
-                f"Radius Clearance: All vehicles passed radius. 0 vehicles remaining on {key}. "
-                f"Automatically switching signal to next approach."
-            )
-            logger.info(f"[Radius Auto-Switch] {self.last_reasoning}")
+        # Switch via Yellow clearance to next approach with demand or round-robin
+        next_key = self.get_next_approach_for_clearance(key)
+
+        self.mode = "AUTOMATIC"
+        self.manual_target_approach = None
+        self.radius_next_approach = next_key
+        self.state = "YELLOW"
+        self.countdown = settings.YELLOW_TIME
+        switched = True
+        self.last_reasoning = (
+            f"Radius Clearance: All vehicles passed radius. 0 vehicles remaining on {key}. "
+            f"Automatically switching signal to next approach."
+        )
+        logger.info(f"[Radius Auto-Switch] {self.last_reasoning}")
 
         return {
             "intersection_id": self.intersection_id,
             "approach": key,
             "vehicles_remaining": 0,
             "auto_switched_to_next": switched,
+            "next_approach": next_key,
             "state": self.state,
             "countdown": self.countdown,
             "reasoning": self.last_reasoning
@@ -510,13 +550,15 @@ class SignalController:
             curr_v = active_app.get("vehicle_count", 0.0)
             curr_q = active_app.get("queue_length", 0)
             if curr_v <= 0.05 and curr_q == 0 and self.elapsed_green_time >= 2.0:
+                next_key = self.get_next_approach_for_clearance(self.active_approach)
+                self.radius_next_approach = next_key
                 self.state = "YELLOW"
                 self.countdown = settings.YELLOW_TIME
                 self.last_reasoning = (
                     f"Radius Auto-Switch: All vehicles passed detection radius (20m). Approach {self.active_approach} "
-                    f"has 0 vehicles remaining. Automatically switching signal to next approach."
+                    f"has 0 vehicles remaining. Automatically switching signal to {next_key} approach."
                 )
-                logger.info(f"Approach {self.active_approach} empty inside radius. Triggered auto-switch to next approach.")
+                logger.info(f"Approach {self.active_approach} empty inside radius. Triggered auto-switch to {next_key}.")
             elif self.elapsed_green_time >= settings.MIN_GREEN_TIME:
                 self._reassess_green_phase(db)
 
@@ -537,11 +579,20 @@ class SignalController:
             self.state = "GREEN"
             self.elapsed_green_time = 0.0
 
-            if self.mode == "MANUAL" and self.manual_target_approach:
+            if getattr(self, "radius_next_approach", None):
+                self.active_approach = self.radius_next_approach
+                self.active_phase = self.radius_next_approach
+                self.radius_next_approach = None
+                self.countdown = 30
+                self.last_reasoning = f"Radius auto-switch complete: Flow granted to {self.active_approach} Approach."
+                self._log_decision(db, self.countdown, self.active_approach, 100.0, 1.0, self.last_reasoning)
+            elif self.mode == "MANUAL" and self.manual_target_approach:
                 self.active_approach = self.manual_target_approach
                 self.active_phase = self.manual_target_approach
                 self.countdown = 30
                 self.last_reasoning = f"Manual override active: Forced green to {self.active_approach} Approach."
+                self.manual_target_approach = None
+                self.mode = "AUTOMATIC"
                 self._log_decision(db, self.countdown, self.active_approach, 100.0, 1.0, self.last_reasoning)
             else:
                 self._run_optimization(db)

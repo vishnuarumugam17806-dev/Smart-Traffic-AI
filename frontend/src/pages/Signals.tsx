@@ -837,6 +837,31 @@ export const Signals: React.FC = () => {
           priority_score: a.priority_score
         }))}
         onRefresh={fetchJunctionData}
+        onApproachSwitch={(nextApproach: string, nextState: string = 'GREEN') => {
+          setSignalData((prev: any) => ({
+            ...prev,
+            active_approach: nextApproach,
+            active_phase: nextApproach,
+            state: nextState,
+            countdown: 30,
+            mode: 'AUTOMATIC',
+            reasoning: `Zero-waste automatic transmission: 0 vehicles in 20m radius. Switched to ${nextApproach} Approach.`,
+            approaches: {
+              ...(prev?.approaches || {}),
+              [activeApproachKey]: {
+                ...(prev?.approaches?.[activeApproachKey] || {}),
+                signal: 'RED',
+                vehicle_count: 0,
+                queue_length: 0
+              },
+              [nextApproach]: {
+                ...(prev?.approaches?.[nextApproach] || {}),
+                signal: nextState
+              }
+            }
+          }));
+          setOverrideMessage(`⚡ Automatic transmission: Zero vehicles in radius — Switched green to ${nextApproach} approach.`);
+        }}
       />
 
       {/* SECTION 1, 3, 8 & 13: DYNAMIC VIDEO PANELS WITH MOVEMENT VS STOPPING SIMULATION LAYER */}

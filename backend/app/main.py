@@ -21,7 +21,7 @@ from app.cv.detector import TrafficVisionProcessor
 from app.cv.stream_manager import stream_manager
 from app.models.models import (
     Camera, TrafficMeasurement, CongestionLevelEnum, EmergencyEvent, Incident,
-    PlateObservation, Blacklist, Alert, SignalDecision, CameraStatusEnum
+    PlateObservation, Blacklist, Alert, SignalDecision, CameraStatusEnum, Intersection
 )
 from app.trajectory.graph import trajectory_engine
 from app.traffic.signal_controller import signal_optimizer, signal_registry
@@ -296,17 +296,17 @@ async def background_video_processing_loop():
                             controller.approaches[dir_key]["emergency_type"] = em_type
 
                         # Update observation inputs derived from camera/AI detection (Section 2, 3, 4, 22)
-                        controller.update_approach_observation(
-                            approach_key=dir_key,
-                            vehicle_count=res["total_vehicles"],
-                            queue_length=res["queue_length"],
-                            traffic_density=res["density_state"],
-                            average_speed=res.get("average_speed", 38.0),
-                            camera_status="DATA_AVAILABLE",
-                            is_queue_available=res.get("is_queue_available", True)
-                        )
-
-                        controller.tick(db, dt=1.5)
+                        curr_app = controller.approaches.get(dir_key, {})
+                        if not (curr_app.get("vehicle_count", 1) <= 0.05 and dir_key == controller.active_approach and controller.state in ["YELLOW", "RED_CLEARANCE"]):
+                            controller.update_approach_observation(
+                                approach_key=dir_key,
+                                vehicle_count=res["total_vehicles"],
+                                queue_length=res["queue_length"],
+                                traffic_density=res["density_state"],
+                                average_speed=res.get("average_speed", 38.0),
+                                camera_status="DATA_AVAILABLE",
+                                is_queue_available=res.get("is_queue_available", True)
+                            )
 
                         active_app_data = controller.approaches.get(controller.active_approach, {})
                         await ws_manager.broadcast({
@@ -374,6 +374,69 @@ async def background_video_processing_loop():
         except Exception as outer_e:
             logger.error(f"Outer loop error: {outer_e}")
 
+async def dedicated_signal_controller_loop():
+    """
+    Dedicated 1.0-second state machine ticker for all intersection signal controllers.
+    Ensures countdown decrements reliably, transitions through YELLOW -> RED_CLEARANCE -> GREEN,
+    and broadcasts real-time state changes to all dashboards via WebSocket.
+    """
+    await asyncio.sleep(1.0)
+    while True:
+        try:
+            await asyncio.sleep(1.0)
+            db: Session = SessionLocal()
+            try:
+                intersections = db.query(Intersection).all()
+                for inter in intersections:
+                    controller = signal_registry.get_controller(inter.id, db=db)
+                    controller.tick(db, dt=1.0)
+
+                    active_app_data = controller.approaches.get(controller.active_approach, {})
+                    await ws_manager.broadcast({
+                        "event": "SIGNAL_STATE_CHANGED",
+                        "intersection_id": inter.id,
+                        "num_approaches": controller.num_approaches,
+                        "active_approach": controller.active_approach,
+                        "active_phase": controller.active_phase,
+                        "state": controller.state,
+                        "countdown": controller.countdown,
+                        "mode": controller.mode,
+                        "reasoning": controller.last_reasoning,
+                        "elapsed_green_time": round(controller.elapsed_green_time, 1),
+                        "current_metrics": {
+                            "approach": controller.active_approach,
+                            "vehicle_count": round(active_app_data.get("vehicle_count", 0.0), 1),
+                            "queue_length": active_app_data.get("queue_length", 0),
+                            "waiting_time": round(active_app_data.get("waiting_time", 0.0), 1),
+                            "traffic_density": active_app_data.get("traffic_density", "MODERATE"),
+                            "demand_score": round(active_app_data.get("demand_score", 0.0), 3),
+                            "priority_score": round(active_app_data.get("priority_score", 0.0), 1),
+                            "green_duration": active_app_data.get("green_duration", controller.countdown)
+                        },
+                        "approaches": {
+                            name: {
+                                "name": app.get("name") or f"{name.title()} Approach",
+                                "direction": app.get("direction", name),
+                                "vehicle_count": round(app.get("vehicle_count", 0.0), 1),
+                                "queue_length": app.get("queue_length", 0),
+                                "waiting_time": round(app.get("waiting_time", 0.0), 1),
+                                "traffic_density": app.get("traffic_density", "MODERATE"),
+                                "demand_score": round(app.get("demand_score", 0.0), 3),
+                                "priority_score": round(app.get("priority_score", 0.0), 1),
+                                "camera_status": app.get("camera_status", "DATA_AVAILABLE"),
+                                "signal": controller.get_approach_signal(name)
+                            } for name, app in controller.approaches.items()
+                        }
+                    })
+            except Exception as e:
+                db.rollback()
+            finally:
+                db.close()
+        except asyncio.CancelledError:
+            break
+        except Exception as e:
+            logger.error(f"Error in dedicated signal controller loop: {e}")
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     logger.info("Starting VIGITRA AI Platform Engine...")
@@ -396,8 +459,10 @@ async def lifespan(app: FastAPI):
         logger.warning(f"Note: Demo Vehicle Registry init: {reg_err}")
 
     bg_task = asyncio.create_task(background_video_processing_loop())
+    signal_task = asyncio.create_task(dedicated_signal_controller_loop())
     yield
     bg_task.cancel()
+    signal_task.cancel()
     stream_manager.release_all()
     logger.info("VIGITRA AI Platform shut down successfully.")
 
