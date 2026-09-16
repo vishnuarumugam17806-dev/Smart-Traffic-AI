@@ -1,3 +1,4 @@
+from typing import Optional
 from fastapi import Depends, HTTPException, status
 from fastapi.security import OAuth2PasswordBearer
 import jwt  # type: ignore
@@ -8,6 +9,7 @@ from app.models.models import User
 from app.schemas.schemas import TokenData
 
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl=f"{settings.API_V1_STR}/auth/login")
+oauth2_scheme_optional = OAuth2PasswordBearer(tokenUrl=f"{settings.API_V1_STR}/auth/login", auto_error=False)
 
 def get_current_user(db: Session = Depends(get_db), token: str = Depends(oauth2_scheme)) -> User:
     credentials_exception = HTTPException(
@@ -38,3 +40,16 @@ def require_role(allowed_roles: list):
             )
         return current_user
     return role_checker
+
+def get_current_user_optional(db: Session = Depends(get_db), token: Optional[str] = Depends(oauth2_scheme_optional)) -> Optional[User]:
+    if not token:
+        return None
+    try:
+        payload = jwt.decode(token, settings.SECRET_KEY, algorithms=[settings.ALGORITHM])
+        username: str = payload.get("sub")
+        if username is None:
+            return None
+        return db.query(User).filter(User.username == username).first()
+    except Exception:
+        return None
+

@@ -728,15 +728,17 @@ class SignalController:
         target: Optional[str] = None,
         reason: str = "",
         username: str = "OPERATOR",
-        phase: Optional[str] = None
+        phase: Optional[str] = None,
+        color: str = "GREEN"
     ) -> bool:
         """
-        Validates manual operator control and enforces safety interlocks (Section 19).
-        Never permits instant unsafe switches; commands transition via YELLOW clearance.
+        Validates manual operator control and enforces color changes (Section 19).
+        Supports explicitly forcing GREEN, RED, or YELLOW on any approach.
         """
         raw_key = phase or target or "NORTH"
         target_key = raw_key.upper()
         self._manual_raw_phase = raw_key
+        req_color = (color or "GREEN").upper()
 
         if target_key not in self.approaches:
             if target_key == "NORTH_SOUTH":
@@ -753,12 +755,26 @@ class SignalController:
         self.manual_reason = reason
         self.manual_user = username
 
-        # If another approach is currently green, transition safely through YELLOW
-        if self.active_approach != target_key and self.state == "GREEN":
+        if req_color == "RED":
+            # Operator requested to force this approach RED
+            if self.active_approach == target_key:
+                # Switch active green to the next best approach
+                other_keys = [k for k in self.approaches.keys() if k != target_key]
+                next_key = max(other_keys, key=lambda k: self.approaches[k].get("priority_score", 0)) if other_keys else target_key
+                self.active_approach = next_key
+                self.active_phase = next_key
+                self.state = "GREEN"
+                self.countdown = 30
+                self.elapsed_green_time = 0.0
+                self.last_reasoning = f"MANUAL OVERRIDE: Operator {username} forced RED on {target_key}. Switched flow to {next_key} Approach."
+            else:
+                self.last_reasoning = f"MANUAL OVERRIDE: Operator {username} enforced RED on {target_key} (Approach already RED)."
+        elif req_color == "YELLOW":
             self.state = "YELLOW"
-            self.countdown = settings.YELLOW_TIME
-            self.last_reasoning = f"MANUAL OVERRIDE: Requested {target_key} by {username}. Transitioning safely through YELLOW."
+            self.countdown = getattr(settings, "YELLOW_TIME", 3)
+            self.last_reasoning = f"MANUAL OVERRIDE: Operator {username} forced clearance YELLOW on {self.active_approach} Approach."
         else:
+            # Force GREEN on target_key
             self.active_approach = target_key
             self.active_phase = target_key
             self.state = "GREEN"

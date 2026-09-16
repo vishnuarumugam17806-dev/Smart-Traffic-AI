@@ -81,6 +81,13 @@ interface DecisionRecord {
   timestamp: string;
 }
 
+const APPROACH_ANPR_DATA: Record<string, { plate: string; ocr: string; status: string; statusClass: string; reason: string }> = {
+  NORTH: { plate: 'TN01AX1001', ocr: '99.4%', status: 'CLEARED', statusClass: 'bg-emerald-500/30 text-emerald-300 border-emerald-500/40', reason: 'Verified Active' },
+  SOUTH: { plate: 'TN09AB1002', ocr: '98.8%', status: 'INSURANCE DUE', statusClass: 'bg-amber-500/30 text-amber-300 border-amber-500/40', reason: 'Insurance Expired' },
+  EAST: { plate: 'KA01AM1080', ocr: '99.7%', status: '108 AMBULANCE', statusClass: 'bg-blue-500/30 text-blue-300 border-blue-500/40', reason: 'Emergency Priority' },
+  WEST: { plate: 'TN22BZ4455', ocr: '98.2%', status: 'PUC EXPIRED', statusClass: 'bg-orange-500/30 text-orange-300 border-orange-500/40', reason: 'PUC Expired' }
+};
+
 export const Signals: React.FC = () => {
   const { activeLiveUpdate } = useStore();
   const [intersections, setIntersections] = useState<Intersection[]>(FALLBACK_INTERSECTIONS);
@@ -445,15 +452,74 @@ export const Signals: React.FC = () => {
 
   // Quick Action: Force green signal priority for an approach
   const handleForceGreen = async (approachKey: string) => {
+    // Optimistic UI update so user sees instant signal change execution
+    setSignalData((prev: any) => ({
+      ...prev,
+      active_approach: approachKey,
+      active_phase: approachKey,
+      state: 'GREEN',
+      countdown: 30,
+      mode: 'MANUAL',
+      reasoning: `Manual Override: Forced GREEN to ${approachKey} Approach.`,
+      approaches: {
+        ...(prev?.approaches || {}),
+        [approachKey]: {
+          ...(prev?.approaches?.[approachKey] || {}),
+          signal: 'GREEN'
+        }
+      }
+    }));
+    setOverrideMessage(`⚡ Signal forced GREEN for ${approachKey} approach (Executed).`);
+
     try {
       await apiClient.post(`/intersections/${selectedJunctionId}/manual-override`, {
         phase: approachKey,
-        reason: `Manual priority requested for ${approachKey} approach via camera feed`
+        color: 'GREEN',
+        reason: `Manual priority requested for ${approachKey} approach`
       });
-      setOverrideMessage(`Signal forced GREEN for ${approachKey} approach.`);
       fetchJunctionData();
     } catch (err) {
       console.error('Error forcing green:', err);
+    }
+  };
+
+  // Quick Action: Force red signal for an approach
+  const handleForceRed = async (approachKey: string) => {
+    const otherApproaches = approachesList.filter((a) => a.key !== approachKey);
+    const nextKey = otherApproaches.length > 0 ? otherApproaches[0].key : approachKey;
+
+    // Optimistic UI state update: set approachKey to RED and nextKey to GREEN
+    setSignalData((prev: any) => ({
+      ...prev,
+      active_approach: nextKey,
+      active_phase: nextKey,
+      state: 'GREEN',
+      countdown: 30,
+      mode: 'MANUAL',
+      reasoning: `Manual Override: Forced RED on ${approachKey}. Flow transferred to ${nextKey} Approach.`,
+      approaches: {
+        ...(prev?.approaches || {}),
+        [approachKey]: {
+          ...(prev?.approaches?.[approachKey] || {}),
+          signal: 'RED'
+        },
+        [nextKey]: {
+          ...(prev?.approaches?.[nextKey] || {}),
+          signal: 'GREEN'
+        }
+      }
+    }));
+    setOverrideMessage(`⚡ Signal forced RED for ${approachKey} approach (Flow transferred to ${nextKey}).`);
+
+    try {
+      await apiClient.post(`/intersections/${selectedJunctionId}/manual-override`, {
+        phase: approachKey,
+        color: 'RED',
+        reason: `Manual stop requested for ${approachKey} approach`
+      });
+      fetchJunctionData();
+    } catch (err) {
+      console.error('Error forcing red:', err);
     }
   };
 
@@ -978,19 +1044,25 @@ export const Signals: React.FC = () => {
                   {/* QUICK INTERACTIVE ACTION CONTROLS (Interact with footage & running signal) */}
                   <div className="absolute inset-x-2 bottom-2 z-20 flex items-center justify-between gap-1.5 opacity-90 group-hover:opacity-100 transition-opacity">
                     {/* Compliance tag on left */}
-                    <div className="px-2 py-1 rounded bg-slate-900/90 backdrop-blur-xs border border-slate-700 text-[9px] font-mono text-white flex items-center gap-1.5 shadow-sm">
-                      <span className="font-extrabold text-amber-300">
-                        {cam.camera_id % 2 === 0 ? 'TN09AB1002' : 'TN01AX1001'}
-                      </span>
-                      <span className="text-slate-400">| 98%</span>
-                      <span className={`px-1 rounded text-[8px] font-bold ${
-                        cam.camera_id % 2 === 0
-                          ? 'bg-red-500/30 text-red-300 border border-red-500/40'
-                          : 'bg-emerald-500/30 text-emerald-300 border border-emerald-500/40'
-                      }`}>
-                        {cam.camera_id % 2 === 0 ? 'INSURANCE DUE' : 'CLEARED'}
-                      </span>
-                    </div>
+                    {(() => {
+                      const anpr = APPROACH_ANPR_DATA[dirKey] || {
+                        plate: cam.camera_id % 2 === 0 ? 'TN09AB1002' : 'TN01AX1001',
+                        ocr: '99.1%',
+                        status: cam.camera_id % 2 === 0 ? 'INSURANCE DUE' : 'CLEARED',
+                        statusClass: cam.camera_id % 2 === 0 ? 'bg-amber-500/30 text-amber-300 border border-amber-500/40' : 'bg-emerald-500/30 text-emerald-300 border border-emerald-500/40'
+                      };
+                      return (
+                        <div className="px-2 py-1 rounded bg-slate-900/90 backdrop-blur-xs border border-slate-700 text-[9px] font-mono text-white flex items-center gap-1.5 shadow-sm">
+                          <span className="font-extrabold text-amber-300">
+                            {anpr.plate}
+                          </span>
+                          <span className="text-slate-400">| {anpr.ocr}</span>
+                          <span className={`px-1 rounded text-[8px] font-bold ${anpr.statusClass}`}>
+                            {anpr.status}
+                          </span>
+                        </div>
+                      );
+                    })()}
 
                     {/* Interactive Action Buttons */}
                     <div className="flex items-center gap-1 pointer-events-auto">
@@ -1082,27 +1154,20 @@ export const Signals: React.FC = () => {
                   {/* Force Controls */}
                   <div className="grid grid-cols-2 gap-2 pt-1">
                     <button
-                      onClick={() => {
-                        setManualApproach(dirKey);
-                        setShowOverrideModal(true);
-                      }}
-                      className="py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded font-bold text-[10px] font-mono transition-colors shadow-2xs"
+                      type="button"
+                      onClick={() => handleForceGreen(dirKey)}
+                      className="py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded font-bold text-[10px] font-mono transition-colors shadow-2xs active:scale-95 cursor-pointer flex items-center justify-center gap-1"
+                      title="Directly force signal GREEN for this approach (Executes immediately)"
                     >
-                      🟢 FORCE GREEN
+                      <span>🟢 FORCE GREEN</span>
                     </button>
                     <button
-                      onClick={async () => {
-                        try {
-                          await apiClient.post(`/intersections/${selectedJunctionId}/manual-override`, {
-                            phase: dirKey,
-                            reason: 'Manual Red Signal Stop'
-                          });
-                          fetchJunctionData();
-                        } catch (err) {}
-                      }}
-                      className="py-1.5 bg-red-600 hover:bg-red-700 text-white rounded font-bold text-[10px] font-mono transition-colors shadow-2xs"
+                      type="button"
+                      onClick={() => handleForceRed(dirKey)}
+                      className="py-1.5 bg-red-600 hover:bg-red-700 text-white rounded font-bold text-[10px] font-mono transition-colors shadow-2xs active:scale-95 cursor-pointer flex items-center justify-center gap-1"
+                      title="Directly force signal RED for this approach (Switches flow to next approach)"
                     >
-                      🔴 FORCE RED
+                      <span>🔴 FORCE RED</span>
                     </button>
                   </div>
                 </div>

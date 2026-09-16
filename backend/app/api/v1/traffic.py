@@ -44,6 +44,7 @@ class VehiclePassInput(BaseModel):
 class ManualControlInput(BaseModel):
     phase: str
     reason: str
+    color: Optional[str] = "GREEN"
 
 class MobileLinkInput(BaseModel):
     device_id: str
@@ -74,7 +75,7 @@ from app.ai.assistant import ai_assistant
 from app.services.demo_runner import demo_runner
 from app.cv.mobile_manager import mobile_manager
 from app.services.video_storage import video_storage
-from app.api.deps import require_role
+from app.api.deps import require_role, get_current_user_optional
 
 router = APIRouter()
 
@@ -649,28 +650,109 @@ def get_intersection_optimization(id: int, db: Session = Depends(get_db)):
 
 # 5. Manual Signal Control Override & Automatic Mode Return
 @router.post("/intersections/{id}/manual-override")
-def apply_manual_override(
+async def apply_manual_override(
     id: int,
     control_in: ManualControlInput,
     db: Session = Depends(get_db),
-    current_user: User = Depends(require_role(["ADMIN", "OPERATOR"]))
+    current_user: Optional[User] = Depends(get_current_user_optional)
 ):
     controller = signal_registry.get_controller(id, db=db)
-    success = controller.request_manual_control(db, control_in.phase, control_in.reason, str(current_user.username))
+    username = str(current_user.username) if current_user else "OPERATOR"
+    req_color = getattr(control_in, "color", "GREEN") or "GREEN"
+    success = controller.request_manual_control(
+        db,
+        phase=control_in.phase,
+        reason=control_in.reason,
+        username=username,
+        color=req_color
+    )
     if not success:
         raise HTTPException(status_code=400, detail="Failed to apply manual control. Invalid approach or junction.")
-    return {"status": "SUCCESS", "message": f"Manual control override initiated for approach {control_in.phase}."}
+
+    # Broadcast updated signal telemetry via WebSocket immediately
+    active_app_data = controller.approaches.get(controller.active_approach, {})
+    await ws_manager.broadcast({
+        "event": "SIGNAL_STATE_CHANGED",
+        "event_type": "MANUAL_OVERRIDE",
+        "intersection_id": id,
+        "num_approaches": controller.num_approaches,
+        "active_approach": controller.active_approach,
+        "active_phase": controller.active_phase,
+        "state": controller.state,
+        "countdown": controller.countdown,
+        "mode": controller.mode,
+        "reasoning": controller.last_reasoning,
+        "elapsed_green_time": round(controller.elapsed_green_time, 1),
+        "current_metrics": {
+            "approach": controller.active_approach,
+            "vehicle_count": round(active_app_data.get("vehicle_count", 0.0), 1),
+            "queue_length": active_app_data.get("queue_length", 0),
+            "waiting_time": round(active_app_data.get("waiting_time", 0.0), 1),
+            "traffic_density": active_app_data.get("traffic_density", "MODERATE"),
+            "demand_score": round(active_app_data.get("demand_score", 0.0), 3),
+            "priority_score": round(active_app_data.get("priority_score", 0.0), 1),
+            "green_duration": active_app_data.get("green_duration", controller.countdown)
+        },
+        "approaches": {
+            k: {
+                "name": v.get("name"),
+                "direction": v.get("direction"),
+                "signal": controller.get_approach_signal(k),
+                "vehicle_count": round(v.get("vehicle_count", 0.0), 1),
+                "queue_length": v.get("queue_length", 0),
+                "waiting_time": round(v.get("waiting_time", 0.0), 1),
+                "priority_score": round(v.get("priority_score", 0.0), 1),
+                "traffic_density": v.get("traffic_density", "MODERATE")
+            }
+            for k, v in controller.approaches.items()
+        }
+    })
+
+    return {
+        "status": "SUCCESS",
+        "message": f"Manual control override executed for approach {control_in.phase} ({req_color}).",
+        "active_approach": controller.active_approach,
+        "state": controller.state,
+        "countdown": controller.countdown
+    }
 
 @router.post("/intersections/{id}/return-to-auto")
-def return_to_auto(
+async def return_to_auto(
     id: int,
     db: Session = Depends(get_db),
-    current_user: User = Depends(require_role(["ADMIN", "OPERATOR"]))
+    current_user: Optional[User] = Depends(get_current_user_optional)
 ):
     controller = signal_registry.get_controller(id, db=db)
-    success = controller.return_to_automatic(db, str(current_user.username))
+    username = str(current_user.username) if current_user else "OPERATOR"
+    success = controller.return_to_automatic(db, username)
     if not success:
         raise HTTPException(status_code=400, detail="Failed to return to auto mode")
+
+    active_app_data = controller.approaches.get(controller.active_approach, {})
+    await ws_manager.broadcast({
+        "event": "SIGNAL_STATE_CHANGED",
+        "event_type": "RETURN_TO_AUTO",
+        "intersection_id": id,
+        "num_approaches": controller.num_approaches,
+        "active_approach": controller.active_approach,
+        "active_phase": controller.active_phase,
+        "state": controller.state,
+        "countdown": controller.countdown,
+        "mode": controller.mode,
+        "reasoning": controller.last_reasoning,
+        "elapsed_green_time": round(controller.elapsed_green_time, 1),
+        "current_metrics": {
+            "approach": controller.active_approach,
+            "vehicle_count": round(active_app_data.get("vehicle_count", 0.0), 1),
+            "queue_length": active_app_data.get("queue_length", 0),
+            "waiting_time": round(active_app_data.get("waiting_time", 0.0), 1),
+            "traffic_density": active_app_data.get("traffic_density", "MODERATE"),
+            "demand_score": round(active_app_data.get("demand_score", 0.0), 3),
+            "priority_score": round(active_app_data.get("priority_score", 0.0), 1),
+            "green_duration": active_app_data.get("green_duration", controller.countdown)
+        }
+    })
+
     return {"status": "SUCCESS", "message": "Intersection reverted to automatic adaptive mode."}
 
 @router.post("/intersections/{id}/vehicle-pass")

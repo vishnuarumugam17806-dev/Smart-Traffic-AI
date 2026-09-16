@@ -6,7 +6,6 @@ import {
   Radar, Target
 } from 'lucide-react';
 import { CameraCanvasFeed } from '../components/CameraCanvasFeed';
-import { SignalControllerCard } from '../components/SignalControllerCard';
 import { GISMap } from '../components/GISMap';
 import { apiClient } from '../api/client';
 import { useStore } from '../store/useStore';
@@ -296,11 +295,11 @@ export const Dashboard: React.FC = () => {
         </button>
       </div>
 
-      {/* 3. MAIN OPERATIONAL DASHBOARD GRID */}
+      {/* 3. MAIN OPERATIONAL DASHBOARD GRID: CAMERA LIST & LIVE VIDEO FEED */}
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-4">
         
-        {/* Left: Camera Selector Panel */}
-        <div className="lg:col-span-3 bg-white p-3.5 rounded-lg border border-[#DCE4EA] space-y-3 flex flex-col justify-between">
+        {/* Left: Camera Selector Panel (4 cols) */}
+        <div className="lg:col-span-4 bg-white p-3.5 rounded-lg border border-[#DCE4EA] space-y-3 flex flex-col justify-between shadow-xs">
           <div className="space-y-2.5">
             <div className="flex items-center justify-between border-b border-[#DCE4EA] pb-2">
               <h2 className="text-xs font-bold text-slate-800 uppercase flex items-center gap-1.5 font-mono">
@@ -355,8 +354,8 @@ export const Dashboard: React.FC = () => {
           </div>
         </div>
 
-        {/* Center: Live Camera Video Stream */}
-        <div className="lg:col-span-6 space-y-3">
+        {/* Right: Live Camera Video Stream (8 cols) */}
+        <div className="lg:col-span-8 space-y-3">
           <div className="flex items-center justify-between">
             <h2 className="text-xs font-bold text-slate-800 uppercase flex items-center gap-1.5 font-mono">
               <Camera className="w-4 h-4 text-[#245B84]" /> LIVE VIDEO FEED
@@ -411,20 +410,6 @@ export const Dashboard: React.FC = () => {
               </button>
             </div>
           </div>
-        </div>
-
-        {/* Right: Smart Signal Controller */}
-        <div className="lg:col-span-3 space-y-3">
-          <h2 className="text-xs font-bold text-slate-800 uppercase flex items-center gap-1.5 font-mono">
-            <TrafficCone className="w-4 h-4 text-[#245B84]" /> SIGNAL CONTROL
-          </h2>
-
-          <SignalControllerCard
-            signalId={selectedIntersectionId || 1}
-            intersectionName={currentIntersection ? currentIntersection.name : "Central Junction"}
-            initialGreen={55}
-            isAdaptive={true}
-          />
         </div>
       </div>
 

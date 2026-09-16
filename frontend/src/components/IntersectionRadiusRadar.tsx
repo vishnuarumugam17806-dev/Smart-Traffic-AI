@@ -12,7 +12,14 @@ import {
   AlertCircle,
   Car,
   Activity,
-  Maximize2
+  Maximize2,
+  FileText,
+  Search,
+  Check,
+  X,
+  AlertTriangle,
+  Siren,
+  Sparkles
 } from 'lucide-react';
 import { apiClient } from '../api/client';
 
@@ -38,16 +45,54 @@ interface IntersectionRadiusRadarProps {
   onRefresh?: () => void;
 }
 
-interface SimVehicle {
+export type ComplianceType =
+  | 'CLEARED'
+  | 'PUC_EXPIRED'
+  | 'INSURANCE_DUE'
+  | 'CHALLAN_PENDING'
+  | 'EMERGENCY_WHITELIST'
+  | 'WATCHLIST_HIT';
+
+export interface SimVehicle {
   id: number;
   approach: string;
-  distMeters: number; // Distance from intersection center (0 - 100m)
+  distMeters: number; // Distance from intersection center (0 - 35m)
   speedKmh: number;
   color: string;
   type: string;
   passedRadius: boolean;
   passTime?: number;
+  // ANPR Interpretation fields
+  plate: string;
+  ocrConfidence: number;
+  complianceStatus: ComplianceType;
+  statusReason: string;
+  owner: string;
+  isEmergency?: boolean;
 }
+
+const INDIAN_PLATES_POOL: Array<{
+  plate: string;
+  type: string;
+  color: string;
+  speed: number;
+  ocr: number;
+  status: ComplianceType;
+  reason: string;
+  owner: string;
+  isEmergency?: boolean;
+}> = [
+  { plate: 'TN09AB1002', type: 'SEDAN', color: '#38BDF8', speed: 42, ocr: 98.8, status: 'INSURANCE_DUE', reason: 'Insurance lapsed 12 days ago', owner: 'R. Karthik' },
+  { plate: 'TN01AX1001', type: 'SUV', color: '#34D399', speed: 38, ocr: 99.4, status: 'CLEARED', reason: 'All documents verified & active', owner: 'Sundaram Motors' },
+  { plate: 'TN22BZ4455', type: 'SEDAN', color: '#FBBF24', speed: 44, ocr: 97.9, status: 'PUC_EXPIRED', reason: 'Emission PUC overdue by 18 days', owner: 'M. Anand' },
+  { plate: 'KA01AM1080', type: 'AMBULANCE', color: '#EF4444', speed: 56, ocr: 99.7, status: 'EMERGENCY_WHITELIST', reason: '108 EMS Ambulance Dispatch (Priority)', owner: 'GVK EMRI 108', isEmergency: true },
+  { plate: 'TN07CF9912', type: 'MOTORCYCLE', color: '#F472B6', speed: 48, ocr: 98.2, status: 'CHALLAN_PENDING', reason: 'Pending e-Challan #CH-8821 (₹1,000)', owner: 'V. Prakash' },
+  { plate: 'MH12PQ9999', type: 'SUV', color: '#A78BFA', speed: 40, ocr: 99.1, status: 'WATCHLIST_HIT', reason: 'Security Hotlist: Warrant 2026/41', owner: 'Unknown Suspect' },
+  { plate: 'DL01CA1080', type: 'BUS', color: '#38BDF8', speed: 32, ocr: 98.5, status: 'CLEARED', reason: 'State Transport Interstate Service', owner: 'MTC Transit' },
+  { plate: 'TN10ER8823', type: 'SEDAN', color: '#34D399', speed: 41, ocr: 99.2, status: 'CLEARED', reason: 'FastTag Active • RC Valid', owner: 'K. Divya' },
+  { plate: 'AP09TX3319', type: 'SUV', color: '#FBBF24', speed: 39, ocr: 98.1, status: 'CHALLAN_PENDING', reason: 'Over-speeding violation recorded', owner: 'A. Srinivas' },
+  { plate: 'KA04ME5521', type: 'SEDAN', color: '#38BDF8', speed: 43, ocr: 98.9, status: 'CLEARED', reason: 'Commercial Taxi Permit Valid', owner: 'City Cabs Ltd' }
+];
 
 export const IntersectionRadiusRadar: React.FC<IntersectionRadiusRadarProps> = ({
   junctionId,
@@ -62,12 +107,14 @@ export const IntersectionRadiusRadar: React.FC<IntersectionRadiusRadarProps> = (
 }) => {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const [isSimActive, setIsSimActive] = useState<boolean>(true);
+  const [isAutoPilot, setIsAutoPilot] = useState<boolean>(true); // Autonomous flow enabled by default!
   const [vehicles, setVehicles] = useState<SimVehicle[]>([]);
   const [switchBanner, setSwitchBanner] = useState<string | null>(null);
   const [localApproaches, setLocalApproaches] = useState<ApproachConfig[]>(approaches);
   const [totalPassedCount, setTotalPassedCount] = useState<number>(0);
+  const [selectedDossierVehicle, setSelectedDossierVehicle] = useState<SimVehicle | null>(null);
   const [lastEventText, setLastEventText] = useState<string>(
-    'System monitoring 20m radius zone. When vehicle passes radius and approach has 0 vehicles, signal auto-switches.'
+    'Radar Auto-Pilot Active: Vehicles move smoothly. Crossing 20m radius auto-decrements queue; 0 vehicles auto-switches signal.'
   );
 
   // 360-Degree Continuous Scanning Needle & Animation Loop Refs
@@ -78,7 +125,9 @@ export const IntersectionRadiusRadar: React.FC<IntersectionRadiusRadarProps> = (
   const countdownRef = useRef<number>(countdown);
   const localApproachesRef = useRef<ApproachConfig[]>(approaches);
   const isSimActiveRef = useRef<boolean>(true);
+  const isAutoPilotRef = useRef<boolean>(true);
   const junctionIdRef = useRef<number>(junctionId);
+  const lastAutoPassTimeRef = useRef<number>(0);
 
   useEffect(() => {
     vehiclesRef.current = vehicles;
@@ -105,6 +154,10 @@ export const IntersectionRadiusRadar: React.FC<IntersectionRadiusRadarProps> = (
   }, [isSimActive]);
 
   useEffect(() => {
+    isAutoPilotRef.current = isAutoPilot;
+  }, [isAutoPilot]);
+
+  useEffect(() => {
     junctionIdRef.current = junctionId;
   }, [junctionId]);
 
@@ -113,23 +166,31 @@ export const IntersectionRadiusRadar: React.FC<IntersectionRadiusRadarProps> = (
     setLocalApproaches(approaches);
   }, [approaches]);
 
-  // Initialize initial vehicles distributed across approaches
+  // Initialize initial vehicles distributed across approaches with rich ANPR profiles
   useEffect(() => {
     const initial: SimVehicle[] = [];
-    const colors = ['#38BDF8', '#34D399', '#FBBF24', '#F472B6', '#A78BFA'];
+    let poolIdx = 0;
     let vId = 101;
 
     localApproaches.forEach((app) => {
-      const count = Math.min(5, Math.max(1, Math.round(app.vehicle_count || 3)));
+      const count = Math.min(4, Math.max(1, Math.round(app.vehicle_count || 3)));
       for (let i = 0; i < count; i++) {
+        const profile = INDIAN_PLATES_POOL[poolIdx % INDIAN_PLATES_POOL.length];
+        poolIdx++;
         initial.push({
           id: vId++,
           approach: app.key,
-          distMeters: 6 + i * 4, // Distance from intersection center (meters)
-          speedKmh: 35 + Math.floor(Math.random() * 15),
-          color: colors[i % colors.length],
-          type: i === 0 ? 'SEDAN' : i === 1 ? 'SUV' : 'BUS',
-          passedRadius: false
+          distMeters: 6 + i * 5.5, // Distance from intersection center (meters)
+          speedKmh: profile.speed,
+          color: profile.color,
+          type: profile.type,
+          passedRadius: false,
+          plate: profile.plate,
+          ocrConfidence: profile.ocr,
+          complianceStatus: profile.status,
+          statusReason: profile.reason,
+          owner: profile.owner,
+          isEmergency: profile.isEmergency
         });
       }
     });
@@ -140,39 +201,55 @@ export const IntersectionRadiusRadar: React.FC<IntersectionRadiusRadarProps> = (
   // Radius parameter in meters
   const DETECTION_RADIUS_M = 20.0;
 
-  // Handle a vehicle passing the radius boundary
+  const showAutoSwitchNotice = (approach: string, reason?: string) => {
+    const msg = `⚡ VEHICLE PASSED RADIUS — 0 VEHICLES REMAINING ON ${approach} — AUTO-SWITCHING TO NEXT APPROACH!`;
+    setSwitchBanner(msg);
+    setLastEventText(
+      reason ||
+        `Zero-waste adaptive clearance: Approach ${approach} empty. Transitioning via Yellow clearance to next queued approach.`
+    );
+    setTimeout(() => {
+      setSwitchBanner(null);
+    }, 4000);
+  };
+
+  // Handle a vehicle passing the radius boundary (Manual button trigger)
   const handlePassVehicle = async () => {
     const activeAppKey = activeApproach.toUpperCase();
 
     // Find the closest vehicle on the active approach inside radius
-    const targetVehIndex = vehicles.findIndex(
+    const targetVeh = vehicles.find(
       (v) => v.approach.toUpperCase() === activeAppKey && !v.passedRadius
     );
 
-    let remainingOnActive = 0;
-
-    if (targetVehIndex !== -1) {
-      setVehicles((prev) => {
-        const next = [...prev];
-        next[targetVehIndex] = {
-          ...next[targetVehIndex],
-          distMeters: Math.max(-25, next[targetVehIndex].distMeters - 30),
-          passedRadius: true,
-          passTime: Date.now()
-        };
-        remainingOnActive = next.filter(
-          (v) => v.approach.toUpperCase() === activeAppKey && !v.passedRadius
-        ).length;
-        return next;
-      });
+    if (!targetVeh) {
+      setLastEventText(`No vehicles currently on ${activeAppKey} approach.`);
+      return;
     }
+
+    await handlePassVehicleSpecific(targetVeh);
+  };
+
+  // Handle specific vehicle pass (used by both manual trigger and Auto-Pilot)
+  const handlePassVehicleSpecific = async (targetVeh: SimVehicle) => {
+    const activeAppKey = targetVeh.approach.toUpperCase();
+    const passedPlate = targetVeh.plate;
+
+    setVehicles((prev) => {
+      const next = prev.map((v) =>
+        v.id === targetVeh.id
+          ? { ...v, distMeters: -25, passedRadius: true, passTime: Date.now() }
+          : v
+      );
+      return next;
+    });
 
     setTotalPassedCount((c) => c + 1);
 
     try {
       const res = await apiClient.post(`/intersections/${junctionId}/vehicle-pass`, {
         approach: activeAppKey,
-        vehicle_id: `VEH-${Date.now().toString().slice(-4)}`
+        vehicle_id: passedPlate
       });
 
       if (res.data) {
@@ -181,21 +258,24 @@ export const IntersectionRadiusRadar: React.FC<IntersectionRadiusRadarProps> = (
           showAutoSwitchNotice(activeAppKey, res.data.reasoning);
         } else {
           setLastEventText(
-            `Vehicle passed 20m radius on ${activeAppKey}. ${remaining} vehicle(s) remaining in approach zone.`
+            `ANPR: ${passedPlate} passed 20m radius (${targetVeh.speedKmh} km/h). ${remaining} veh remaining.`
           );
         }
       }
       if (onRefresh) onRefresh();
     } catch (e) {
-      // Fallback local simulation if backend offline
-      if (remainingOnActive === 0) {
+      const remaining = vehicles.filter(
+        (v) => v.approach.toUpperCase() === activeAppKey && !v.passedRadius && v.id !== targetVeh.id
+      ).length;
+
+      if (remaining === 0) {
         showAutoSwitchNotice(
           activeAppKey,
-          `Vehicle passed 20m radius. Approach ${activeAppKey} has 0 vehicles. Automatically switching signal to next approach.`
+          `Vehicle ${passedPlate} passed 20m radius. Approach ${activeAppKey} empty (0 veh). Auto-switching to next approach.`
         );
       } else {
         setLastEventText(
-          `Vehicle passed 20m radius on ${activeAppKey}. ${remainingOnActive} vehicle(s) remaining in approach zone.`
+          `ANPR: ${passedPlate} passed 20m radius (${targetVeh.speedKmh} km/h). ${remaining} veh remaining.`
         );
       }
     }
@@ -230,35 +310,110 @@ export const IntersectionRadiusRadar: React.FC<IntersectionRadiusRadarProps> = (
     }
   };
 
-  // Spawn new vehicle on active approach for continuous testing
-  const handleAddVehicle = () => {
-    const activeAppKey = activeApproach.toUpperCase();
+  // Spawn new vehicle on active or specified approach
+  const handleAddVehicle = (targetApproach?: string) => {
+    const appKey = (targetApproach || activeApproach).toUpperCase();
+    const profile = INDIAN_PLATES_POOL[Math.floor(Math.random() * INDIAN_PLATES_POOL.length)];
     const newVeh: SimVehicle = {
-      id: Date.now() % 10000,
-      approach: activeAppKey,
+      id: Date.now() % 100000 + Math.floor(Math.random() * 500),
+      approach: appKey,
       distMeters: 25 + Math.random() * 5,
-      speedKmh: 42,
-      color: '#38BDF8',
-      type: 'SEDAN',
-      passedRadius: false
+      speedKmh: 35 + Math.floor(Math.random() * 15),
+      color: profile.color,
+      type: profile.type,
+      passedRadius: false,
+      plate: `${profile.plate.slice(0, 4)}${Math.floor(1000 + Math.random() * 9000)}`,
+      ocrConfidence: +(97.5 + Math.random() * 2.3).toFixed(1),
+      complianceStatus: profile.status,
+      statusReason: profile.reason,
+      owner: profile.owner,
+      isEmergency: profile.isEmergency
     };
     setVehicles((prev) => [...prev, newVeh]);
-    setLastEventText(`Spawned new vehicle on ${activeAppKey} approach at 25m distance from intersection.`);
+    setLastEventText(`ANPR Sighted: New vehicle ${newVeh.plate} approaching on ${appKey} (${newVeh.distMeters.toFixed(0)}m).`);
   };
 
-  const showAutoSwitchNotice = (approach: string, reason?: string) => {
-    const msg = `⚡ VEHICLE PASSED RADIUS — 0 VEHICLES REMAINING ON ${approach} — AUTO-SWITCHING TO NEXT APPROACH!`;
-    setSwitchBanner(msg);
-    setLastEventText(
-      reason ||
-        `Zero-waste adaptive clearance: Approach ${approach} empty. Transitioning via Yellow clearance to next queued approach.`
-    );
-    setTimeout(() => {
-      setSwitchBanner(null);
-    }, 4500);
-  };
+  // -------------------------------------------------------------
+  // AUTONOMOUS RADAR AUTO-PILOT LOOP: Smooth Movement & Zero-Waste Switching
+  // -------------------------------------------------------------
+  useEffect(() => {
+    if (!isSimActive || !isAutoPilot) return;
 
-  // Canvas Radar Animation: Continuous 360-Degree Sweeping Needle & Phosphor Trail
+    const autoInterval = setInterval(() => {
+      const curSignal = activeSignalRef.current;
+      const curApproach = activeApproachRef.current.toUpperCase();
+
+      if (curSignal !== 'GREEN') return;
+
+      // Find vehicles on the green approach that haven't passed
+      const unpassedOnActive = vehiclesRef.current.filter(
+        (v) => v.approach.toUpperCase() === curApproach && !v.passedRadius
+      );
+
+      if (unpassedOnActive.length === 0) return;
+
+      // Find the foremost vehicle (lowest distMeters)
+      const foremost = unpassedOnActive.reduce((min, v) => (v.distMeters < min.distMeters ? v : min), unpassedOnActive[0]);
+
+      // Move vehicles forward
+      const dt = 0.2; // 200ms
+      setVehicles((prev) => {
+        let vehicleCrossed: SimVehicle | null = null;
+        const updated = prev.map((v) => {
+          if (v.approach.toUpperCase() === curApproach && !v.passedRadius) {
+            const moveMeters = (v.speedKmh * 1000) / 3600 * dt;
+            const newDist = v.distMeters - moveMeters;
+            if (newDist <= 0 && v.distMeters > 0) {
+              vehicleCrossed = { ...v, distMeters: -25, passedRadius: true, passTime: Date.now() };
+              return vehicleCrossed;
+            }
+            return { ...v, distMeters: Math.max(-25, newDist) };
+          }
+          return v;
+        });
+
+        // If a vehicle just crossed the stop line (0m)
+        if (vehicleCrossed) {
+          const v = vehicleCrossed as SimVehicle;
+          const now = Date.now();
+          if (now - lastAutoPassTimeRef.current > 1200) {
+            lastAutoPassTimeRef.current = now;
+            handlePassVehicleSpecific(v);
+          }
+        }
+
+        return updated;
+      });
+    }, 200);
+
+    return () => clearInterval(autoInterval);
+  }, [isSimActive, isAutoPilot, junctionId]);
+
+  // Traffic dynamic replenishment: Spawn new incoming arrivals so radar stays alive
+  useEffect(() => {
+    if (!isSimActive || !isAutoPilot) return;
+
+    const arrivalInterval = setInterval(() => {
+      // Check approaches that have fewer than 2 active vehicles
+      const approachesToCheck = localApproachesRef.current;
+      if (!approachesToCheck || approachesToCheck.length === 0) return;
+
+      const randomApp = approachesToCheck[Math.floor(Math.random() * approachesToCheck.length)];
+      const activeCount = vehiclesRef.current.filter(
+        (v) => v.approach.toUpperCase() === randomApp.key.toUpperCase() && !v.passedRadius
+      ).length;
+
+      if (activeCount < 3) {
+        handleAddVehicle(randomApp.key);
+      }
+    }, 6000);
+
+    return () => clearInterval(arrivalInterval);
+  }, [isSimActive, isAutoPilot]);
+
+  // -------------------------------------------------------------
+  // CANVAS RADAR ANIMATION: 360° Sweeping Needle, Phosphor Trail & ANPR Tag Overlay
+  // -------------------------------------------------------------
   useEffect(() => {
     const canvas = canvasRef.current;
     if (!canvas) return;
@@ -396,7 +551,7 @@ export const IntersectionRadiusRadar: React.FC<IntersectionRadiusRadarProps> = (
         const isCurrentActive = curActiveApproach === dir;
 
         // Approach Corridor Road Lines
-        const roadW = 32;
+        const roadW = 34;
         const cosA = Math.cos(angle);
         const sinA = Math.sin(angle);
 
@@ -494,7 +649,6 @@ export const IntersectionRadiusRadar: React.FC<IntersectionRadiusRadarProps> = (
       }
 
       // Bright Phosphor Scanning Needle Line
-      // Outer glow
       ctx.strokeStyle = 'rgba(16, 185, 129, 0.35)';
       ctx.lineWidth = 8;
       ctx.beginPath();
@@ -502,7 +656,6 @@ export const IntersectionRadiusRadar: React.FC<IntersectionRadiusRadarProps> = (
       ctx.lineTo(sweepX, sweepY);
       ctx.stroke();
 
-      // Mid neon beam
       ctx.strokeStyle = 'rgba(52, 211, 153, 0.9)';
       ctx.lineWidth = 2.5;
       ctx.beginPath();
@@ -510,7 +663,6 @@ export const IntersectionRadiusRadar: React.FC<IntersectionRadiusRadarProps> = (
       ctx.lineTo(sweepX, sweepY);
       ctx.stroke();
 
-      // Bright laser core needle
       ctx.strokeStyle = '#FFFFFF';
       ctx.lineWidth = 1.2;
       ctx.beginPath();
@@ -552,7 +704,7 @@ export const IntersectionRadiusRadar: React.FC<IntersectionRadiusRadarProps> = (
       ctx.textBaseline = 'middle';
       ctx.fillText(`J#${junctionIdRef.current}`, cx, cy);
 
-      // 8. Render Vehicles with 360° Phosphor Ping Excitation
+      // 8. Render Vehicles with ANPR Plate Tags & 360° Phosphor Ping Excitation
       const curVehicles = vehiclesRef.current;
       curVehicles.forEach((veh) => {
         const dir = veh.approach.toUpperCase();
@@ -601,15 +753,35 @@ export const IntersectionRadiusRadar: React.FC<IntersectionRadiusRadarProps> = (
         ctx.lineTo(tipX, tipY);
         ctx.stroke();
 
-        // Vehicle Distance Tag
-        ctx.fillStyle = isSwept ? '#34D399' : '#E2E8F0';
-        ctx.font = 'bold 8px monospace';
-        ctx.textAlign = 'left';
-        ctx.fillText(
-          isPassed ? `PASSED` : `${Math.max(0, Math.round(veh.distMeters))}m`,
-          vx + 10,
-          vy - 6
-        );
+        // ANPR Plate Tag & Distance on Canvas
+        if (!isPassed && veh.distMeters <= 25) {
+          // Plate Box
+          const tagW = 76;
+          const tagH = 14;
+          const tagX = vx + 10;
+          const tagY = vy - 18;
+
+          ctx.fillStyle = 'rgba(15, 23, 42, 0.85)';
+          ctx.fillRect(tagX, tagY, tagW, tagH);
+          ctx.strokeStyle = isSwept ? '#34D399' : '#475569';
+          ctx.lineWidth = 1;
+          ctx.strokeRect(tagX, tagY, tagW, tagH);
+
+          // Plate Text
+          ctx.fillStyle = isSwept ? '#34D399' : '#F8FAFC';
+          ctx.font = 'bold 8px monospace';
+          ctx.textAlign = 'left';
+          ctx.fillText(`${veh.plate}`, tagX + 3, tagY + 10);
+        } else {
+          ctx.fillStyle = isSwept ? '#34D399' : '#E2E8F0';
+          ctx.font = 'bold 8px monospace';
+          ctx.textAlign = 'left';
+          ctx.fillText(
+            isPassed ? `PASSED` : `${Math.max(0, Math.round(veh.distMeters))}m`,
+            vx + 10,
+            vy - 6
+          );
+        }
 
         // Passed Radius Spark Ring Animation
         if (isPassed && veh.passTime && Date.now() - veh.passTime < 2500) {
@@ -622,22 +794,7 @@ export const IntersectionRadiusRadar: React.FC<IntersectionRadiusRadarProps> = (
         }
       });
 
-      // 9. Move vehicles smoothly if simulation is active
-      if (isSimActiveRef.current && curActiveSignal === 'GREEN') {
-        vehiclesRef.current.forEach((v) => {
-          if (v.approach.toUpperCase() === curActiveApproach) {
-            const moveMeters = (v.speedKmh * 1000) / 3600 / 60; // Meters moved per frame at 60fps
-            const newDist = v.distMeters - moveMeters;
-            if (v.distMeters >= 0 && newDist < 0) {
-              v.passedRadius = true;
-              v.passTime = Date.now();
-            }
-            v.distMeters = newDist < -35 ? -35 : newDist;
-          }
-        });
-      }
-
-      // 10. Live 360° Radar Scanning HUD at the top
+      // 9. Live 360° Radar Scanning HUD at the top
       ctx.fillStyle = 'rgba(15, 23, 42, 0.85)';
       ctx.fillRect(width / 2 - 140, 10, 280, 22);
       ctx.strokeStyle = '#334155';
@@ -669,10 +826,12 @@ export const IntersectionRadiusRadar: React.FC<IntersectionRadiusRadarProps> = (
 
   const vehiclesInActiveRadius = vehicles.filter(
     (v) => v.approach.toUpperCase() === activeApproach.toUpperCase() && !v.passedRadius
-  ).length;
+  );
+
+  const totalInRadius = vehicles.filter((v) => !v.passedRadius && v.distMeters <= 20).length;
 
   return (
-    <div className="bg-slate-900 border border-slate-700/80 rounded-xl overflow-hidden shadow-lg select-none font-mono text-white">
+    <div className="bg-slate-900 border border-slate-700/80 rounded-xl overflow-hidden shadow-lg select-none font-mono text-white space-y-0">
       {/* Header Bar */}
       <div className="p-3.5 bg-slate-950 border-b border-slate-800 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
         <div className="flex items-center gap-2.5">
@@ -685,17 +844,30 @@ export const IntersectionRadiusRadar: React.FC<IntersectionRadiusRadarProps> = (
                 INTERSECTION DETECTION RADIUS (20m) & ZERO-WASTE AUTO-SWITCH RADAR
               </h3>
               <span className="px-2 py-0.5 rounded text-[9px] font-extrabold bg-emerald-500/20 text-emerald-300 border border-emerald-500/30">
-                PROXIMITY ENGINE ACTIVE
+                20m GEOFENCE ARMED
               </span>
             </div>
             <p className="text-[10px] text-slate-400">
-              Detects vehicles crossing the 20m radius zone. When all vehicles pass and 0 remain, signal automatically switches to the next approach.
+              Autonomous proximity tracking with real-time ANPR OCR interpretation. Zero vehicles inside 20m zone auto-switches signal.
             </p>
           </div>
         </div>
 
-        {/* Action Controls */}
+        {/* Action Controls & Auto-Pilot Toggle */}
         <div className="flex items-center gap-2 w-full sm:w-auto justify-end">
+          <button
+            onClick={() => setIsAutoPilot((prev) => !prev)}
+            className={`px-3 py-1.5 rounded text-xs font-bold flex items-center gap-1.5 transition-colors border ${
+              isAutoPilot
+                ? 'bg-emerald-600 text-white border-emerald-400 shadow-sm'
+                : 'bg-slate-800 text-slate-300 border-slate-700 hover:bg-slate-700'
+            }`}
+            title="When active, vehicles advance autonomously and auto-switch the signal on 0 remaining"
+          >
+            <Sparkles className="w-3.5 h-3.5 text-yellow-300" />
+            <span>AUTONOMOUS RADAR: {isAutoPilot ? 'ACTIVE' : 'MANUAL'}</span>
+          </button>
+
           <button
             onClick={() => setIsSimActive((prev) => !prev)}
             className={`px-3 py-1.5 rounded text-xs font-bold flex items-center gap-1.5 transition-colors border ${
@@ -757,7 +929,7 @@ export const IntersectionRadiusRadar: React.FC<IntersectionRadiusRadarProps> = (
             <div className="flex items-center justify-between border-b border-slate-800 pb-2">
               <span className="text-xs font-bold text-slate-300 uppercase flex items-center gap-1.5">
                 <Activity className="w-4 h-4 text-emerald-400" />
-                APPROACH RADIUS TELEMETRY
+                20m APPROACH RADIUS TELEMETRY
               </span>
               <span className="text-[10px] px-2 py-0.5 rounded bg-slate-800 text-slate-300 border border-slate-700">
                 {localApproaches.length}-APPROACH DYNAMIC
@@ -767,16 +939,16 @@ export const IntersectionRadiusRadar: React.FC<IntersectionRadiusRadarProps> = (
             {/* Metrics Dashboard */}
             <div className="grid grid-cols-2 gap-2.5 text-xs">
               <div className="p-2.5 bg-slate-950 rounded-lg border border-slate-800">
-                <span className="text-[10px] text-slate-400 uppercase block">Vehicles in 20m Radius</span>
-                <span className="text-lg font-black text-emerald-400">{vehiclesInActiveRadius} veh</span>
+                <span className="text-[10px] text-slate-400 uppercase block">Active Approach In-Range</span>
+                <span className="text-lg font-black text-emerald-400">{vehiclesInActiveRadius.length} veh</span>
               </div>
               <div className="p-2.5 bg-slate-950 rounded-lg border border-slate-800">
                 <span className="text-[10px] text-slate-400 uppercase block">Total Passed Radius</span>
                 <span className="text-lg font-black text-cyan-400">{totalPassedCount} passed</span>
               </div>
               <div className="p-2.5 bg-slate-950 rounded-lg border border-slate-800">
-                <span className="text-[10px] text-slate-400 uppercase block">Detection Radius</span>
-                <span className="text-base font-bold text-slate-200">20.0 meters</span>
+                <span className="text-[10px] text-slate-400 uppercase block">Total Junction In-Range</span>
+                <span className="text-base font-bold text-slate-200">{totalInRadius} veh (20m zone)</span>
               </div>
               <div className="p-2.5 bg-slate-950 rounded-lg border border-slate-800">
                 <span className="text-[10px] text-slate-400 uppercase block">Auto-Switch Behavior</span>
@@ -787,7 +959,7 @@ export const IntersectionRadiusRadar: React.FC<IntersectionRadiusRadarProps> = (
             {/* Live Event Reasoning Log */}
             <div className="p-3 bg-slate-950 rounded-lg border border-slate-800 space-y-1">
               <span className="text-[10px] font-bold text-amber-400 uppercase flex items-center gap-1">
-                <Zap className="w-3 h-3" /> REAL-TIME RADAR LOG:
+                <Zap className="w-3 h-3" /> REAL-TIME RADAR & ANPR LOG:
               </span>
               <p className="text-[11px] text-slate-300 leading-relaxed font-semibold">
                 {lastEventText}
@@ -798,7 +970,7 @@ export const IntersectionRadiusRadar: React.FC<IntersectionRadiusRadarProps> = (
           {/* Interactive Test Triggers (Judge & User Demonstrator) */}
           <div className="space-y-2 border-t border-slate-800 pt-3">
             <span className="text-[10px] font-bold text-slate-400 uppercase block">
-              INTERACTIVE DEMO CONTROLS (TEST ZERO-WASTE SWITCH):
+              MANUAL RADAR OVERRIDE CONTROLS:
             </span>
 
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
@@ -823,7 +995,7 @@ export const IntersectionRadiusRadar: React.FC<IntersectionRadiusRadarProps> = (
 
             <button
               type="button"
-              onClick={handleAddVehicle}
+              onClick={() => handleAddVehicle()}
               className="w-full py-2 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-lg text-[11px] font-bold border border-slate-700 flex items-center justify-center gap-1.5 transition-colors cursor-pointer"
             >
               <span>➕ Add Vehicle to Approach Queue</span>
@@ -831,6 +1003,178 @@ export const IntersectionRadiusRadar: React.FC<IntersectionRadiusRadarProps> = (
           </div>
         </div>
       </div>
+
+      {/* ------------------------------------------------------------------ */}
+      {/* SECTION: REAL-TIME ANPR INTERPRETATION & SURVEILLANCE RADAR HUD */}
+      {/* ------------------------------------------------------------------ */}
+      <div className="p-4 bg-slate-950 border-b border-slate-800 space-y-3">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+          <div className="flex items-center gap-2">
+            <Siren className="w-4 h-4 text-emerald-400" />
+            <h4 className="text-xs font-bold text-slate-200 uppercase tracking-wider">
+              REAL-TIME ANPR INTERPRETATION & WATCHLIST CROSS-CHECK ({vehicles.filter(v => !v.passedRadius).length} DETECTED VEHICLES)
+            </h4>
+          </div>
+          <span className="text-[10px] text-slate-400">
+            Automated OCR Interpretation • Watchlist Cross-Check • e-Challan & Fitness Verification
+          </span>
+        </div>
+
+        {/* ANPR Vehicle Cards Grid */}
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-2.5">
+          {vehicles
+            .filter((v) => !v.passedRadius)
+            .slice(0, 4)
+            .map((veh) => {
+              const isCleared = veh.complianceStatus === 'CLEARED';
+              const isEmergency = veh.complianceStatus === 'EMERGENCY_WHITELIST';
+              const isWatchlist = veh.complianceStatus === 'WATCHLIST_HIT';
+              const isPending =
+                veh.complianceStatus === 'CHALLAN_PENDING' ||
+                veh.complianceStatus === 'PUC_EXPIRED' ||
+                veh.complianceStatus === 'INSURANCE_DUE';
+
+              return (
+                <div
+                  key={veh.id}
+                  onClick={() => setSelectedDossierVehicle(veh)}
+                  className={`p-3 rounded-lg border cursor-pointer transition-all hover:scale-[1.01] ${
+                    isWatchlist
+                      ? 'bg-red-950/40 border-red-500/60 ring-1 ring-red-500/40'
+                      : isEmergency
+                      ? 'bg-blue-950/40 border-blue-500/60 ring-1 ring-blue-500/40'
+                      : isPending
+                      ? 'bg-amber-950/40 border-amber-500/50'
+                      : 'bg-slate-900 border-slate-800 hover:border-slate-700'
+                  }`}
+                >
+                  <div className="flex items-center justify-between mb-2">
+                    {/* Indian HSRP License Plate Badge */}
+                    <div className="flex items-center bg-white text-slate-950 font-black text-[11px] rounded border border-slate-400 overflow-hidden shadow-xs">
+                      <span className="bg-[#002664] text-white px-1 py-0.5 text-[8px] font-extrabold tracking-tighter">
+                        IND
+                      </span>
+                      <span className="px-1.5 py-0.5 tracking-wider font-mono">
+                        {veh.plate}
+                      </span>
+                    </div>
+
+                    <span className="text-[9px] text-slate-400 font-mono">
+                      {veh.distMeters.toFixed(0)}m • {veh.approach}
+                    </span>
+                  </div>
+
+                  <div className="space-y-1 text-[10px]">
+                    <div className="flex items-center justify-between">
+                      <span className="text-slate-400">Class:</span>
+                      <span className="font-bold text-slate-200">{veh.type}</span>
+                    </div>
+                    <div className="flex items-center justify-between">
+                      <span className="text-slate-400">Speed:</span>
+                      <span className="font-bold text-slate-200">{veh.speedKmh} km/h</span>
+                    </div>
+                    <div className="flex items-center justify-between">
+                      <span className="text-slate-400">OCR Accuracy:</span>
+                      <span className="font-bold text-emerald-400">{veh.ocrConfidence}%</span>
+                    </div>
+
+                    {/* Interpretation Badge */}
+                    <div className="pt-1.5 border-t border-slate-800/80">
+                      <span
+                        className={`px-2 py-0.5 rounded text-[9px] font-extrabold block text-center truncate ${
+                          isWatchlist
+                            ? 'bg-red-500 text-white animate-pulse'
+                            : isEmergency
+                            ? 'bg-blue-500 text-white'
+                            : isPending
+                            ? 'bg-amber-500/30 text-amber-300 border border-amber-500/40'
+                            : 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/30'
+                        }`}
+                      >
+                        {veh.complianceStatus.replace('_', ' ')}
+                      </span>
+                      <p className="text-[9px] text-slate-400 mt-1 truncate">
+                        {veh.statusReason}
+                      </p>
+                    </div>
+                  </div>
+                </div>
+              );
+            })}
+        </div>
+      </div>
+
+      {/* Vehicle ANPR Dossier Modal */}
+      {selectedDossierVehicle && (
+        <div className="fixed inset-0 bg-black/70 backdrop-blur-xs z-50 flex items-center justify-center p-4">
+          <div className="bg-slate-900 border border-slate-700 max-w-md w-full rounded-xl p-5 space-y-4 shadow-2xl text-white font-mono">
+            <div className="flex items-center justify-between border-b border-slate-800 pb-3">
+              <div className="flex items-center gap-2">
+                <FileText className="w-5 h-5 text-emerald-400" />
+                <h3 className="font-bold text-sm">ANPR INTELLIGENCE DOSSIER</h3>
+              </div>
+              <button
+                onClick={() => setSelectedDossierVehicle(null)}
+                className="text-slate-400 hover:text-white text-lg font-bold"
+              >
+                ✕
+              </button>
+            </div>
+
+            {/* HSRP Plate Display */}
+            <div className="flex items-center justify-center py-2 bg-slate-950 rounded-lg border border-slate-800">
+              <div className="flex items-center bg-white text-slate-950 font-black text-sm rounded border-2 border-slate-400 shadow-md">
+                <span className="bg-[#002664] text-white px-2 py-1 text-[10px] font-black">
+                  IND 🇮🇳
+                </span>
+                <span className="px-3 py-1 tracking-widest font-mono text-base">
+                  {selectedDossierVehicle.plate}
+                </span>
+              </div>
+            </div>
+
+            <div className="space-y-2 text-xs">
+              <div className="flex justify-between p-2 bg-slate-950 rounded border border-slate-800">
+                <span className="text-slate-400">Registered Owner:</span>
+                <span className="font-bold text-slate-200">{selectedDossierVehicle.owner}</span>
+              </div>
+              <div className="flex justify-between p-2 bg-slate-950 rounded border border-slate-800">
+                <span className="text-slate-400">Vehicle Classification:</span>
+                <span className="font-bold text-slate-200">{selectedDossierVehicle.type}</span>
+              </div>
+              <div className="flex justify-between p-2 bg-slate-950 rounded border border-slate-800">
+                <span className="text-slate-400">Approach Corridor:</span>
+                <span className="font-bold text-slate-200">{selectedDossierVehicle.approach}</span>
+              </div>
+              <div className="flex justify-between p-2 bg-slate-950 rounded border border-slate-800">
+                <span className="text-slate-400">Detection Radar Distance:</span>
+                <span className="font-bold text-emerald-400">{selectedDossierVehicle.distMeters.toFixed(1)}m from stop line</span>
+              </div>
+              <div className="flex justify-between p-2 bg-slate-950 rounded border border-slate-800">
+                <span className="text-slate-400">Optical OCR Accuracy:</span>
+                <span className="font-bold text-emerald-400">{selectedDossierVehicle.ocrConfidence}%</span>
+              </div>
+              <div className="flex justify-between p-2 bg-slate-950 rounded border border-slate-800">
+                <span className="text-slate-400">ANPR Compliance Status:</span>
+                <span className="font-bold text-amber-400">{selectedDossierVehicle.complianceStatus}</span>
+              </div>
+              <div className="p-2.5 bg-slate-950 rounded border border-slate-800 space-y-1">
+                <span className="text-[10px] text-slate-400 uppercase font-bold block">Interpretation Findings:</span>
+                <p className="text-slate-300 font-semibold">{selectedDossierVehicle.statusReason}</p>
+              </div>
+            </div>
+
+            <div className="flex justify-end gap-2 pt-2 border-t border-slate-800">
+              <button
+                onClick={() => setSelectedDossierVehicle(null)}
+                className="px-4 py-2 bg-slate-800 hover:bg-slate-700 text-white rounded text-xs font-bold"
+              >
+                Close Dossier
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Approach Breakdown Strip */}
       <div className="p-3 bg-slate-950 grid grid-cols-2 sm:grid-cols-4 gap-2 text-xs">
@@ -851,7 +1195,7 @@ export const IntersectionRadiusRadar: React.FC<IntersectionRadiusRadarProps> = (
             >
               <div>
                 <span className="font-bold block text-[11px]">{app.name || app.key}</span>
-                <span className="text-[10px] text-slate-400">Inside Radius: {count} veh</span>
+                <span className="text-[10px] text-slate-400">Inside 20m: {count} veh</span>
               </div>
               <span
                 className={`px-1.5 py-0.5 rounded text-[9px] font-bold ${
