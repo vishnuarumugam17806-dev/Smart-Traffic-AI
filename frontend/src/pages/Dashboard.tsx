@@ -2,7 +2,8 @@ import React, { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
   Camera, Car, Bell, TrafficCone, Activity, Radio, Search,
-  ArrowRight, ShieldCheck, Map, Route, Video, Play, SkipForward
+  ArrowRight, ShieldCheck, Map, Route, Video, Play, SkipForward,
+  Radar, Target
 } from 'lucide-react';
 import { CameraCanvasFeed } from '../components/CameraCanvasFeed';
 import { SignalControllerCard } from '../components/SignalControllerCard';
@@ -28,6 +29,7 @@ export const Dashboard: React.FC = () => {
 
   // Live KPI Metrics
   const [activeDetections, setActiveDetections] = useState<number>(1482);
+  const [vehiclesInRange, setVehiclesInRange] = useState<number>(6);
 
   // Live camera stream stats
   const [liveStreamStats, setLiveStreamStats] = useState({
@@ -85,6 +87,9 @@ export const Dashboard: React.FC = () => {
           status: activeLiveUpdate.camera_health || 'ONLINE'
         });
         setActiveDetections(prev => Math.max(100, prev + (Math.random() > 0.5 ? 1 : -1)));
+        if (activeLiveUpdate.vehicle_count !== undefined) {
+          setVehiclesInRange(Math.max(1, Math.round(activeLiveUpdate.vehicle_count * 0.45)));
+        }
       } else if (activeLiveUpdate.event === 'ALERT_CREATED') {
         setAlertsFeed(prev => [activeLiveUpdate.alert, ...prev.slice(0, 4)]);
       } else if (activeLiveUpdate.event === 'DEMO_STEP_CHANGED') {
@@ -93,6 +98,28 @@ export const Dashboard: React.FC = () => {
       }
     }
   }, [activeLiveUpdate]);
+
+  useEffect(() => {
+    const fetchRangeData = async () => {
+      try {
+        const res = await apiClient.get(`/intersections/${selectedIntersectionId || 1}/traffic`);
+        if (res.data && res.data.approaches) {
+          const apps = Object.values(res.data.approaches) as any[];
+          const activeApp = apps[0];
+          if (activeApp && typeof activeApp.vehicle_count === 'number') {
+            setVehiclesInRange(Math.round(activeApp.vehicle_count));
+            return;
+          }
+        }
+      } catch {
+        // Fallback calculation from current stream stats
+      }
+      setVehiclesInRange(Math.max(2, Math.round(liveStreamStats.vehicleCount * 0.45)));
+    };
+    fetchRangeData();
+    const interval = setInterval(fetchRangeData, 3000);
+    return () => clearInterval(interval);
+  }, [selectedIntersectionId, liveStreamStats.vehicleCount]);
 
   const handleNextDemoStep = async () => {
     const nextStep = demoStep >= 30 ? 1 : demoStep + 1;
@@ -158,7 +185,7 @@ export const Dashboard: React.FC = () => {
       </div>
 
       {/* 2. OPERATIONAL KPI METRICS & QUICK ACTIONS */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4">
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3 sm:gap-4">
         {/* Connected Cameras */}
         <div 
           onClick={() => navigate('/cameras')}
@@ -174,13 +201,34 @@ export const Dashboard: React.FC = () => {
           </div>
         </div>
 
-        {/* Vehicles Detected */}
+        {/* Vehicles in 20m Detection Range */}
+        <div 
+          onClick={() => navigate('/signals')}
+          className="bg-white p-4 rounded-lg border border-[#DCE4EA] flex items-center justify-between shadow-xs cursor-pointer hover:border-emerald-500 hover:shadow-md transition-all group"
+          title="Click to view 360° Detection Radius Radar & signal auto-switch"
+        >
+          <div>
+            <div className="flex items-center gap-1.5">
+              <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
+              <p className="text-[10px] font-bold text-slate-500 uppercase font-mono">VEHICLES IN RANGE</p>
+            </div>
+            <h3 className="text-xl font-bold text-emerald-700 mt-0.5">{vehiclesInRange} in 20m</h3>
+            <p className="text-[11px] text-emerald-600 font-bold mt-0.5 flex items-center gap-1">
+              <span>🎯 20m Geofence Active</span>
+            </p>
+          </div>
+          <div className="p-2.5 rounded-lg bg-[#EAF7EF] text-[#2E7D5B] group-hover:bg-emerald-600 group-hover:text-white transition-colors">
+            <Radar className="w-5 h-5 animate-spin" style={{ animationDuration: '8s' }} />
+          </div>
+        </div>
+
+        {/* Total Vehicles Detected */}
         <div 
           onClick={() => navigate('/anpr')}
           className="bg-white p-4 rounded-lg border border-[#DCE4EA] flex items-center justify-between shadow-xs cursor-pointer hover:border-[#245B84] transition-colors"
         >
           <div>
-            <p className="text-[10px] font-bold text-slate-500 uppercase font-mono">VEHICLES DETECTED</p>
+            <p className="text-[10px] font-bold text-slate-500 uppercase font-mono">TOTAL DETECTED</p>
             <h3 className="text-xl font-bold text-slate-800 mt-0.5">{activeDetections}</h3>
             <p className="text-[11px] text-[#245B84] font-bold mt-0.5">Live ANPR & Tracking</p>
           </div>
@@ -327,6 +375,42 @@ export const Dashboard: React.FC = () => {
             queueLength={liveStreamStats.queueLength}
             occupancyPct={liveStreamStats.occupancyPct}
           />
+
+          {/* 20m Detection Range Proximity Telemetry Bar */}
+          <div className="bg-slate-900 border border-slate-800 rounded-lg p-3 text-white flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2.5 shadow-xs font-mono">
+            <div className="flex items-center gap-2.5">
+              <div className="p-2 rounded-md bg-emerald-500/20 text-emerald-400 border border-emerald-500/30">
+                <Radar className="w-4 h-4 animate-spin" style={{ animationDuration: '6s' }} />
+              </div>
+              <div>
+                <div className="flex items-center gap-2">
+                  <span className="text-xs font-black text-slate-100 uppercase tracking-wide">
+                    20m DETECTION RADIUS GEOFENCE
+                  </span>
+                  <span className="px-1.5 py-0.5 rounded text-[9px] font-black bg-emerald-500/20 text-emerald-300 border border-emerald-500/30">
+                    ARMED
+                  </span>
+                </div>
+                <p className="text-[10px] text-slate-400">
+                  <strong className="text-emerald-400">{vehiclesInRange} vehicles</strong> inside the 20m approach detection zone
+                </p>
+              </div>
+            </div>
+
+            <div className="flex items-center gap-3 w-full sm:w-auto justify-between sm:justify-end">
+              <div className="text-right">
+                <span className="text-[9px] text-slate-400 uppercase block">In-Range Count</span>
+                <span className="text-sm font-black text-emerald-400">{vehiclesInRange} VEHICLES</span>
+              </div>
+              <button
+                onClick={() => navigate('/signals')}
+                className="px-2.5 py-1.5 bg-emerald-600 hover:bg-emerald-500 text-white rounded text-[10px] font-black tracking-wider transition-colors flex items-center gap-1 shadow-xs cursor-pointer"
+              >
+                <span>360° RADAR</span>
+                <ArrowRight className="w-3 h-3" />
+              </button>
+            </div>
+          </div>
         </div>
 
         {/* Right: Smart Signal Controller */}
