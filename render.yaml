@@ -6,7 +6,7 @@ services:
     env: docker
     rootDir: backend
     dockerfilePath: Dockerfile
-    dockerContext: backend
+    dockerContext: .
     healthCheckPath: /health
     plan: free
     region: oregon
@@ -33,7 +33,7 @@ services:
     env: docker
     rootDir: backend
     dockerfilePath: Dockerfile
-    dockerContext: backend
+    dockerContext: .
     healthCheckPath: /health
     plan: free
     region: oregon
@@ -60,7 +60,7 @@ services:
     env: docker
     rootDir: backend
     dockerfilePath: Dockerfile
-    dockerContext: backend
+    dockerContext: .
     healthCheckPath: /health
     plan: free
     region: oregon
