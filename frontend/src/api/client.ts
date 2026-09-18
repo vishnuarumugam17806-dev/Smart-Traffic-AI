@@ -2,12 +2,12 @@ import axios from 'axios';
 
 // Detect if running in production on Render or on localhost
 const isRenderProd = typeof window !== 'undefined' && window.location.hostname.includes('onrender.com');
-const PROD_BACKEND = 'https://vigitra-backend.onrender.com/api/v1';
+const PROD_BACKEND = 'https://vigitra-backend-k0yj.onrender.com/api/v1';
 const LOCAL_BACKEND = 'http://localhost:8000/api/v1';
 
 // If env var is missing or relative '/api/v1' on static render host, route directly to Render backend!
 let rawBase = import.meta.env.VITE_API_BASE_URL;
-if (!rawBase || rawBase === '/api/v1' || rawBase.startsWith('/')) {
+if (!rawBase || rawBase === '/api/v1' || rawBase.startsWith('/') || rawBase.includes('vigitra-backend.onrender.com')) {
   rawBase = isRenderProd ? PROD_BACKEND : LOCAL_BACKEND;
 }
 

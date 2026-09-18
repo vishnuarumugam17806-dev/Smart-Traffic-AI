@@ -27,10 +27,13 @@ export const Layout: React.FC = () => {
   useEffect(() => {
     const isRenderProd = typeof window !== 'undefined' && window.location.hostname.includes('onrender.com');
     const defaultWsUrl = isRenderProd
-      ? 'wss://vigitra-backend.onrender.com/ws/traffic'
+      ? 'wss://vigitra-backend-k0yj.onrender.com/ws/traffic'
       : 'ws://localhost:8000/ws/traffic';
 
-    const envWsUrl = import.meta.env.VITE_WS_URL;
+    let envWsUrl = import.meta.env.VITE_WS_URL;
+    if (envWsUrl && envWsUrl.includes('vigitra-backend.onrender.com')) {
+      envWsUrl = 'wss://vigitra-backend-k0yj.onrender.com/ws/traffic';
+    }
     const wsUrl = (envWsUrl && !envWsUrl.startsWith('/')) ? envWsUrl : defaultWsUrl;
 
     let ws: WebSocket | null = null;

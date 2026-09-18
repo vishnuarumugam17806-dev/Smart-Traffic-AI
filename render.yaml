@@ -94,8 +94,8 @@ services:
         destination: /index.html
     envVars:
       - key: VITE_API_BASE_URL
-        value: https://vigitra-backend.onrender.com/api/v1
+        value: https://vigitra-backend-k0yj.onrender.com/api/v1
       - key: VITE_WS_URL
-        value: wss://vigitra-backend.onrender.com/ws/traffic
+        value: wss://vigitra-backend-k0yj.onrender.com/ws/traffic
       - key: VITE_FRONTEND_BASE_URL
         value: https://vigitra-frontend.onrender.com
