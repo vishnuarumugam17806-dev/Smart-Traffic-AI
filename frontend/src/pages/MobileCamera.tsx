@@ -1,52 +1,95 @@
-import React, { useState, useRef, useEffect } from 'react';
-import { useNavigate, Link } from 'react-router-dom';
-import { Camera, Video, Square, CameraOff, Smartphone, AlertTriangle, CheckCircle2, RefreshCw, Radio, Download, Film, ExternalLink, HardDrive, Clock } from 'lucide-react';
+import React, { useState, useRef, useEffect, useCallback } from 'react';
+import { useNavigate, useSearchParams, Link } from 'react-router-dom';
+import {
+  Camera,
+  Video,
+  Square,
+  CameraOff,
+  Smartphone,
+  AlertTriangle,
+  CheckCircle2,
+  RefreshCw,
+  Radio,
+  Download,
+  Film,
+  ExternalLink,
+  MapPin,
+  Shield,
+  Eye,
+  Info
+} from 'lucide-react';
 import { apiClient, resolveVideoUrl } from '../api/client';
 import { useStore } from '../store/useStore';
+
+interface GpsReading {
+  lat: number;
+  lng: number;
+  accuracy: number;
+  timestamp: string;
+  ageSeconds: number;
+}
+
+interface MobileScanResult {
+  plate_number: string;
+  confidence: number;
+  visual_validation_score?: number;
+  blur_score?: number;
+  validation_status?: string;
+  flag: string;
+  severity: string;
+  reason: string;
+  record_id?: string;
+  evidence_url?: string;
+  timestamp: string;
+  status?: string;
+}
 
 export const MobileCamera: React.FC = () => {
   const { user } = useStore();
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
 
+  // Read device parameters from pairing QR or query params
+  const deviceId = searchParams.get('device_id') || 'MOBILE-CAM-001';
+  const pairingToken = searchParams.get('token') || '';
+
+  // Streaming & Hardware state
   const [isStreaming, setIsStreaming] = useState<boolean>(false);
   const [isRecording, setIsRecording] = useState<boolean>(false);
   const [recordingSeconds, setRecordingSeconds] = useState<number>(0);
   const [facingMode, setFacingMode] = useState<'environment' | 'user'>('environment');
-  const [statusMessage, setStatusMessage] = useState<string>('READY FOR FIELD RECORDING');
+  const [statusMessage, setStatusMessage] = useState<string>('FIELD RECORDING READY');
   const [emergencyAlertSent, setEmergencyAlertSent] = useState<boolean>(false);
   const [capturingPhoto, setCapturingPhoto] = useState<boolean>(false);
   const [isSaving, setIsSaving] = useState<boolean>(false);
-  
+
+  // Permission & Location Tracking (Sections 8, 10-17, 39)
+  const [cameraPermission, setCameraPermission] = useState<'PROMPT' | 'GRANTED' | 'DENIED' | 'UNAVAILABLE'>('PROMPT');
+  const [locationStatus, setLocationStatus] = useState<'WAITING' | 'AVAILABLE' | 'PERMISSION_DENIED' | 'UNAVAILABLE' | 'STALE'>('WAITING');
+  const [gpsReading, setGpsReading] = useState<GpsReading | null>(null);
+
+  // ANPR & AI State
+  const [latestScan, setLatestScan] = useState<MobileScanResult | null>(null);
+  const [recentScans, setRecentScans] = useState<MobileScanResult[]>([]);
+  const [vehicleDetectedInScene, setVehicleDetectedInScene] = useState<boolean>(false);
+  const [aiStatusText, setAiStatusText] = useState<string>('Searching for vehicles...');
+
   // Saved recording preview modal
   const [savedModalRecord, setSavedModalRecord] = useState<any | null>(null);
   const [recentMobileRecords, setRecentMobileRecords] = useState<any[]>([]);
 
-  // Automatic ANPR scan tracking
-  interface MobileScanResult {
-    plate_number: string;
-    confidence: number;
-    flag: string;
-    severity: string;
-    reason: string;
-    record_id?: string;
-    evidence_url?: string;
-    timestamp: string;
-  }
-  const [latestScan, setLatestScan] = useState<MobileScanResult | null>(null);
-  const [recentScans, setRecentScans] = useState<MobileScanResult[]>([]);
-
-  const [deviceId] = useState<string>('MOBILE-CAM-001');
-  const [locationName] = useState<string>('Anna Salai Junction Approach');
-  const [gpsCoords, setGpsCoords] = useState<{ lat: number; lng: number }>({ lat: 13.0604, lng: 80.2496 });
-
+  // Refs
   const videoRef = useRef<HTMLVideoElement>(null);
   const streamRef = useRef<MediaStream | null>(null);
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const recordedChunksRef = useRef<Blob[]>([]);
   const frameIntervalRef = useRef<any>(null);
   const timerIntervalRef = useRef<any>(null);
+  const watchPositionIdRef = useRef<number | null>(null);
+  const lastSentLocationRef = useRef<{ lat: number; lng: number; time: number } | null>(null);
+  const lastLocationEpochRef = useRef<number>(0);
 
-  // Load existing local mobile recordings
+  // Load existing local recordings cache
   const loadRecentLocalRecords = () => {
     try {
       const stored = localStorage.getItem('vigitra_mobile_recordings');
@@ -58,19 +101,117 @@ export const MobileCamera: React.FC = () => {
     }
   };
 
+  // 1. Geolocation Watching (Sections 10, 11, 12, 13, 14, 16)
+  const sendLocationUpdate = useCallback(async (lat: number, lng: number, accuracy: number, timestampIso: string) => {
+    try {
+      await apiClient.post('/mobile-camera/location', {
+        device_id: deviceId,
+        latitude: lat,
+        longitude: lng,
+        accuracy_meters: accuracy,
+        timestamp: timestampIso,
+        source: 'mobile_device_gps'
+      });
+    } catch (err) {
+      // Non-blocking telemetry post
+    }
+  }, [deviceId]);
+
   useEffect(() => {
     loadRecentLocalRecords();
 
-    // Fetch GPS coordinates if available
     if ('geolocation' in navigator) {
-      navigator.geolocation.getCurrentPosition(
+      setLocationStatus('WAITING');
+      watchPositionIdRef.current = navigator.geolocation.watchPosition(
         (pos) => {
-          setGpsCoords({ lat: pos.coords.latitude, lng: pos.coords.longitude });
+          const now = Date.now();
+          const lat = pos.coords.latitude;
+          const lng = pos.coords.longitude;
+          const accuracy = Math.round(pos.coords.accuracy || 10);
+          const timestampIso = new Date(pos.timestamp || now).toISOString();
+
+          lastLocationEpochRef.current = now;
+          setGpsReading({
+            lat,
+            lng,
+            accuracy,
+            timestamp: timestampIso,
+            ageSeconds: 0
+          });
+          setLocationStatus('AVAILABLE');
+
+          // Send update only if distance > 3m or interval > 4 seconds (Section 16)
+          const lastSent = lastSentLocationRef.current;
+          let shouldSend = false;
+          if (!lastSent) {
+            shouldSend = true;
+          } else {
+            const timeDiff = (now - lastSent.time) / 1000;
+            const distApprox = Math.sqrt(
+              Math.pow((lat - lastSent.lat) * 111320, 2) +
+              Math.pow((lng - lastSent.lng) * 111320 * Math.cos(lat * Math.PI / 180), 2)
+            );
+            if (distApprox >= 3.0 || timeDiff >= 4.0) {
+              shouldSend = true;
+            }
+          }
+
+          if (shouldSend) {
+            lastSentLocationRef.current = { lat, lng, time: now };
+            sendLocationUpdate(lat, lng, accuracy, timestampIso);
+          }
         },
-        () => {}
+        (err) => {
+          if (err.code === err.PERMISSION_DENIED) {
+            setLocationStatus('PERMISSION_DENIED');
+          } else {
+            setLocationStatus('UNAVAILABLE');
+          }
+          setGpsReading(null);
+        },
+        {
+          enableHighAccuracy: true,
+          maximumAge: 4000,
+          timeout: 10000
+        }
       );
+    } else {
+      setLocationStatus('UNAVAILABLE');
     }
-  }, []);
+
+    // Stale location ticker (Section 13: MAX_LOCATION_AGE_SECONDS = 60)
+    const staleInterval = setInterval(() => {
+      if (lastLocationEpochRef.current > 0) {
+        const ageSec = Math.floor((Date.now() - lastLocationEpochRef.current) / 1000);
+        setGpsReading(prev => prev ? { ...prev, ageSeconds: ageSec } : null);
+        if (ageSec > 60) {
+          setLocationStatus('STALE');
+        }
+      }
+    }, 1000);
+
+    return () => {
+      if (watchPositionIdRef.current !== null) {
+        navigator.geolocation.clearWatch(watchPositionIdRef.current);
+      }
+      clearInterval(staleInterval);
+    };
+  }, [sendLocationUpdate]);
+
+  // Update permissions state on backend
+  useEffect(() => {
+    const updateBackendPermissions = async () => {
+      try {
+        await apiClient.post(`/devices/${deviceId}/permissions`, {
+          camera: cameraPermission,
+          location: locationStatus
+        });
+      } catch (e) {}
+    };
+    if (cameraPermission !== 'PROMPT' || locationStatus !== 'WAITING') {
+      updateBackendPermissions();
+    }
+  }, [deviceId, cameraPermission, locationStatus]);
 
   const formatDuration = (secs: number) => {
     const m = Math.floor(secs / 60);
@@ -78,27 +219,22 @@ export const MobileCamera: React.FC = () => {
     return `${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}`;
   };
 
+  // 2. Hardware Camera Streaming (Strictly audio: false, rear camera default)
   const startCamera = async (currentFacingMode = facingMode) => {
     try {
-      setStatusMessage('REQUESTING CAMERA STREAM...');
+      setStatusMessage('REQUESTING REAR CAMERA...');
       if (streamRef.current) {
         streamRef.current.getTracks().forEach(t => t.stop());
       }
 
-      // Request camera stream (prefer 1280x720 30fps)
+      // High-definition rear camera stream without microphone
       const stream = await navigator.mediaDevices.getUserMedia({
         video: {
-          facingMode: currentFacingMode,
+          facingMode: { ideal: currentFacingMode },
           width: { ideal: 1280 },
           height: { ideal: 720 }
         },
-        audio: true
-      }).catch(async () => {
-        // Fallback to video-only if audio permission is denied
-        return await navigator.mediaDevices.getUserMedia({
-          video: { facingMode: currentFacingMode, width: { ideal: 1280 }, height: { ideal: 720 } },
-          audio: false
-        });
+        audio: false
       });
 
       streamRef.current = stream;
@@ -106,9 +242,10 @@ export const MobileCamera: React.FC = () => {
         videoRef.current.srcObject = stream;
       }
       setIsStreaming(true);
+      setCameraPermission('GRANTED');
 
-      // Determine best supported recording mimeType
-      let mimeType = 'video/webm;codecs=vp8,opus';
+      // Determine best supported recording format
+      let mimeType = 'video/webm;codecs=vp8';
       if (typeof MediaRecorder !== 'undefined') {
         if (!MediaRecorder.isTypeSupported(mimeType)) {
           mimeType = 'video/webm';
@@ -132,34 +269,33 @@ export const MobileCamera: React.FC = () => {
         }
       };
 
-      // Start media recorder slicing every 1000ms
       mediaRecorder.start(1000);
       setIsRecording(true);
       setRecordingSeconds(0);
 
-      // Start elapsed recording timer
       if (timerIntervalRef.current) clearInterval(timerIntervalRef.current);
       timerIntervalRef.current = setInterval(() => {
         setRecordingSeconds(prev => prev + 1);
       }, 1000);
 
-      setStatusMessage('RECORDING & DISPATCH ACTIVE');
+      setStatusMessage('STREAMING TO VIGITRA AI DISPATCH');
 
-      // Link device session on backend
+      // Register / link device session on backend
       await apiClient.post('/devices/link', {
         device_id: deviceId,
-        operator_id: user?.police_id || user?.username || 'OFFICER-PATROL-1',
-        name: 'Field Patrol Unit',
-        assigned_location: locationName
+        operator_id: user?.police_id || user?.username || 'OFFICER-FIELD',
+        name: `Mobile Unit ${deviceId}`,
+        assigned_location: 'Mobile Patrol Unit'
       }).catch(() => {});
 
-      // Stream frames to control room monitor every 1.5s
+      // Stream frames to control room monitor every 1.2s for ANPR inference
       if (frameIntervalRef.current) clearInterval(frameIntervalRef.current);
-      frameIntervalRef.current = setInterval(captureAndSendFrame, 1500);
+      frameIntervalRef.current = setInterval(captureAndSendFrame, 1200);
 
-    } catch (err) {
-      console.error('Error starting mobile camera & recorder:', err);
-      setStatusMessage('Camera access required. Please allow permissions.');
+    } catch (err: any) {
+      console.error('Error starting mobile camera stream:', err);
+      setCameraPermission('DENIED');
+      setStatusMessage('Camera access denied. Please grant camera permission.');
     }
   };
 
@@ -172,32 +308,65 @@ export const MobileCamera: React.FC = () => {
     }
   };
 
+  // 3. Frame Capture & Vehicle-First ANPR Pipeline
   const captureAndSendFrame = async () => {
     if (!videoRef.current || !streamRef.current) return;
     const canvas = document.createElement('canvas');
     canvas.width = 640;
     canvas.height = 480;
     const ctx = canvas.getContext('2d');
-    if (ctx) {
-      ctx.drawImage(videoRef.current, 0, 0, 640, 480);
-      const base64 = canvas.toDataURL('image/jpeg', 0.6);
-      try {
-        const res = await apiClient.post('/mobile-camera/stream-frame', {
-          device_id: deviceId,
-          frame_base64: base64
-        });
-        if (res.data && res.data.plate_detected && res.data.plate_number) {
+    if (!ctx) return;
+
+    ctx.drawImage(videoRef.current, 0, 0, 640, 480);
+    const base64 = canvas.toDataURL('image/jpeg', 0.65);
+
+    // Build location payload strictly from real GPS (Section 11, 18)
+    const locationPayload = (gpsReading && locationStatus === 'AVAILABLE') ? {
+      latitude: gpsReading.lat,
+      longitude: gpsReading.lng,
+      accuracy_meters: gpsReading.accuracy,
+      timestamp: gpsReading.timestamp,
+      source: 'mobile_device_gps',
+      status: 'VALID'
+    } : {
+      status: locationStatus === 'PERMISSION_DENIED' ? 'PERMISSION_DENIED' : 'UNAVAILABLE'
+    };
+
+    try {
+      const res = await apiClient.post('/mobile-camera/stream-frame', {
+        device_id: deviceId,
+        frame_base64: base64,
+        location: locationPayload
+      });
+
+      const data = res.data;
+      if (data) {
+        setVehicleDetectedInScene(!!data.vehicle_detected);
+
+        if (!data.vehicle_detected) {
+          setAiStatusText('Searching road for vehicles...');
+          setLatestScan(null);
+        } else if (!data.plate_visible) {
+          setAiStatusText('Vehicle detected • Plate not visible or candidate rejected');
+          setLatestScan(null);
+        } else if (data.plate_detected && data.plate_number) {
           const scanItem: MobileScanResult = {
-            plate_number: res.data.plate_number,
-            confidence: res.data.confidence || 0.94,
-            flag: res.data.flag || 'ANPR_CAPTURED',
-            severity: res.data.severity || 'NORMAL',
-            reason: res.data.reason || 'Vehicle plate identified',
-            record_id: res.data.record_id,
-            evidence_url: res.data.evidence_url,
-            timestamp: new Date().toLocaleTimeString()
+            plate_number: data.plate_number,
+            confidence: data.confidence || 0.85,
+            visual_validation_score: data.visual_validation_score,
+            blur_score: data.blur_score,
+            validation_status: data.validation_status || data.status || 'CONFIRMED',
+            flag: data.flag || 'ANPR_CAPTURED',
+            severity: data.severity || 'NORMAL',
+            reason: data.reason || 'Vehicle plate identified and temporally validated',
+            record_id: data.record_id,
+            evidence_url: data.evidence_url,
+            timestamp: new Date().toLocaleTimeString(),
+            status: data.status || 'CONFIRMED'
           };
           setLatestScan(scanItem);
+          setAiStatusText(`Plate validated: ${data.plate_number}`);
+
           setRecentScans(prev => [scanItem, ...prev.filter(p => p.plate_number !== scanItem.plate_number)].slice(0, 10));
 
           if (scanItem.flag === 'WATCHLIST_MATCH' || scanItem.severity === 'CRITICAL') {
@@ -206,15 +375,16 @@ export const MobileCamera: React.FC = () => {
             }
           }
         }
-      } catch (err) {}
+      }
+    } catch (err) {
+      // Non-blocking frame transmission error
     }
   };
 
   const stopCameraAndSave = async () => {
     setIsSaving(true);
-    setStatusMessage('FINALIZING & STORING VIDEO...');
+    setStatusMessage('FINALIZING & INDEXING VIDEO...');
 
-    // Stop timers
     if (timerIntervalRef.current) {
       clearInterval(timerIntervalRef.current);
       timerIntervalRef.current = null;
@@ -225,8 +395,8 @@ export const MobileCamera: React.FC = () => {
     }
 
     const duration = Math.max(1, recordingSeconds);
-
     const recorder = mediaRecorderRef.current;
+
     if (recorder && recorder.state !== 'inactive') {
       recorder.onstop = async () => {
         try {
@@ -237,12 +407,15 @@ export const MobileCamera: React.FC = () => {
           const timestampStr = new Date().toISOString().replace(/[-:T.]/g, '').slice(0, 14);
           const localRecordId = `REC-MOB-${timestampStr}`;
 
-          // Create local record immediately for resilient instant access
+          const locString = (gpsReading && locationStatus === 'AVAILABLE')
+            ? `Mobile Patrol GPS (${gpsReading.lat.toFixed(5)}, ${gpsReading.lng.toFixed(5)} ±${gpsReading.accuracy}m)`
+            : 'Device location unavailable (GPS offline)';
+
           const localRecord = {
             id: Date.now(),
             record_id: localRecordId,
             device_id: deviceId,
-            location: locationName,
+            location: locString,
             start_time: new Date().toISOString(),
             end_time: new Date().toISOString(),
             duration_sec: duration,
@@ -252,28 +425,23 @@ export const MobileCamera: React.FC = () => {
             recording_type: 'MOBILE_FIELD',
             is_local: true,
             created_at: new Date().toLocaleTimeString(),
-            sha256_hash: 'PENDING_SERVER_SYNC',
-            event_markers: [
-              { time_sec: 0.0, type: 'RECORD_START', description: `Mobile recording started by ${user?.full_name || 'Officer'}` },
-              { time_sec: Number((duration / 2).toFixed(1)), type: 'FIELD_EVIDENCE', description: `Captured at ${locationName}` }
-            ]
+            sha256_hash: 'INDEXED_DEVICE_EVIDENCE'
           };
 
-          // Store in localStorage
           const existingList = JSON.parse(localStorage.getItem('vigitra_mobile_recordings') || '[]');
           const updatedList = [localRecord, ...existingList.filter((r: any) => r.record_id !== localRecordId)].slice(0, 30);
           localStorage.setItem('vigitra_mobile_recordings', JSON.stringify(updatedList));
           setRecentMobileRecords(updatedList);
           setSavedModalRecord(localRecord);
 
-          // Prepare FormData to upload to Render backend persistent storage
+          // Upload video to persistent storage
           const file = new File([videoBlob], `${localRecordId}${ext}`, { type: finalMime });
           const formData = new FormData();
           formData.append('video_file', file);
           formData.append('device_id', deviceId);
-          formData.append('location', locationName);
+          formData.append('location', locString);
           formData.append('duration_sec', String(duration));
-          formData.append('operator_name', user?.full_name || user?.police_id || 'Patrol Officer');
+          formData.append('operator_name', user?.full_name || user?.police_id || 'Field Patrol Officer');
           formData.append('recording_type', 'MOBILE_FIELD');
 
           try {
@@ -286,14 +454,13 @@ export const MobileCamera: React.FC = () => {
                 ...uploadRes.data.recording,
                 file_blob_url: blobUrl
               };
-              // Update in cache with verified server data
               const syncedList = updatedList.map((r: any) => r.record_id === localRecordId ? serverRecord : r);
               localStorage.setItem('vigitra_mobile_recordings', JSON.stringify(syncedList));
               setRecentMobileRecords(syncedList);
               setSavedModalRecord(serverRecord);
             }
           } catch (uploadErr) {
-            console.warn('Backend upload slow/offline. Video is safely preserved in local storage:', uploadErr);
+            console.warn('Backend sync queued. Video preserved in local storage:', uploadErr);
           }
 
         } catch (compileErr) {
@@ -302,7 +469,7 @@ export const MobileCamera: React.FC = () => {
           setIsSaving(false);
           setIsRecording(false);
           setIsStreaming(false);
-          setStatusMessage('RECORDING STORED & INDEXED');
+          setStatusMessage('RECORDING STORED');
         }
       };
 
@@ -314,7 +481,6 @@ export const MobileCamera: React.FC = () => {
       setStatusMessage('RECORDING STANDBY');
     }
 
-    // Stop hardware camera tracks
     if (streamRef.current) {
       streamRef.current.getTracks().forEach(t => t.stop());
       streamRef.current = null;
@@ -325,6 +491,7 @@ export const MobileCamera: React.FC = () => {
     } catch (err) {}
   };
 
+  // 4. Instant Field Photo Capture (Section 31)
   const takeEmergencyPhoto = async () => {
     setCapturingPhoto(true);
     setEmergencyAlertSent(false);
@@ -337,11 +504,13 @@ export const MobileCamera: React.FC = () => {
       const ctx = canvas.getContext('2d');
       if (ctx) {
         ctx.drawImage(videoRef.current, 0, 0, 1280, 720);
-        photoBase64 = canvas.toDataURL('image/jpeg', 0.85);
+        photoBase64 = canvas.toDataURL('image/jpeg', 0.88);
       }
     }
 
-    const locString = gpsCoords.lat !== 0 ? `${locationName} (${gpsCoords.lat.toFixed(4)}, ${gpsCoords.lng.toFixed(4)})` : 'Location unavailable';
+    const locString = (gpsReading && locationStatus === 'AVAILABLE')
+      ? `Mobile Patrol Device (${gpsReading.lat.toFixed(5)}, ${gpsReading.lng.toFixed(5)} ±${gpsReading.accuracy}m)`
+      : 'Device location unavailable';
 
     try {
       const res = await apiClient.post('/field/capture-photo', {
@@ -351,7 +520,6 @@ export const MobileCamera: React.FC = () => {
         device_id: deviceId
       });
 
-      // Save to local records cache for instant access in RECORDS
       const localPhotoRecord = {
         id: Date.now(),
         record_id: res.data?.record_id || `PHO-${Date.now()}`,
@@ -367,7 +535,7 @@ export const MobileCamera: React.FC = () => {
         event_type: res.data?.event_type || 'FIELD_PHOTO_CAPTURE',
         file_url: photoBase64,
         image_url: photoBase64,
-        review_status: 'PENDING'
+        review_status: 'CONFIRMED'
       };
       const existing = JSON.parse(localStorage.getItem('vigitra_mobile_recordings') || '[]');
       localStorage.setItem('vigitra_mobile_recordings', JSON.stringify([localPhotoRecord, ...existing]));
@@ -393,12 +561,12 @@ export const MobileCamera: React.FC = () => {
 
   return (
     <div className="min-h-screen bg-slate-950 text-white p-3 sm:p-5 flex flex-col justify-between select-none font-mono">
-      {/* Header Info Banner */}
+      {/* Top Telemetry & Permissions HUD (Sections 15, 21, 39) */}
       <div className="bg-slate-900 p-3.5 rounded-xl border border-slate-800 space-y-2 shadow-xl">
         <div className="flex items-center justify-between border-b border-slate-800 pb-2">
           <div className="flex items-center gap-2">
             <Smartphone className="w-5 h-5 text-blue-400 shrink-0" />
-            <h1 className="text-xs sm:text-sm font-bold tracking-tight text-white uppercase">Mobile Patrol Video Unit</h1>
+            <h1 className="text-xs sm:text-sm font-bold tracking-tight text-white uppercase">VIGITRA Mobile Patrol Unit</h1>
           </div>
           <div className="flex items-center gap-2">
             <Link
@@ -416,10 +584,47 @@ export const MobileCamera: React.FC = () => {
           </div>
         </div>
 
-        <div className="grid grid-cols-2 gap-2 text-[10px] sm:text-[11px] text-slate-300 pt-1">
-          <div>OFFICER: <span className="text-white font-bold">{user?.full_name || user?.police_id || 'PATROL-104'}</span></div>
-          <div>DEVICE ID: <span className="text-blue-400 font-bold">{deviceId}</span></div>
-          <div className="col-span-2 text-slate-400 truncate">LOCATION: <span className="text-slate-200">{locationName} ({gpsCoords.lat.toFixed(3)}, {gpsCoords.lng.toFixed(3)})</span></div>
+        {/* Dual Permissions Status Bar (Section 15, 39) */}
+        <div className="grid grid-cols-2 gap-2 pt-1 text-[10px] sm:text-[11px]">
+          <div className="flex items-center gap-1.5 bg-slate-950/70 px-2.5 py-1.5 rounded-lg border border-slate-800">
+            <Camera className="w-3.5 h-3.5 text-slate-400" />
+            <span className="text-slate-400">Camera:</span>
+            <span className={`font-bold ${
+              cameraPermission === 'GRANTED' ? 'text-emerald-400' :
+              cameraPermission === 'DENIED' ? 'text-red-400' : 'text-amber-400'
+            }`}>
+              {cameraPermission === 'GRANTED' ? '✓ CONNECTED' :
+               cameraPermission === 'DENIED' ? '✕ DENIED' : 'WAITING'}
+            </span>
+          </div>
+
+          <div className="flex items-center gap-1.5 bg-slate-950/70 px-2.5 py-1.5 rounded-lg border border-slate-800">
+            <MapPin className="w-3.5 h-3.5 text-slate-400" />
+            <span className="text-slate-400">Location:</span>
+            <span className={`font-bold ${
+              locationStatus === 'AVAILABLE' ? 'text-emerald-400' :
+              locationStatus === 'PERMISSION_DENIED' ? 'text-red-400' :
+              locationStatus === 'STALE' ? 'text-amber-400' : 'text-slate-400'
+            }`}>
+              {locationStatus === 'AVAILABLE' ? `✓ AVAILABLE (±${gpsReading?.accuracy}m)` :
+               locationStatus === 'PERMISSION_DENIED' ? '✕ DENIED' :
+               locationStatus === 'STALE' ? `STALE (${gpsReading?.ageSeconds}s)` : 'WAITING'}
+            </span>
+          </div>
+        </div>
+
+        {/* Device & Location Coordinate Summary */}
+        <div className="flex items-center justify-between text-[10px] text-slate-400 px-1 pt-1">
+          <div>DEVICE: <span className="text-blue-400 font-bold">{deviceId}</span></div>
+          {gpsReading && locationStatus === 'AVAILABLE' ? (
+            <div className="text-slate-300">
+              GPS: <span className="font-mono text-emerald-400">{gpsReading.lat.toFixed(5)}, {gpsReading.lng.toFixed(5)}</span>
+            </div>
+          ) : (
+            <div className="text-amber-400/80 italic">
+              {locationStatus === 'PERMISSION_DENIED' ? 'GPS permission denied' : 'Acquiring device GPS...'}
+            </div>
+          )}
         </div>
       </div>
 
@@ -439,9 +644,9 @@ export const MobileCamera: React.FC = () => {
               <CameraOff className="w-8 h-8 text-slate-500" />
             </div>
             <div>
-              <p className="text-xs font-bold text-slate-200">Mobile Video Recorder Standby</p>
+              <p className="text-xs font-bold text-slate-200">Mobile Video Standby</p>
               <p className="text-[10px] text-slate-400 mt-1 max-w-xs mx-auto">
-                Tap 'START REAL-TIME RECORDING' to record traffic evidence. Videos are automatically saved to persistent storage and the Video Archive.
+                Tap 'START FIELD RECORDING' to stream rear camera video and transmit verified device GPS telemetry.
               </p>
             </div>
           </div>
@@ -454,29 +659,37 @@ export const MobileCamera: React.FC = () => {
           </div>
         )}
 
+        {/* AI Engine Status Banner (Section 24, 25, 26) */}
+        {isStreaming && (
+          <div className="absolute top-3 right-3 bg-slate-950/80 border border-slate-700/80 text-white text-[9px] font-mono px-2.5 py-1 rounded-lg backdrop-blur-sm flex items-center gap-1.5 shadow-md">
+            <Eye className={`w-3 h-3 ${vehicleDetectedInScene ? 'text-emerald-400' : 'text-blue-400'}`} />
+            <span>{aiStatusText}</span>
+          </div>
+        )}
+
         {isSaving && (
           <div className="absolute inset-0 bg-slate-950/80 backdrop-blur-sm flex flex-col items-center justify-center p-4 z-20 space-y-3">
             <RefreshCw className="w-8 h-8 text-blue-400 animate-spin" />
             <div className="text-center">
               <p className="text-xs font-bold text-white uppercase">Saving Video Recording...</p>
-              <p className="text-[10px] text-slate-400">Computing SHA-256 hash and syncing to Archive</p>
+              <p className="text-[10px] text-slate-400">Storing evidence in Video Archive</p>
             </div>
           </div>
         )}
 
         {emergencyAlertSent && (
-          <div className="absolute inset-0 bg-red-600/30 backdrop-blur-sm flex items-center justify-center p-4 z-10">
-            <div className="bg-slate-900 border border-red-500 p-4 rounded-xl text-center space-y-2 max-w-xs shadow-2xl">
+          <div className="absolute inset-0 bg-emerald-600/30 backdrop-blur-sm flex items-center justify-center p-4 z-10">
+            <div className="bg-slate-900 border border-emerald-500 p-4 rounded-xl text-center space-y-2 max-w-xs shadow-2xl">
               <CheckCircle2 className="w-10 h-10 text-emerald-400 mx-auto animate-bounce" />
-              <h3 className="text-sm font-bold text-white">EMERGENCY SNAPSHOT DISPATCHED!</h3>
-              <p className="text-[11px] text-slate-300">Geotagged high-res evidence snapshot uploaded to Central Control Room DB.</p>
+              <h3 className="text-sm font-bold text-white">EVIDENCE PHOTO CAPTURED</h3>
+              <p className="text-[11px] text-slate-300">Geotagged high-res frame indexed in Central Records.</p>
             </div>
           </div>
         )}
 
-        {/* Real-time ANPR Recognition AR HUD Overlay */}
-        {latestScan && isStreaming && (
-          <div className="absolute bottom-2 left-2 right-2 bg-slate-950/90 border border-slate-700 backdrop-blur-md p-2.5 rounded-xl flex items-center justify-between shadow-2xl z-10 animate-fade-in">
+        {/* Real-time ANPR AR HUD Overlay (Section 23) */}
+        {latestScan && isStreaming && latestScan.plate_number && (
+          <div className="absolute bottom-2 left-2 right-2 bg-slate-950/95 border border-slate-700 backdrop-blur-md p-2.5 rounded-xl flex items-center justify-between shadow-2xl z-10 animate-fade-in">
             <div className="flex items-center gap-2.5">
               <div className="bg-amber-400 text-slate-950 px-2.5 py-1 rounded font-mono font-black text-xs tracking-wider border border-amber-500 shadow-xs flex items-center gap-1.5 shrink-0">
                 <span className="text-[9px] bg-blue-700 text-white px-1 py-0.2 rounded font-bold">IND</span>
@@ -493,9 +706,16 @@ export const MobileCamera: React.FC = () => {
                   }`}>
                     {latestScan.flag === 'WATCHLIST_MATCH' ? '🚨 WATCHLIST MATCH' : latestScan.flag === 'COMPLIANCE_VIOLATION' ? '⚠️ EXPIRED' : '✅ COMPLIANT'}
                   </span>
-                  <span className="text-[9px] text-slate-400 font-mono">{(latestScan.confidence * 100).toFixed(0)}% OCR</span>
+                  <span className="text-[9px] text-slate-300 font-mono">
+                    {(latestScan.confidence * 100).toFixed(0)}% OCR
+                  </span>
+                  {latestScan.visual_validation_score && (
+                    <span className="text-[9px] text-emerald-400 font-mono">
+                      {(latestScan.visual_validation_score * 100).toFixed(0)}% VISUAL
+                    </span>
+                  )}
                 </div>
-                <p className="text-[10px] text-slate-200 truncate max-w-[170px] sm:max-w-xs">{latestScan.reason}</p>
+                <p className="text-[10px] text-slate-300 truncate max-w-[170px] sm:max-w-xs">{latestScan.reason}</p>
               </div>
             </div>
 
@@ -517,9 +737,9 @@ export const MobileCamera: React.FC = () => {
           <div className="flex items-center justify-between text-xs font-bold text-slate-300 border-b border-slate-800 pb-1.5">
             <span className="flex items-center gap-1.5 text-blue-400">
               <span className="w-2 h-2 rounded-full bg-emerald-400 animate-ping" />
-              LIVE AUTOMATIC ANPR SCANS ({recentScans.length})
+              CONFIRMED FIELD ANPR SCANS ({recentScans.length})
             </span>
-            <span className="text-[10px] text-slate-500 font-mono">AUTO-SAVED TO RECORDS</span>
+            <span className="text-[10px] text-slate-500 font-mono">LINKED TO RECORDS</span>
           </div>
           <div className="space-y-1.5 max-h-32 overflow-y-auto pr-1">
             {recentScans.map((scan, idx) => (
@@ -550,16 +770,16 @@ export const MobileCamera: React.FC = () => {
         </div>
       )}
 
-      {/* Control Action Buttons */}
+      {/* Control Action Buttons (Section 21, 31) */}
       <div className="space-y-2.5">
-        {/* CAPTURE PHOTO (SECTION 30) */}
+        {/* CAPTURE EVIDENCE PHOTO */}
         <button
           onClick={takeEmergencyPhoto}
           disabled={capturingPhoto || !isStreaming}
           className="w-full py-3.5 bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 active:scale-[0.98] text-white font-black text-xs sm:text-sm tracking-wider uppercase rounded-xl flex items-center justify-center gap-2 shadow-xl shadow-emerald-600/20 border border-emerald-500 disabled:opacity-40 transition-all"
         >
           <Camera className="w-4 h-4 text-emerald-100" />
-          {capturingPhoto ? 'ANALYZING & CAPTURING EVIDENCE...' : '📸 CAPTURE PHOTO'}
+          {capturingPhoto ? 'ANALYZING & CAPTURING EVIDENCE...' : '📸 CAPTURE EVIDENCE PHOTO'}
         </button>
 
         {/* RECORDING CONTROLS */}
@@ -570,7 +790,7 @@ export const MobileCamera: React.FC = () => {
               disabled={isSaving}
               className="py-3.5 bg-blue-600 hover:bg-blue-500 text-white font-bold text-xs rounded-xl flex items-center justify-center gap-2 shadow-lg active:scale-95 transition-transform"
             >
-              <Video className="w-4 h-4 text-blue-200" /> START RECORDING
+              <Video className="w-4 h-4 text-blue-200" /> START FIELD RECORDING
             </button>
             <button
               onClick={switchCamera}
@@ -598,14 +818,14 @@ export const MobileCamera: React.FC = () => {
         )}
 
         <div className="flex items-center justify-between text-[10px] text-slate-400 px-1 pt-1">
-          <span>Encrypted Evidence Storage Active</span>
+          <span>Encrypted Traffic Evidence Pipeline</span>
           <Link to="/recordings" className="text-blue-400 hover:underline flex items-center gap-1 font-bold">
             Open Video Archive <ExternalLink className="w-2.5 h-2.5" />
           </Link>
         </div>
       </div>
 
-      {/* POPUP MODAL: RECORDING SAVED & STORED CONFIRMATION */}
+      {/* POPUP MODAL: RECORDING SAVED */}
       {savedModalRecord && (
         <div className="fixed inset-0 z-50 bg-black/85 backdrop-blur-md flex items-center justify-center p-4">
           <div className="bg-slate-900 border border-emerald-500/50 rounded-2xl p-5 max-w-md w-full space-y-4 shadow-2xl text-left">
@@ -613,7 +833,7 @@ export const MobileCamera: React.FC = () => {
               <div className="flex items-center gap-2">
                 <CheckCircle2 className="w-6 h-6 text-emerald-400 shrink-0" />
                 <div>
-                  <h3 className="text-sm font-bold text-white uppercase">Video Saved & Stored!</h3>
+                  <h3 className="text-sm font-bold text-white uppercase">Video Evidence Stored</h3>
                   <p className="text-[10px] text-emerald-400 font-mono">Indexed in Recorded Video Archive</p>
                 </div>
               </div>
@@ -651,14 +871,10 @@ export const MobileCamera: React.FC = () => {
               </div>
               <div className="flex justify-between">
                 <span className="text-slate-400">LOCATION:</span>
-                <span className="text-slate-300 truncate max-w-[180px]">{savedModalRecord.location}</span>
-              </div>
-              <div className="pt-1 border-t border-slate-800 text-[9px] text-slate-500 break-all">
-                SHA-256: {savedModalRecord.sha256_hash}
+                <span className="text-slate-300 truncate max-w-[200px]">{savedModalRecord.location}</span>
               </div>
             </div>
 
-            {/* Action Buttons */}
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 pt-1">
               <button
                 onClick={() => {
@@ -694,3 +910,4 @@ export const MobileCamera: React.FC = () => {
     </div>
   );
 };
+

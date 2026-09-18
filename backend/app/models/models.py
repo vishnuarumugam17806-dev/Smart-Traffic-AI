@@ -95,14 +95,27 @@ class MobileDevice(Base):
     camera_id: Mapped[Optional[int]] = Column(Integer, ForeignKey("cameras.id"), nullable=True) # type: ignore
     operator_id: Mapped[str] = Column(String(100), nullable=False) # type: ignore
     name: Mapped[str] = Column(String(100), nullable=False) # type: ignore
+    device_name: Mapped[Optional[str]] = Column(String(100), nullable=True) # type: ignore
+    registered_by: Mapped[Optional[str]] = Column(String(100), nullable=True) # type: ignore
     assigned_location: Mapped[str] = Column(String(255), nullable=False) # type: ignore
     connection_status: Mapped[str] = Column(String(50), default="CONNECTED") # type: ignore # CONNECTED, DISCONNECTED, REVOKED
     stream_status: Mapped[str] = Column(String(50), default="IDLE") # type: ignore # IDLE, STREAMING, STOPPED
     battery_pct: Mapped[int] = Column(Integer, default=92) # type: ignore
     network_type: Mapped[str] = Column(String(50), default="5G") # type: ignore
     platform: Mapped[str] = Column(String(50), default="Android / Chrome") # type: ignore
+    browser: Mapped[Optional[str]] = Column(String(100), nullable=True) # type: ignore
+    camera_capabilities: Mapped[Optional[str]] = Column(Text, nullable=True) # type: ignore
+    permission_camera: Mapped[str] = Column(String(50), default="GRANTED") # type: ignore
+    permission_location: Mapped[str] = Column(String(50), default="WAITING") # type: ignore # GRANTED, DENIED, WAITING, UNAVAILABLE
+    latitude: Mapped[Optional[float]] = Column(Float, nullable=True) # type: ignore
+    longitude: Mapped[Optional[float]] = Column(Float, nullable=True) # type: ignore
+    accuracy_meters: Mapped[Optional[float]] = Column(Float, nullable=True) # type: ignore
+    last_location_status: Mapped[str] = Column(String(50), default="UNAVAILABLE") # type: ignore # AVAILABLE, PERMISSION_DENIED, UNAVAILABLE, STALE
+    last_location_timestamp: Mapped[Optional[datetime]] = Column(DateTime, nullable=True) # type: ignore
+    source_mode: Mapped[str] = Column(String(20), default="LIVE") # type: ignore # LIVE, DEMO
     is_active: Mapped[bool] = Column(Boolean, default=True) # type: ignore
     revocation_reason: Mapped[Optional[str]] = Column(String(255), nullable=True) # type: ignore
+    revoked_at: Mapped[Optional[datetime]] = Column(DateTime, nullable=True) # type: ignore
     last_seen: Mapped[datetime] = Column(DateTime, default=datetime.utcnow, index=True) # type: ignore
     created_at: Mapped[datetime] = Column(DateTime, default=datetime.utcnow) # type: ignore
 
@@ -236,6 +249,7 @@ class PlateObservation(Base):
     image_path = Column(String(255), nullable=True)
     lane = Column(Integer, default=1)
     direction = Column(String(50), default="NORTH")
+    location = Column(String(255), nullable=True) # Direct observation / checkpoint location
     global_vehicle_id = Column(String(50), nullable=True, index=True)
     speed_kmh = Column(Float, default=0.0)
 
@@ -249,6 +263,7 @@ class Blacklist(Base):
     reason = Column(String(255), nullable=False)
     directory_type = Column(String(50), default="SECURITY_WATCHLIST", nullable=False) # STOLEN_VEHICLES, SECURITY_WATCHLIST, CHALLAN_DEFAULTER, RTO_COMPLIANCE, VIP_WHITELIST
     severity = Column(String(50), default="CRITICAL", nullable=False) # CRITICAL, HIGH, MEDIUM, LOW
+    location = Column(String(255), nullable=True) # Surveillance location / checkpoint provided
     vehicle_model = Column(String(100), nullable=True) # e.g. "White Swift Dzire"
     owner_name = Column(String(100), nullable=True)
     fir_number = Column(String(100), nullable=True) # e.g. "FIR-2026/89"

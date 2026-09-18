@@ -47,6 +47,7 @@ export const Alerts: React.FC = () => {
   const [showAddModal, setShowAddModal] = useState<boolean>(false);
   const [newPlate, setNewPlate] = useState<string>('');
   const [newReason, setNewReason] = useState<string>('Stolen Vehicle Investigation');
+  const [newLocation, setNewLocation] = useState<string>('Anna Salai - Spencers Junction');
   const [newNotes, setNewNotes] = useState<string>('');
 
   const { activeLiveUpdate } = useStore();
@@ -105,6 +106,7 @@ export const Alerts: React.FC = () => {
       await apiClient.post('/blacklist', {
         plate: newPlate.toUpperCase().replace(' ', ''),
         reason: newReason,
+        location: newLocation,
         notes: newNotes
       });
       setShowAddModal(false);
@@ -414,6 +416,22 @@ export const Alerts: React.FC = () => {
                   <option value="Hit-and-Run Suspect">Hit-and-Run Suspect</option>
                   <option value="Wanted Flagged Record">Wanted Flagged Record</option>
                   <option value="Speeding / Traffic Offense Priority">Speeding / Traffic Offense Priority</option>
+                </select>
+              </div>
+
+              <div>
+                <label className="block text-[10px] font-bold text-slate-500 uppercase mb-1">Surveillance Location / Checkpoint Junction *</label>
+                <select
+                  value={newLocation}
+                  onChange={(e) => setNewLocation(e.target.value)}
+                  className="w-full bg-[#F6F8FA] border border-[#DCE4EA] rounded p-2.5 text-xs text-slate-800 font-bold focus:border-[#245B84] focus:outline-none"
+                >
+                  <option value="Anna Salai - Spencers Junction">Anna Salai - Spencers Junction (CCTV-01)</option>
+                  <option value="Chennai Central - Ripon Cross">Chennai Central - Ripon Cross (CCTV-02)</option>
+                  <option value="Gemini Flyover Circle">Gemini Flyover Circle (CCTV-03)</option>
+                  <option value="T. Nagar - Panagal Park">T. Nagar - Panagal Park (CCTV-04)</option>
+                  <option value="Kathipara Cloverleaf">Kathipara Cloverleaf (CCTV-05)</option>
+                  <option value="Mobile Field Patrol Unit">Mobile Field Patrol Unit (MOB-CAM-001)</option>
                 </select>
               </div>
 

@@ -91,6 +91,26 @@ class Settings(BaseSettings):
     DETECTION_FPS: int = 10
     CONFIDENCE_THRESHOLD: float = 0.45
 
+    # Mobile Camera & Real-Time ANPR Parameters (Sections 6, 7, 8, 9, 13, 45)
+    ANPR_MIN_PLATE_CONFIDENCE: float = 0.85
+    ANPR_MIN_OCR_CONFIDENCE: float = 0.85
+    ANPR_MIN_VALIDATION_SCORE: float = 0.80
+    ANPR_MIN_PLATE_WIDTH: int = 35
+    ANPR_MIN_PLATE_HEIGHT: int = 12
+    ANPR_MIN_PLATE_AREA: int = 420
+    ANPR_MAX_BLUR_THRESHOLD: float = 25.0
+    ANPR_MIN_CONSECUTIVE_MATCHES: int = 2
+    ANPR_TEMPORAL_MATCH_WINDOW: float = 3.0
+    ANPR_EVENT_COOLDOWN_SECONDS: float = 30.0
+
+    # Mobile Device Location & GPS Boundaries (Sections 10-17, 45)
+    LOCATION_MAX_AGE_SECONDS: float = 60.0
+    LOCATION_UPDATE_INTERVAL_SECONDS: float = 3.0
+    LOCATION_MIN_DISTANCE_METERS: float = 5.0
+    MOBILE_DEVICE_SESSION_TIMEOUT: int = 300
+    PAIRING_TOKEN_EXPIRY: int = 300
+    DEMO_MODE: bool = False
+
     # GIS Map Provider Configuration
     MAP_PROVIDER: str = "CartoDB"
     MAP_API_KEY: Optional[str] = None

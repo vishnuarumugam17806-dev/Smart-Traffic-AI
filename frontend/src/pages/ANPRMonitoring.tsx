@@ -4,7 +4,8 @@ import {
   Search, Edit3, Check, X, ShieldAlert, FileText, AlertTriangle,
   Clock, MapPin, DollarSign, Car, Sparkles, Filter, Route as RouteIcon,
   Bell, Plus, Trash2, Shield, Radio, Volume2, VolumeX, Eye,
-  RefreshCw, CheckCircle2, Siren, Database, Layers, ArrowRight
+  Bell, Plus, Trash2, Shield, Radio, Volume2, VolumeX, Eye,
+  RefreshCw, CheckCircle2, Siren, Database, Layers, ArrowRight, Camera
 } from 'lucide-react';
 import { apiClient } from '../api/client';
 import { useStore } from '../store/useStore';
@@ -48,6 +49,7 @@ interface DirectoryEntry {
   reason: string;
   directory_type: string;
   severity: string;
+  location?: string;
   vehicle_model?: string;
   owner_name?: string;
   fir_number?: string;
@@ -80,6 +82,7 @@ interface ScanCheckResult {
   recommended_action: string;
   scan_timestamp: string;
   sightings_count: number;
+  location?: string;
 }
 
 interface PlateDossier {
@@ -345,9 +348,9 @@ const FALLBACK_OBSERVATIONS: PlateObservation[] = [
   }
 ];
 
-const generateFallbackScanResult = (targetPlate: string, location: string, autoAlert: boolean): ScanCheckResult => {
+const generateFallbackScanResult = (targetPlate: string, location: string, autoAlert: boolean, liveDirectories: DirectoryEntry[] = []): ScanCheckResult => {
   const p = targetPlate.toUpperCase().replace(/[\s-]/g, '');
-  const dirMatch = FALLBACK_DIRECTORIES.find(d => d.plate === p);
+  const dirMatch = liveDirectories.find(d => d.plate === p) || FALLBACK_DIRECTORIES.find(d => d.plate === p);
   
   if (dirMatch) {
     const isStolen = dirMatch.directory_type === 'STOLEN_VEHICLES';
@@ -373,6 +376,7 @@ const generateFallbackScanResult = (targetPlate: string, location: string, autoA
         owner_name: dirMatch.owner_name,
         fir_number: dirMatch.fir_number,
         police_station: dirMatch.police_station,
+        location: dirMatch.location || location,
       },
       compliance_details: {
         compliance_status: (isStolen || isWatchlist || isInsuranceExp || isPUCExp || isFitnessExp) ? 'ACTION_REQUIRED' : 'COMPLIANT',
@@ -395,7 +399,8 @@ const generateFallbackScanResult = (targetPlate: string, location: string, autoA
       alert_triggered: autoAlert && (isStolen || isWatchlist || dirMatch.severity === 'CRITICAL' || dirMatch.severity === 'HIGH'),
       alert: {
         id: Math.floor(1000 + Math.random() * 9000),
-        type: isStolen ? 'STOLEN_VEHICLE_INTERCEPT' : isWatchlist ? 'WATCHLIST_PERIMETER_ALERT' : 'CHALLAN_WARRANT_ALERT'
+        type: isStolen ? 'STOLEN_VEHICLE_INTERCEPT' : isWatchlist ? 'WATCHLIST_PERIMETER_ALERT' : 'CHALLAN_WARRANT_ALERT',
+        location: location
       },
       recommended_action: isStolen
         ? 'IMMEDIATE POLICE INTERCEPT: Dispatch intercept unit to junction.'
@@ -409,7 +414,8 @@ const generateFallbackScanResult = (targetPlate: string, location: string, autoA
         ? 'GREEN WAVE ACTIVE: Grant priority clearance phase.'
         : 'Pass vehicle normally.',
       scan_timestamp: new Date().toISOString(),
-      sightings_count: dirMatch.scan_count || 5
+      sightings_count: dirMatch.scan_count || 5,
+      location: location
     };
   }
 
@@ -442,7 +448,8 @@ const generateFallbackScanResult = (targetPlate: string, location: string, autoA
     alert_triggered: false,
     recommended_action: 'Vehicle fully compliant. Authorize passage.',
     scan_timestamp: new Date().toISOString(),
-    sightings_count: 8
+    sightings_count: 8,
+    location: location
   };
 };
 
@@ -553,12 +560,12 @@ export const ANPRMonitoring: React.FC = () => {
   // Dossier Modal state
   const [selectedDossier, setSelectedDossier] = useState<PlateDossier | null>(null);
   const [loadingDossier, setLoadingDossier] = useState<boolean>(false);
-
   // Add to Directory Modal states
   const [showAddDirModal, setShowAddDirModal] = useState<boolean>(false);
   const [newPlate, setNewPlate] = useState<string>('');
   const [newDirType, setNewDirType] = useState<string>('STOLEN_VEHICLES');
   const [newSeverity, setNewSeverity] = useState<string>('CRITICAL');
+  const [newLocation, setNewLocation] = useState<string>('Anna Salai - Spencers Junction');
   const [newReason, setNewReason] = useState<string>('Armed Robbery Getaway Vehicle');
   const [newModel, setNewModel] = useState<string>('');
   const [newOwner, setNewOwner] = useState<string>('');
@@ -566,6 +573,8 @@ export const ANPRMonitoring: React.FC = () => {
   const [newStation, setNewStation] = useState<string>('Anna Salai PS');
   const [newAutoAlert, setNewAutoAlert] = useState<boolean>(true);
   const [newNotes, setNewNotes] = useState<string>('');
+  const [isUploadingImage, setIsUploadingImage] = useState<boolean>(false);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   // Notifications
   const [bannerMessage, setBannerMessage] = useState<{ type: 'success' | 'alert' | 'info'; text: string } | null>(null);
@@ -598,99 +607,67 @@ export const ANPRMonitoring: React.FC = () => {
         osc.frequency.setValueAtTime(523.25, ctx.currentTime);
         osc.frequency.exponentialRampToValueAtTime(783.99, ctx.currentTime + 0.2);
         gain.gain.setValueAtTime(0.15, ctx.currentTime);
-        gain.gain.exponentialRampToValueAtTime(0.01, ctx.currentTime + 0.3);
+        gain.gain.exponentialRampToValueAtTime(0.01, ctx.currentTime + 0.2);
         osc.start(ctx.currentTime);
-        osc.stop(ctx.currentTime + 0.3);
+        osc.stop(ctx.currentTime + 0.2);
       }
     } catch (e) {
-      // Audio context policy fallback
+      console.warn('Audio chime notice:', e);
     }
   };
 
-  const fetchObservations = async () => {
-    try {
-      const res = await apiClient.get('/anpr/observations');
-      if (Array.isArray(res.data) && res.data.length > 0) {
-        setObservations(res.data);
-      } else if (Array.isArray(res.data) && res.data.length === 0) {
-        apiClient.post('/anpr/seed-examples').then(() => {
-          apiClient.get('/anpr/observations').then(r => {
-            if (Array.isArray(r.data) && r.data.length > 0) setObservations(r.data);
-          }).catch(() => {});
-        }).catch(() => {});
-      }
-    } catch (err) {
-      console.warn('Using resilient local ANPR plate observations while backend connects:', err);
-      setObservations(prev => (prev && prev.length > 0 ? prev : FALLBACK_OBSERVATIONS));
-    }
-  };
-
-  const fetchDirectories = async () => {
-    setLoadingDirectories(true);
-    try {
-      let url = '/anpr/directories?';
-      if (dirTypeFilter !== 'ALL') url += `directory_type=${dirTypeFilter}&`;
-      if (dirSeverityFilter !== 'ALL') url += `severity=${dirSeverityFilter}&`;
-      if (dirSearchQuery.trim()) url += `search=${encodeURIComponent(dirSearchQuery)}&`;
-
-      const res = await apiClient.get(url);
-      if (Array.isArray(res.data) && res.data.length > 0) {
-        setDirectories(res.data);
-      } else if (Array.isArray(res.data) && res.data.length === 0 && dirTypeFilter === 'ALL') {
-        // Auto-seed directories if table is clean
-        await apiClient.post('/anpr/directories/seed');
-        const r = await apiClient.get('/anpr/directories');
-        if (Array.isArray(r.data)) setDirectories(r.data);
-      }
-    } catch (err) {
-      console.warn('Using resilient directory records:', err);
-      let filtered = [...FALLBACK_DIRECTORIES];
-      if (dirTypeFilter !== 'ALL') filtered = filtered.filter(d => d.directory_type === dirTypeFilter);
-      if (dirSeverityFilter !== 'ALL') filtered = filtered.filter(d => d.severity === dirSeverityFilter);
-      if (dirSearchQuery.trim()) {
-        const q = dirSearchQuery.toLowerCase();
-        filtered = filtered.filter(d => d.plate.toLowerCase().includes(q) || d.reason.toLowerCase().includes(q));
-      }
-      setDirectories(filtered);
-    } finally {
-      setLoadingDirectories(false);
-    }
-  };
-
+  // Fetch performance metrics
   const fetchPerformance = async () => {
     try {
       const res = await apiClient.get('/anpr/performance');
-      if (res.data && typeof res.data === 'object') {
-        setPerfStats(res.data);
-      }
+      setPerfStats(res.data);
     } catch (err) {
-      setPerfStats({
-        exact_accuracy: 96.8,
-        char_accuracy: 98.4,
-        accuracy: 96.8,
-        precision: 97.4,
-        recall: 95.9,
-        f1_score: 96.6,
-        latency_ms: 14.2,
-        fps: 29.8
-      });
+      console.warn('Using fallback performance statistics:', err);
     }
   };
 
-  const fetchDossier = async (plateNum: string) => {
-    setLoadingDossier(true);
+  // Fetch verified observations
+  const fetchObservations = async () => {
     try {
-      const res = await apiClient.get(`/anpr/dossier/${plateNum}`);
-      if (res.data && res.data.plate_number) {
-        setSelectedDossier(res.data);
-      } else {
-        setSelectedDossier(generateFallbackDossier(plateNum));
+      const res = await apiClient.get('/observations', { params: { limit: 50 } });
+      if (Array.isArray(res.data) && res.data.length > 0) {
+        setObservations(res.data);
       }
     } catch (err) {
-      console.warn('Backend dossier endpoint unavailable, using resilient local dossier:', err);
-      setSelectedDossier(generateFallbackDossier(plateNum));
+      console.warn('Using resilient plate observations while backend connects:', err);
+    }
+  };
+
+  // Fetch multi-category directories
+  const fetchDirectories = async () => {
+    setLoadingDirectories(true);
+    try {
+      const res = await apiClient.get('/anpr/directories', {
+        params: {
+          directory_type: dirTypeFilter,
+          severity: dirSeverityFilter,
+          search: dirSearchQuery || undefined
+        }
+      });
+      if (Array.isArray(res.data)) {
+        setDirectories(res.data);
+      }
+    } catch (err) {
+      console.warn('Using resilient directory entries while backend connects:', err);
+      let list = FALLBACK_DIRECTORIES;
+      if (dirTypeFilter !== 'ALL') {
+        list = list.filter(d => d.directory_type === dirTypeFilter);
+      }
+      if (dirSeverityFilter !== 'ALL') {
+        list = list.filter(d => d.severity === dirSeverityFilter);
+      }
+      if (dirSearchQuery) {
+        const q = dirSearchQuery.toLowerCase();
+        list = list.filter(d => d.plate.toLowerCase().includes(q) || d.reason.toLowerCase().includes(q));
+      }
+      setDirectories(list);
     } finally {
-      setLoadingDossier(false);
+      setLoadingDirectories(false);
     }
   };
 
@@ -699,10 +676,6 @@ export const ANPRMonitoring: React.FC = () => {
     fetchDirectories();
     fetchPerformance();
   }, []);
-
-  useEffect(() => {
-    fetchDirectories();
-  }, [dirTypeFilter, dirSeverityFilter, dirSearchQuery]);
 
   // Live WebSocket listener
   useEffect(() => {
@@ -739,7 +712,7 @@ export const ANPRMonitoring: React.FC = () => {
       data = res.data;
     } catch (err: any) {
       console.warn('Backend scan-check unavailable, generating resilient local compliance verification:', err);
-      data = generateFallbackScanResult(target, scanLocation, scanAutoAlert);
+      data = generateFallbackScanResult(target, scanLocation, scanAutoAlert, directories);
     }
 
     setScanResult(data);
@@ -748,7 +721,7 @@ export const ANPRMonitoring: React.FC = () => {
       playAlertSound(data.severity);
       setBannerMessage({
         type: 'alert',
-        text: `🚨 AUTOMATIC ALERT TRIGGERED: Plate ${data.plate_number} identified in ${data.matched_directory_type}! Alert #${data.alert?.id || '402'} broadcasted.`
+        text: `🚨 AUTOMATIC ALERT TRIGGERED: Plate ${data.plate_number} identified in ${data.matched_directory_type}! Alert #${data.alert?.id || '402'} broadcasted at ${data.location || scanLocation}.`
       });
     } else if (data.directory_matched) {
       playAlertSound('LOW');
@@ -769,6 +742,67 @@ export const ANPRMonitoring: React.FC = () => {
     setIsScanning(false);
   };
 
+  // Upload Plate Photo / Image to Scan & Match
+  const handleImageUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    setIsUploadingImage(true);
+    setIsScanning(true);
+    setScanResult(null);
+
+    const reader = new FileReader();
+    reader.onload = async () => {
+      const base64Str = reader.result as string;
+      try {
+        const res = await apiClient.post('/anpr/scan-check', {
+          image_base64: base64Str,
+          location: scanLocation,
+          source: 'FIELD_PHOTO_SCAN',
+          auto_create_alert: scanAutoAlert
+        });
+        const data: ScanCheckResult = res.data;
+        setScanInputPlate(data.plate_number);
+        setScanResult(data);
+
+        if (data.alert_triggered) {
+          playAlertSound(data.severity);
+          setBannerMessage({
+            type: 'alert',
+            text: `🚨 AUTOMATIC ALERT TRIGGERED: Image plate ${data.plate_number} matched ${data.matched_directory_type} at ${scanLocation}!`
+          });
+        } else if (data.directory_matched) {
+          playAlertSound('LOW');
+          setBannerMessage({
+            type: 'info',
+            text: `Image OCR Plate ${data.plate_number} identified in ${data.matched_directory_type}. Action: ${data.recommended_action}`
+          });
+        } else {
+          setBannerMessage({
+            type: 'success',
+            text: `Image OCR Plate ${data.plate_number} scanned successfully. Status: Fully Clear & Compliant.`
+          });
+        }
+        fetchObservations();
+        fetchDirectories();
+        setTimeout(() => setBannerMessage(null), 6500);
+      } catch (err: any) {
+        const errorMsg = err.response?.data?.detail || 'No license plate detected in image. Please provide a clear plate photo.';
+        setScanResult(null);
+        setBannerMessage({
+          type: 'alert',
+          text: `⚠️ Scanning Alert: ${errorMsg}`
+        });
+        setTimeout(() => setBannerMessage(null), 6000);
+      } finally {
+        setIsUploadingImage(false);
+        setIsScanning(false);
+        if (fileInputRef.current) fileInputRef.current.value = '';
+      }
+    };
+    reader.readAsDataURL(file);
+  };
+
   // Add vehicle to directory
   const handleAddDirectoryEntry = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -776,11 +810,13 @@ export const ANPRMonitoring: React.FC = () => {
 
     try {
       const cleanP = newPlate.toUpperCase().replace(/[\s-]/g, '');
+      const selectedLoc = newLocation || scanLocation || 'Anna Salai - Spencers Junction';
       await apiClient.post('/anpr/directories', {
         plate: cleanP,
         directory_type: newDirType,
         severity: newSeverity,
         reason: newReason,
+        location: selectedLoc,
         vehicle_model: newModel || undefined,
         owner_name: newOwner || undefined,
         fir_number: newFIR || undefined,
@@ -797,10 +833,11 @@ export const ANPRMonitoring: React.FC = () => {
       setNewNotes('');
       setBannerMessage({
         type: 'success',
-        text: `Vehicle ${cleanP} successfully registered into ${newDirType} directory. Auto-alert: ${newAutoAlert ? 'Active' : 'Muted'}.`
+        text: `Vehicle ${cleanP} successfully registered into ${newDirType} directory at ${selectedLoc}. Record and observation saved.`
       });
       setTimeout(() => setBannerMessage(null), 4000);
       fetchDirectories();
+      fetchObservations();
     } catch (err: any) {
       alert(err.response?.data?.detail || 'Failed to register vehicle into directory.');
     }
@@ -1104,6 +1141,31 @@ export const ANPRMonitoring: React.FC = () => {
               </div>
             </div>
 
+            {/* Quick Test Active Registered Plates in Directory */}
+            {directories.length > 0 && (
+              <div className="space-y-1.5 pt-1">
+                <span className="text-[10px] font-mono font-bold text-slate-500 uppercase flex items-center gap-1">
+                  <Database className="w-3.5 h-3.5 text-[#245B84]" /> Active Registered Directory Plates (Click to Scan):
+                </span>
+                <div className="flex flex-wrap gap-2 max-h-24 overflow-y-auto">
+                  {directories.slice(0, 12).map((dir) => (
+                    <button
+                      key={dir.id}
+                      onClick={() => {
+                        setScanInputPlate(dir.plate);
+                        handleScanPlate(dir.plate);
+                      }}
+                      className="px-2.5 py-1 rounded-lg border border-slate-300 bg-white hover:bg-slate-50 text-xs font-mono font-bold flex items-center gap-1.5 hover:scale-105 transition-transform shadow-2xs text-slate-800"
+                    >
+                      <span className="px-1.5 py-0.5 bg-amber-200 text-slate-950 rounded font-black tracking-wider">{dir.plate}</span>
+                      <span className="text-[10px] text-slate-500">{dir.directory_type.replace('_', ' ')}</span>
+                      {dir.location && <span className="text-[9px] text-emerald-600 font-normal">({dir.location.split('-')[0].trim()})</span>}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
+
             {/* Input Bar */}
             <div className="grid grid-cols-1 md:grid-cols-12 gap-3 pt-2">
               <div className="md:col-span-5">
@@ -1148,23 +1210,40 @@ export const ANPRMonitoring: React.FC = () => {
                 </select>
               </div>
 
-              <div className="md:col-span-3 flex items-end">
+              <div className="md:col-span-3 flex items-end gap-2">
                 <button
                   onClick={() => handleScanPlate()}
                   disabled={isScanning || !scanInputPlate.trim()}
-                  className="w-full py-2.5 px-4 bg-gradient-to-r from-red-600 to-[#245B84] hover:from-red-700 hover:to-[#173F5F] text-white font-bold text-xs font-mono rounded-xl flex items-center justify-center gap-2 shadow-md transition-all active:scale-95 disabled:opacity-50"
+                  className="flex-1 py-2.5 px-3 bg-gradient-to-r from-red-600 to-[#245B84] hover:from-red-700 hover:to-[#173F5F] text-white font-bold text-xs font-mono rounded-xl flex items-center justify-center gap-1.5 shadow-md transition-all active:scale-95 disabled:opacity-50"
                 >
                   {isScanning ? (
                     <>
                       <RefreshCw className="w-4 h-4 animate-spin text-amber-300" />
-                      <span>Scanning Directories...</span>
+                      <span>Scanning...</span>
                     </>
                   ) : (
                     <>
                       <Search className="w-4 h-4" />
-                      <span>SCAN & VERIFY DIRECTORIES</span>
+                      <span>SCAN & VERIFY</span>
                     </>
                   )}
+                </button>
+                <input
+                  type="file"
+                  ref={fileInputRef}
+                  onChange={handleImageUpload}
+                  accept="image/*"
+                  className="hidden"
+                />
+                <button
+                  type="button"
+                  onClick={() => fileInputRef.current?.click()}
+                  disabled={isUploadingImage || isScanning}
+                  title="Upload vehicle image or license plate photo to scan and match against directories"
+                  className="py-2.5 px-3 bg-slate-800 hover:bg-slate-900 text-white font-bold text-xs font-mono rounded-xl flex items-center justify-center gap-1 shadow-md transition-all active:scale-95 disabled:opacity-50 whitespace-nowrap"
+                >
+                  <Camera className="w-4 h-4 text-emerald-400" />
+                  <span>{isUploadingImage ? 'Processing...' : 'Upload'}</span>
                 </button>
               </div>
             </div>
@@ -1204,6 +1283,10 @@ export const ANPRMonitoring: React.FC = () => {
                     <p className="text-xs text-slate-700 font-mono mt-1 font-bold">
                       {scanResult.match_reason}
                     </p>
+                    <div className="flex items-center gap-1 text-[11px] text-slate-500 font-mono mt-1">
+                      <MapPin className="w-3.5 h-3.5 text-emerald-600" />
+                      <span>Recorded Location: <strong className="text-slate-800">{scanResult.location || scanLocation}</strong></span>
+                    </div>
                   </div>
                 </div>
 
@@ -1455,12 +1538,18 @@ export const ANPRMonitoring: React.FC = () => {
                           <div className="text-[10px] text-slate-500">{item.owner_name || 'Owner unlisted'}</div>
                         </td>
 
-                        {/* Reason & FIR */}
+                        {/* Reason, FIR & Location */}
                         <td className="p-3 text-slate-800 max-w-xs">
                           <div className="font-medium truncate">{item.reason}</div>
                           {item.fir_number && (
                             <div className="text-[10px] text-red-600 font-bold">
                               {item.fir_number} • {item.police_station || 'Station unassigned'}
+                            </div>
+                          )}
+                          {(item.location || item.last_crossing_location) && (
+                            <div className="text-[10px] text-slate-500 font-mono flex items-center gap-1 mt-0.5">
+                              <MapPin className="w-3 h-3 text-emerald-600 shrink-0" />
+                              <span className="truncate">{item.location || item.last_crossing_location}</span>
                             </div>
                           )}
                         </td>
@@ -1808,6 +1897,39 @@ export const ANPRMonitoring: React.FC = () => {
                     placeholder="e.g. Anna Salai PS"
                     value={newStation}
                     onChange={(e) => setNewStation(e.target.value)}
+                    className="w-full bg-[#F6F8FA] border border-[#DCE4EA] rounded-lg p-2 text-xs text-slate-800 focus:outline-none"
+                  />
+                </div>
+              </div>
+
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-[10px] font-bold text-slate-600 uppercase mb-1">
+                    Surveillance Location / Junction *
+                  </label>
+                  <select
+                    value={newLocation}
+                    onChange={(e) => setNewLocation(e.target.value)}
+                    className="w-full bg-[#F6F8FA] border border-[#DCE4EA] rounded-lg p-2 text-xs text-slate-800 font-bold focus:outline-none"
+                  >
+                    <option value="Anna Salai - Spencers Junction">Anna Salai - Spencers Junction (CCTV-01)</option>
+                    <option value="Chennai Central - Ripon Cross">Chennai Central - Ripon Cross (CCTV-02)</option>
+                    <option value="Gemini Flyover Circle">Gemini Flyover Circle (CCTV-03)</option>
+                    <option value="T. Nagar - Panagal Park">T. Nagar - Panagal Park (CCTV-04)</option>
+                    <option value="Kathipara Cloverleaf">Kathipara Cloverleaf (CCTV-05)</option>
+                    <option value="Mobile Field Patrol Unit">Mobile Field Patrol Unit (MOB-CAM-001)</option>
+                  </select>
+                </div>
+
+                <div>
+                  <label className="block text-[10px] font-bold text-slate-600 uppercase mb-1">
+                    Owner Name / Suspect Identity
+                  </label>
+                  <input
+                    type="text"
+                    placeholder="e.g. Unknown Driver / Suspect"
+                    value={newOwner}
+                    onChange={(e) => setNewOwner(e.target.value)}
                     className="w-full bg-[#F6F8FA] border border-[#DCE4EA] rounded-lg p-2 text-xs text-slate-800 focus:outline-none"
                   />
                 </div>

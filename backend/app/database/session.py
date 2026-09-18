@@ -47,6 +47,20 @@ try:
             "ALTER TABLE blacklist ADD COLUMN auto_alert BOOLEAN DEFAULT 1;",
             "ALTER TABLE blacklist ADD COLUMN scan_count INTEGER DEFAULT 0;",
             "ALTER TABLE blacklist ADD COLUMN last_scanned_at DATETIME;",
+            "ALTER TABLE plate_observations ADD COLUMN location VARCHAR(255);",
+            "ALTER TABLE mobile_devices ADD COLUMN device_name VARCHAR(100);",
+            "ALTER TABLE mobile_devices ADD COLUMN registered_by VARCHAR(100);",
+            "ALTER TABLE mobile_devices ADD COLUMN browser VARCHAR(100);",
+            "ALTER TABLE mobile_devices ADD COLUMN camera_capabilities TEXT;",
+            "ALTER TABLE mobile_devices ADD COLUMN permission_camera VARCHAR(50) DEFAULT 'GRANTED';",
+            "ALTER TABLE mobile_devices ADD COLUMN permission_location VARCHAR(50) DEFAULT 'WAITING';",
+            "ALTER TABLE mobile_devices ADD COLUMN latitude FLOAT;",
+            "ALTER TABLE mobile_devices ADD COLUMN longitude FLOAT;",
+            "ALTER TABLE mobile_devices ADD COLUMN accuracy_meters FLOAT;",
+            "ALTER TABLE mobile_devices ADD COLUMN last_location_status VARCHAR(50) DEFAULT 'UNAVAILABLE';",
+            "ALTER TABLE mobile_devices ADD COLUMN last_location_timestamp DATETIME;",
+            "ALTER TABLE mobile_devices ADD COLUMN source_mode VARCHAR(20) DEFAULT 'LIVE';",
+            "ALTER TABLE mobile_devices ADD COLUMN revoked_at DATETIME;",
         ]:
             try:
                 conn.execute(text(col_stmt))

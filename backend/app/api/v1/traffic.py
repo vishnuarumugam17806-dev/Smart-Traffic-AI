@@ -52,10 +52,23 @@ class MobileLinkInput(BaseModel):
     name: str
     assigned_location: str
     camera_id: Optional[int] = None
+    device_name: Optional[str] = None
+    platform: Optional[str] = None
+    browser: Optional[str] = None
+
+class DeviceLocationInput(BaseModel):
+    device_id: str
+    latitude: Optional[float] = None
+    longitude: Optional[float] = None
+    accuracy_meters: Optional[float] = None
+    source: Optional[str] = "mobile_device_gps"
+    status: Optional[str] = "AVAILABLE"  # AVAILABLE, PERMISSION_DENIED, UNAVAILABLE
+    timestamp: Optional[str] = None
 
 class FrameStreamInput(BaseModel):
     device_id: str
     frame_base64: str
+    location: Optional[DeviceLocationInput] = None
 
 class FieldCapturePhotoInput(BaseModel):
     operator_id: Optional[str] = "OFFICER-FIELD"
@@ -74,6 +87,8 @@ from app.trajectory.graph import trajectory_engine
 from app.ai.assistant import ai_assistant
 from app.services.demo_runner import demo_runner
 from app.cv.mobile_manager import mobile_manager
+from app.cv.detector import traffic_vision_processor
+from app.services.mobile_event_service import mobile_event_service
 from app.services.video_storage import video_storage
 from app.api.deps import require_role, get_current_user_optional
 
@@ -1289,11 +1304,16 @@ def link_mobile_device(dev_in: MobileLinkInput, db: Session = Depends(get_db)):
             camera_id=cam_id,
             operator_id=dev_in.operator_id,
             name=dev_in.name,
+            device_name=dev_in.device_name or dev_in.name,
             assigned_location=dev_in.assigned_location,
             connection_status="CONNECTED",
             stream_status="IDLE",
             battery_pct=94,
-            platform="Android / Chrome",
+            platform=dev_in.platform or "Android / Chrome Mobile",
+            browser=dev_in.browser or "Chrome Mobile",
+            permission_camera="GRANTED",
+            permission_location="WAITING",
+            source_mode="LIVE",
             is_active=True
         )
         db.add(dev)
@@ -1304,12 +1324,68 @@ def link_mobile_device(dev_in: MobileLinkInput, db: Session = Depends(get_db)):
             existing.device_uuid = f"VG-MOB-{uuid.uuid4().hex[:8].upper()}"
         existing.connection_status = "CONNECTED"
         existing.is_active = True
+        if dev_in.name:
+            existing.name = dev_in.name
+        if dev_in.device_name:
+            existing.device_name = dev_in.device_name
+        if dev_in.platform:
+            existing.platform = dev_in.platform
+        if dev_in.browser:
+            existing.browser = dev_in.browser
         existing.last_seen = datetime.now(timezone.utc).replace(tzinfo=None)
         db.commit()
         dev = existing
 
-    mobile_manager.register_device_session(str(dev.device_id), dev.camera_id or 0, str(dev.operator_id), str(dev.assigned_location))
+    mobile_manager.register_device_session(
+        device_id=str(dev.device_id),
+        camera_id=dev.camera_id or 0,
+        operator_id=str(dev.operator_id),
+        location=str(dev.assigned_location),
+        device_name=dev.device_name or dev.name,
+        platform=dev.platform,
+        browser=dev.browser
+    )
     return dev
+
+@router.post("/mobile-camera/location")
+def update_mobile_location(loc_in: DeviceLocationInput, db: Session = Depends(get_db)):
+    """
+    Receives continuous high-accuracy GPS coordinates from mobile browser watchPosition (Sections 10-12).
+    Updates in-memory session cache and persists latest GPS coordinates to MobileDevice database record.
+    """
+    loc_res = mobile_manager.update_device_location(
+        device_id=loc_in.device_id,
+        latitude=loc_in.latitude,
+        longitude=loc_in.longitude,
+        accuracy_meters=loc_in.accuracy_meters,
+        source=loc_in.source or "mobile_device_gps",
+        status=loc_in.status or "AVAILABLE",
+        timestamp=loc_in.timestamp
+    )
+
+    dev = db.query(MobileDevice).filter(MobileDevice.device_id == loc_in.device_id).first()
+    if dev:
+        if loc_in.status == "PERMISSION_DENIED":
+            dev.permission_location = "DENIED"
+            dev.last_location_status = "PERMISSION_DENIED"
+        elif loc_in.latitude is not None and loc_in.longitude is not None:
+            dev.latitude = loc_in.latitude
+            dev.longitude = loc_in.longitude
+            dev.accuracy_meters = loc_in.accuracy_meters
+            dev.permission_location = "GRANTED"
+            dev.last_location_status = "AVAILABLE"
+            dev.last_location_timestamp = datetime.now(timezone.utc).replace(tzinfo=None)
+        db.commit()
+
+    return {"status": "SUCCESS", "location": loc_res}
+
+@router.get("/mobile-camera/events")
+def get_mobile_anpr_events(limit: int = 50):
+    """
+    Retrieves recent confirmed mobile camera ANPR events from MongoDB Atlas with memory cache fallback.
+    """
+    events = mobile_event_service.get_recent_events(limit=limit)
+    return events
 
 @router.post("/devices/{device_id}/disconnect")
 def disconnect_mobile_device(device_id: str, db: Session = Depends(get_db)):
@@ -1368,8 +1444,20 @@ async def ingest_mobile_frame(stream_in: FrameStreamInput, db: Session = Depends
 
     import uuid, hashlib
     from app.cv.anpr import anpr_engine
+    from app.cv.temporal_tracker import temporal_tracker
     from app.websocket.manager import ws_manager
-    from app.services.compliance.providers.demo_vehicle_provider import demo_vehicle_provider
+
+    # Update real-time GPS location if attached to frame stream (Sections 10-12)
+    if stream_in.location:
+        mobile_manager.update_device_location(
+            device_id=stream_in.device_id,
+            latitude=stream_in.location.latitude,
+            longitude=stream_in.location.longitude,
+            accuracy_meters=stream_in.location.accuracy_meters,
+            source=stream_in.location.source or "mobile_device_gps",
+            status=stream_in.location.status or "AVAILABLE",
+            timestamp=stream_in.location.timestamp
+        )
 
     # Auto-register or keep device session active in DB
     try:
@@ -1385,6 +1473,9 @@ async def ingest_mobile_frame(stream_in: FrameStreamInput, db: Session = Depends
                 stream_status="STREAMING",
                 battery_pct=94,
                 platform="Android / Chrome Mobile",
+                permission_camera="GRANTED",
+                permission_location="WAITING",
+                source_mode="LIVE",
                 is_active=True
             )
             db.add(dev)
@@ -1401,201 +1492,149 @@ async def ingest_mobile_frame(stream_in: FrameStreamInput, db: Session = Depends
                 device_id=stream_in.device_id,
                 camera_id=dev.camera_id or 0,
                 operator_id=dev.operator_id or "PATROL-OFFICER",
-                location=dev.assigned_location or "Mobile Field Stream"
+                location=dev.assigned_location or "Mobile Field Stream",
+                device_name=dev.device_name or dev.name,
+                platform=dev.platform,
+                browser=dev.browser
             )
     except Exception as dbe:
         db.rollback()
         logger.warning(f"Note on device sync: {dbe}")
 
-    # Run Automatic Number Plate Recognition (ANPR) on incoming mobile video frame
-    plate_detected = False
-    detected_plate = None
-    plate_confidence = 0.0
-    flag_type = "NORMAL"
-    flag_severity = "NORMAL"
-    flag_reason = "Standard vehicle flow"
-    record_id = None
+    # SECTION 4 & 5: VEHICLE-FIRST ANPR PIPELINE
+    # Step 1: Detect vehicles in frame. If NO vehicle is present, DO NOT perform ANPR!
+    detected_vehicles = traffic_vision_processor.detect_vehicles(frame)
+    if not detected_vehicles:
+        mobile_manager.update_plate_detection(stream_in.device_id, None)
+        return {
+            "status": "FRAME_ACCEPTED",
+            "device_id": stream_in.device_id,
+            "fps": mobile_manager.measured_fps.get(stream_in.device_id, 24.0),
+            "vehicle_detected": False,
+            "plate_detected": False,
+            "plate_number": None,
+            "confidence": 0.0,
+            "validation_status": "NO_VEHICLE",
+            "message": "Vehicle detector: No vehicle detected in frame (ANPR skipped)",
+            "timestamp": datetime.now(timezone.utc).isoformat()
+        }
+
+    # Step 2: Search for number-plate region inside or directly adjacent to detected vehicle bounding boxes
+    h_f, w_f = frame.shape[:2]
+    best_candidate_result = None
+    best_vehicle_type = "car"
+    best_vehicle_conf = 0.85
+
+    for v in detected_vehicles:
+        vx1, vy1, vx2, vy2 = v["bbox"]
+        v_crop = frame[max(0, vy1):min(h_f, vy2), max(0, vx1):min(w_f, vx2)]
+        if v_crop.size > 0:
+            plate_res = anpr_engine.extract_plate(v_crop)
+            if plate_res and plate_res.get("plate_number"):
+                best_candidate_result = plate_res
+                best_vehicle_type = v.get("label", "car")
+                best_vehicle_conf = v.get("confidence", 0.85)
+                break
+
+    # If no readable plate detected inside any vehicle
+    if not best_candidate_result or not best_candidate_result.get("plate_number"):
+        mobile_manager.update_plate_detection(stream_in.device_id, None)
+        return {
+            "status": "FRAME_ACCEPTED",
+            "device_id": stream_in.device_id,
+            "fps": mobile_manager.measured_fps.get(stream_in.device_id, 24.0),
+            "vehicle_detected": True,
+            "vehicle_type": detected_vehicles[0].get("label", "car"),
+            "plate_detected": False,
+            "plate_number": None,
+            "confidence": 0.0,
+            "validation_status": "PLATE_NOT_VISIBLE",
+            "message": "Vehicle detected, but no visible/validated number-plate candidate",
+            "timestamp": datetime.now(timezone.utc).isoformat()
+        }
+
+    # Step 3: Validate OCR result and format
+    clean_plate = best_candidate_result["plate_number"].replace(" ", "").upper()
+    plate_conf = round(best_candidate_result.get("final_confidence", 0.92), 2)
+    visual_score = best_candidate_result.get("visual_validation_score", 0.85)
+    plate_det_conf = best_candidate_result.get("plate_detection_confidence", 0.92)
+
+    # Step 4: Temporal confirmation and duplicate prevention (Sections 8 & 9)
+    is_confirmed, temp_status, temp_meta = temporal_tracker.process_sighting(
+        device_id=stream_in.device_id,
+        plate_number=clean_plate,
+        confidence=plate_conf,
+        visual_score=visual_score,
+        tracking_id=f"TRK-{clean_plate[-4:]}"
+    )
+
     evidence_url = None
+    record_id = None
+    flag_type = "ANPR_CAPTURED"
+    severity = "NORMAL"
+    reason = "Mobile field observation"
 
-    try:
-        plate_res = anpr_engine.extract_plate(frame)
-        if plate_res and plate_res.get("plate_number"):
-            raw_plate = plate_res["plate_number"]
-            clean_plate = raw_plate.replace(" ", "").upper()
-            plate_confidence = round(plate_res.get("final_confidence", 0.92), 2)
-            detected_plate = clean_plate
-            plate_detected = True
+    # If this frame achieves confirmation (or under cooldown monitoring)
+    if is_confirmed:
+        # Save photo evidence to disk
+        evidence_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "..", "storage", "evidence"))
+        os.makedirs(evidence_dir, exist_ok=True)
+        timestamp_str = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
+        filename = f"PHO-MOB-{timestamp_str}-{uuid.uuid4().hex[:4]}.jpg"
+        dest_path = os.path.join(evidence_dir, filename)
+        cv2.imwrite(dest_path, frame)
+        evidence_url = f"/storage/evidence/{filename}"
 
-            # 1. Check against Security Watchlist / Blacklist
-            blacklist_match = db.query(Blacklist).filter(
-                Blacklist.plate == clean_plate,
-                Blacklist.status == "ACTIVE"
-            ).first()
+        # Persist to MongoDB, SQL PlateObservation, EvidenceRecord, and Alert via MobileEventService
+        event_doc = await mobile_event_service.create_and_persist_event(
+            db=db,
+            device_id=stream_in.device_id,
+            plate_number=clean_plate,
+            vehicle_type=best_vehicle_type,
+            vehicle_confidence=best_vehicle_conf,
+            plate_confidence=plate_conf,
+            plate_det_confidence=plate_det_conf,
+            visual_validation_score=visual_score,
+            tracking_id=f"TRK-{clean_plate[-4:]}",
+            frame_url=evidence_url,
+            plate_crop_url=evidence_url,
+            source_mode="LIVE"
+        )
+        record_id = event_doc.get("event_id")
+        flag_type = event_doc.get("flag_type", "ANPR_CAPTURED")
+        severity = event_doc.get("severity", "NORMAL")
+        reason = event_doc.get("reason", "Field observation")
 
-            # 2. Check against Vehicle Compliance Registry (RC, Insurance, PUC, Fitness)
-            demo_dossier = demo_vehicle_provider.get_vehicle_details(clean_plate)
-
-            if blacklist_match:
-                flag_type = "WATCHLIST_MATCH"
-                flag_severity = "CRITICAL"
-                flag_reason = f"Watchlist Match: {blacklist_match.reason}"
-            elif demo_dossier:
-                comp_status = demo_dossier.get("compliance_status")
-                if comp_status in ["ACTION_REQUIRED", "NON_COMPLIANT"]:
-                    flag_type = "COMPLIANCE_VIOLATION"
-                    flag_severity = "HIGH"
-                    doc_reasons = []
-                    for doc_k in ["insurance", "puc", "fitness", "rc"]:
-                        d = demo_dossier.get(doc_k)
-                        if isinstance(d, dict) and d.get("status") in ["EXPIRED", "ACTION_REQUIRED"]:
-                            doc_reasons.append(f"{doc_k.upper()} Expired")
-                    flag_reason = f"Compliance Violation: {', '.join(doc_reasons) if doc_reasons else 'Document Expired'}"
-                elif comp_status == "REVIEW_REQUIRED":
-                    flag_type = "REVIEW_REQUIRED"
-                    flag_severity = "MEDIUM"
-                    flag_reason = "Flagged for manual operator review"
-                else:
-                    flag_type = "VERIFIED_COMPLIANT"
-                    flag_severity = "NORMAL"
-                    flag_reason = "All documents verified and active"
-            else:
-                flag_type = "ANPR_CAPTURED"
-                flag_severity = "NORMAL"
-                flag_reason = "Field ANPR plate observation"
-
-            # 3. Store PlateObservation in Database
-            cam_id = dev.camera_id if dev and dev.camera_id else 1
-            obs = PlateObservation(
-                plate_number=clean_plate,
-                camera_id=cam_id,
-                ocr_confidence=plate_res.get("ocr_confidence", plate_confidence),
-                plate_detection_confidence=plate_res.get("plate_detection_confidence", 0.95),
-                image_quality_score=plate_res.get("image_quality_score", 0.9),
-                temporal_consistency=1.0,
-                final_confidence=plate_confidence,
-                vehicle_type=plate_res.get("vehicle_type", "car"),
-                lane=1,
-                direction="MOBILE_FIELD",
-                global_vehicle_id=f"VEH-MOB-{clean_plate[-4:]}",
-                speed_kmh=0.0
-            )
-            db.add(obs)
-            db.commit()
-            db.refresh(obs)
-
-            # 4. Save persistent photo evidence to /storage/evidence and create EvidenceRecord
-            evidence_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "..", "storage", "evidence"))
-            os.makedirs(evidence_dir, exist_ok=True)
-            timestamp_str = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
-            rec_id = f"PHO-MOB-{timestamp_str}-{obs.id:03d}"
-            filename = f"{rec_id}.jpg"
-            dest_path = os.path.join(evidence_dir, filename)
-
-            cv2.imwrite(dest_path, frame)
-            evidence_url = f"/storage/evidence/{filename}"
-            record_id = rec_id
-
-            evidence = EvidenceRecord(
-                record_id=rec_id,
-                camera_id=cam_id,
-                device_id=stream_in.device_id,
-                operator_id=(dev.operator_id if dev and dev.operator_id else "PATROL_OFFICER"),
-                location=(dev.assigned_location if dev and dev.assigned_location else f"Field Patrol Unit {stream_in.device_id}"),
-                plate_number=clean_plate,
-                vehicle_type=obs.vehicle_type,
-                timestamp=datetime.now(timezone.utc).replace(tzinfo=None),
-                original_image=evidence_url,
-                vehicle_image=evidence_url,
-                ocr_confidence=plate_confidence,
-                event_type=flag_type,
-                notes=f"Mobile Patrol ANPR: {flag_reason} (Device: {stream_in.device_id})",
-                review_status="FLAGGED" if flag_severity in ["CRITICAL", "HIGH"] else "VERIFIED"
-            )
-            db.add(evidence)
-            db.commit()
-
-            # 5. Persist Violation / Complaint record in DB if there is a compliance or security violation
-            if flag_type in ["COMPLIANCE_VIOLATION", "WATCHLIST_MATCH"] or flag_severity in ["CRITICAL", "HIGH"]:
-                violation_rec = Violation(
-                    violation_type=f"VEHICLE_COMPLIANCE: {flag_reason}",
-                    camera_id=cam_id,
-                    license_plate=clean_plate,
-                    confidence=plate_confidence,
-                    evidence_image=evidence_url,
-                    status="UNPAID",
-                    timestamp=datetime.now(timezone.utc).replace(tzinfo=None)
-                )
-                db.add(violation_rec)
-                db.commit()
-
-            # 6. Create Alert if Critical / High / Medium (Compliance issue, complaint, or watchlist match)
-            if flag_severity in ["CRITICAL", "HIGH", "MEDIUM"] or flag_type in ["COMPLIANCE_VIOLATION", "WATCHLIST_MATCH", "REVIEW_REQUIRED"]:
-                alert = Alert(
-                    type=flag_type,
-                    severity=flag_severity if flag_severity != "NORMAL" else "HIGH",
-                    camera_id=cam_id,
-                    location=dev.assigned_location or f"Field Patrol Unit {stream_in.device_id}",
-                    vehicle_plate=clean_plate,
-                    message=f"MOBILE PATROL ANPR ALERT: Vehicle {clean_plate} identified. {flag_reason}.",
-                    status="NEW",
-                    confidence=plate_confidence
-                )
-                db.add(alert)
-                db.commit()
-                db.refresh(alert)
-
-                await ws_manager.broadcast({
-                    "event": "ALERT_CREATED",
-                    "alert": {
-                        "id": alert.id,
-                        "type": alert.type,
-                        "severity": alert.severity,
-                        "location": alert.location,
-                        "vehicle_plate": alert.vehicle_plate,
-                        "message": alert.message,
-                        "timestamp": alert.timestamp.isoformat()
-                    }
-                })
-
-            # Broadcast plate sighting to all connected dashboards
-            await ws_manager.broadcast({
-                "event": "PLATE_DETECTED",
-                "camera_id": cam_id,
-                "device_id": stream_in.device_id,
-                "global_vehicle_id": obs.global_vehicle_id,
-                "plate_number": clean_plate,
-                "confidence": plate_confidence,
-                "vehicle_type": obs.vehicle_type,
-                "flag": flag_type,
-                "severity": flag_severity,
-                "reason": flag_reason,
-                "timestamp": obs.timestamp.isoformat()
-            })
-
-            # Update latest detection in mobile_manager memory for desktop telemetry
-            mobile_manager.update_plate_detection(stream_in.device_id, {
-                "plate_number": clean_plate,
-                "confidence": plate_confidence,
-                "flag": flag_type,
-                "severity": flag_severity,
-                "reason": flag_reason,
-                "record_id": record_id,
-                "evidence_url": evidence_url
-            })
-
-    except Exception as anpr_err:
-        logger.warning(f"Mobile ANPR processing notice: {anpr_err}")
+    # Update in-memory telemetry for desktop monitor
+    mobile_manager.update_plate_detection(stream_in.device_id, {
+        "plate_number": clean_plate,
+        "confidence": plate_conf,
+        "visual_validation_score": visual_score,
+        "temporal_status": temp_status,
+        "is_confirmed": is_confirmed,
+        "vehicle_type": best_vehicle_type,
+        "flag": flag_type,
+        "severity": severity,
+        "reason": reason,
+        "record_id": record_id,
+        "evidence_url": evidence_url
+    })
 
     return {
         "status": "FRAME_ACCEPTED",
         "device_id": stream_in.device_id,
         "fps": mobile_manager.measured_fps.get(stream_in.device_id, 24.0),
-        "plate_detected": plate_detected,
-        "plate_number": detected_plate,
-        "confidence": plate_confidence,
+        "vehicle_detected": True,
+        "vehicle_type": best_vehicle_type,
+        "plate_detected": True,
+        "plate_number": clean_plate,
+        "confidence": plate_conf,
+        "visual_validation_score": visual_score,
+        "temporal_status": temp_status,
+        "is_confirmed": is_confirmed,
         "flag": flag_type,
-        "severity": flag_severity,
-        "reason": flag_reason,
+        "severity": severity,
+        "reason": reason,
         "record_id": record_id,
         "evidence_url": evidence_url,
         "timestamp": datetime.now(timezone.utc).isoformat()
@@ -1604,11 +1643,11 @@ async def ingest_mobile_frame(stream_in: FrameStreamInput, db: Session = Depends
 @router.get("/mobile-camera/{device_id}/live-frame")
 def get_mobile_live_frame(device_id: str, db: Session = Depends(get_db)):
     """
-    Returns latest frame pushed from the mobile patrol camera for real-time desktop preview.
+    Returns latest frame pushed from the mobile patrol camera for real-time desktop preview,
+    including device GPS location, accuracy, location status, and latest plate telemetry.
     """
     frame, meta = mobile_manager.get_latest_frame(device_id)
     if frame is None:
-        # Check if device is in DB
         dev = db.query(MobileDevice).filter(MobileDevice.device_id == device_id).first()
         return {
             "device_id": device_id,
@@ -1616,7 +1655,9 @@ def get_mobile_live_frame(device_id: str, db: Session = Depends(get_db)):
             "frame_base64": None,
             "has_frame": False,
             "fps": 0.0,
-            "timestamp": datetime.utcnow().isoformat()
+            "location": meta.get("location") if meta else {"status": "UNAVAILABLE"},
+            "permissions": meta.get("permissions") if meta else {"permission_camera": "GRANTED", "permission_location": "WAITING"},
+            "timestamp": datetime.now(timezone.utc).isoformat()
         }
 
     import cv2, base64
@@ -1631,10 +1672,13 @@ def get_mobile_live_frame(device_id: str, db: Session = Depends(get_db)):
         "fps": meta.get("fps", 24.0),
         "battery_pct": meta.get("battery_pct", 94),
         "plate_info": meta.get("plate_info"),
-        "timestamp": datetime.utcnow().isoformat()
+        "location": meta.get("location"),
+        "permissions": meta.get("permissions"),
+        "timestamp": datetime.now(timezone.utc).isoformat()
     }
 
 # --- FIELD CAPTURE & PHOTO ANALYSIS MODULE (SECTIONS 18-23, 27, 30) ---
+@router.post("/field/capture-photo", status_code=status.HTTP_201_CREATED)
 @router.post("/field-capture/photo", status_code=status.HTTP_201_CREATED)
 @router.post("/mobile-camera/capture-photo", status_code=status.HTTP_201_CREATED)
 async def analyze_field_photo(photo_in: FieldCapturePhotoInput, db: Session = Depends(get_db)):
@@ -2225,10 +2269,12 @@ def get_blacklist(
         crossings_count = obs_query.count()
         last_obs = obs_query.order_by(PlateObservation.timestamp.desc()).first()
 
-        last_loc = None
+        last_loc = getattr(item, "location", None)
         last_time = None
         if last_obs:
-            if last_obs.camera and last_obs.camera.intersection:
+            if getattr(last_obs, "location", None):
+                last_loc = last_obs.location
+            elif last_obs.camera and last_obs.camera.intersection:
                 last_loc = f"{last_obs.camera.intersection.name} ({last_obs.direction} Approach)"
             elif last_obs.camera:
                 last_loc = f"{last_obs.camera.name} (Cam #{last_obs.camera_id})"
@@ -2242,6 +2288,7 @@ def get_blacklist(
             reason=item.reason,
             directory_type=getattr(item, "directory_type", "SECURITY_WATCHLIST") or "SECURITY_WATCHLIST",
             severity=getattr(item, "severity", "CRITICAL") or "CRITICAL",
+            location=getattr(item, "location", None) or last_loc,
             vehicle_model=getattr(item, "vehicle_model", None),
             owner_name=getattr(item, "owner_name", None),
             fir_number=getattr(item, "fir_number", None),
@@ -2277,11 +2324,14 @@ async def add_to_blacklist(entry_in: BlacklistCreate, db: Session = Depends(get_
     dir_type = entry_in.directory_type or "SECURITY_WATCHLIST"
     sev = entry_in.severity or ("LOW" if dir_type == "VIP_WHITELIST" else "CRITICAL")
 
+    req_loc = entry_in.location or (existing.location if existing else None) or "Anna Salai - Spencers Junction"
+
     if existing:
         existing.reason = entry_in.reason
         existing.directory_type = dir_type
         existing.severity = sev
         existing.status = "ACTIVE"
+        existing.location = req_loc
         if entry_in.vehicle_model:
             existing.vehicle_model = entry_in.vehicle_model
         if entry_in.owner_name:
@@ -2303,6 +2353,7 @@ async def add_to_blacklist(entry_in: BlacklistCreate, db: Session = Depends(get_
             reason=entry_in.reason,
             directory_type=dir_type,
             severity=sev,
+            location=req_loc,
             vehicle_model=entry_in.vehicle_model,
             owner_name=entry_in.owner_name,
             fir_number=entry_in.fir_number,
@@ -2349,34 +2400,79 @@ async def add_to_blacklist(entry_in: BlacklistCreate, db: Session = Depends(get_
             "notes": entry_in.notes or f"Flagged in {dir_type}"
         }
 
-    # Query if this vehicle has already crossed any signal camera
+    # Record registration observation at the specified location
+    try:
+        reg_obs = PlateObservation(
+            plate_number=clean_p,
+            camera_id=1,
+            location=req_loc,
+            timestamp=datetime.now(timezone.utc).replace(tzinfo=None),
+            ocr_confidence=0.98,
+            plate_detection_confidence=0.98,
+            final_confidence=0.98,
+            vehicle_type=entry_in.vehicle_model or "car",
+            lane=1,
+            direction="ENTRY_POINT",
+            global_vehicle_id=f"VEH-DIR-{clean_p[-4:]}",
+            speed_kmh=35.0
+        )
+        db.add(reg_obs)
+        db.commit()
+    except Exception as oe:
+        db.rollback()
+        logger.debug(f"Observation creation on registration: {oe}")
+
+    # Create Evidence Record in RECORDS Archive
+    try:
+        rec_id = f"REG-{clean_p}-{int(datetime.now(timezone.utc).timestamp())}"
+        evd = EvidenceRecord(
+            record_id=rec_id,
+            camera_id=1,
+            device_id="DIR-REGISTRY",
+            operator_id="ADMIN-OPERATOR",
+            location=req_loc,
+            plate_number=clean_p,
+            ocr_confidence=0.98,
+            vehicle_type="car",
+            event_type=f"DIRECTORY_REGISTRATION_{dir_type}",
+            original_image="/vigitra_logo.jpg",
+            vehicle_image="/vigitra_logo.jpg",
+            review_status="VERIFIED",
+            notes=f"Vehicle registered in {dir_type} at {req_loc}. Reason: {entry.reason}"
+        )
+        db.add(evd)
+        db.commit()
+    except Exception as ee:
+        db.rollback()
+        logger.debug(f"Evidence record registration: {ee}")
+
+    # Query crossings count and last sighting
     obs_query = db.query(PlateObservation).filter(PlateObservation.plate_number.like(f"%{clean_p}%"))
     crossings_count = obs_query.count()
     last_obs = obs_query.order_by(PlateObservation.timestamp.desc()).first()
 
-    last_loc = None
-    last_time = None
+    last_loc = req_loc
+    last_time = datetime.now(timezone.utc).isoformat()
     if last_obs:
-        if last_obs.camera and last_obs.camera.intersection:
+        if getattr(last_obs, "location", None):
+            last_loc = last_obs.location
+        elif last_obs.camera and last_obs.camera.intersection:
             last_loc = f"{last_obs.camera.intersection.name} ({last_obs.direction} Approach)"
-        elif last_obs.camera:
-            last_loc = f"{last_obs.camera.name} (Cam #{last_obs.camera_id})"
-        else:
-            last_loc = f"Signal Camera #{last_obs.camera_id}"
         last_time = last_obs.timestamp.isoformat()
 
-        # If auto_alert enabled and crossings exist, generate immediate notification
-        if entry.auto_alert and dir_type != "VIP_WHITELIST":
-            alert_msg = f"DIRECTORY MATCH: Vehicle {clean_p} ({dir_type}) sighted at {last_loc}. Reason: {entry.reason}."
+    # If auto_alert enabled, generate immediate notification at the registered location
+    if entry.auto_alert and dir_type != "VIP_WHITELIST":
+        alert_msg = f"DIRECTORY MATCH: Vehicle {clean_p} ({dir_type}) registered at {req_loc}. Reason: {entry.reason}."
+        try:
             alert = Alert(
                 type=dir_type,
                 severity=sev if sev != "NORMAL" else "HIGH",
-                camera_id=last_obs.camera_id,
-                location=last_loc,
+                camera_id=1,
+                location=req_loc,
                 vehicle_plate=clean_p,
                 message=alert_msg,
                 status="NEW",
-                confidence=last_obs.final_confidence or 0.95
+                confidence=0.98
             )
             db.add(alert)
             db.commit()
@@ -2393,6 +2489,9 @@ async def add_to_blacklist(entry_in: BlacklistCreate, db: Session = Depends(get_
                     "timestamp": alert.timestamp.isoformat()
                 }
             })
+        except Exception as ae:
+            db.rollback()
+            logger.debug(f"Alert creation on registration: {ae}")
 
     # Broadcast real-time directory updated event
     await ws_manager.broadcast({
@@ -2404,6 +2503,7 @@ async def add_to_blacklist(entry_in: BlacklistCreate, db: Session = Depends(get_
             "severity": sev,
             "reason": entry.reason,
             "vehicle_model": entry.vehicle_model,
+            "location": req_loc,
             "notes": entry.notes,
             "total_crossings": crossings_count,
             "last_crossing_location": last_loc,
@@ -2417,6 +2517,7 @@ async def add_to_blacklist(entry_in: BlacklistCreate, db: Session = Depends(get_
         reason=entry.reason,
         directory_type=dir_type,
         severity=sev,
+        location=req_loc,
         vehicle_model=entry.vehicle_model,
         owner_name=entry.owner_name,
         fir_number=entry.fir_number,
@@ -2605,7 +2706,10 @@ async def scan_and_check_plate(scan_in: PlateScanCheckRequest, db: Session = Dep
             logger.warning(f"ANPR image decode fallback: {ocre}")
 
     if not target_plate:
-        raise HTTPException(status_code=400, detail="Please provide a valid plate number or readable vehicle image.")
+        raise HTTPException(
+            status_code=400,
+            detail="No license plate detected in image. Please provide a valid plate number or a readable vehicle photo."
+        )
 
     result = await directory_service.check_plate_in_directories(
         plate_number=target_plate,

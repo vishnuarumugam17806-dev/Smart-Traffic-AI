@@ -56,11 +56,32 @@ class DirectoryService:
                 "sightings_count": 0
             }
 
-        # 1. Query Active Directory Records (Stolen, Watchlist, Defaulters, Compliance, Whitelist)
+        # 1. Query Active Directory Records (Exact Match First)
         directory_match = db.query(Blacklist).filter(
             Blacklist.plate == clean_plate,
             Blacklist.status == "ACTIVE"
         ).first()
+
+        # Only check OCR glyph substitution if source is an automated OCR extraction (never for MANUAL_SCAN)
+        if not directory_match and source != "MANUAL_SCAN":
+            OCR_CONFUSIONS = {
+                ('O', '0'), ('0', 'O'),
+                ('I', '1'), ('1', 'I'),
+                ('Z', '2'), ('2', 'Z'),
+                ('S', '5'), ('5', 'S'),
+                ('B', '8'), ('8', 'B'),
+                ('D', '0'), ('0', 'D'),
+            }
+            active_entries = db.query(Blacklist).filter(Blacklist.status == "ACTIVE").all()
+            for b in active_entries:
+                b_clean = cls.normalize_plate(b.plate)
+                if len(clean_plate) == len(b_clean) and len(clean_plate) >= 8:
+                    diffs = [(c1, c2) for c1, c2 in zip(clean_plate, b_clean) if c1 != c2]
+                    if len(diffs) == 1 and diffs[0] in OCR_CONFUSIONS:
+                        directory_match = b
+                        logger.info(f"[DirectoryService] OCR glyph substitution matched plate {plate_number} -> {b_clean} in {b.directory_type}")
+                        clean_plate = b_clean
+                        break
 
         # 2. Query RTO Vehicle Compliance Details
         compliance_dossier = demo_vehicle_provider.get_vehicle_details(clean_plate)
@@ -229,11 +250,12 @@ class DirectoryService:
                 db.rollback()
                 logger.error(f"Failed to auto-create alert for plate {clean_plate}: {ae}")
 
-        # 6. Record Plate Observation for Trajectory Tracking
+        # 6. Record Plate Observation for Trajectory Tracking & Sighting Location
         try:
             obs = PlateObservation(
                 plate_number=clean_plate,
                 camera_id=camera_id or 1,
+                location=location or "Main Surveillance Junction",
                 timestamp=datetime.now(timezone.utc).replace(tzinfo=None),
                 ocr_confidence=confidence,
                 plate_detection_confidence=0.95,
@@ -252,6 +274,32 @@ class DirectoryService:
             db.rollback()
             logger.warning(f"Note on plate observation logging: {oe}")
 
+        # 7. Create Verified Evidence Record in RECORDS Archive
+        try:
+            from app.models.models import EvidenceRecord
+            rec_id = f"SCAN-{clean_plate}-{int(datetime.now(timezone.utc).timestamp())}"
+            evd = EvidenceRecord(
+                record_id=rec_id,
+                camera_id=camera_id or 1,
+                device_id="DIR-SCANNER",
+                operator_id="CONTROL-OPERATOR",
+                location=location or "Main Surveillance Junction",
+                plate_number=clean_plate,
+                ocr_confidence=confidence,
+                vehicle_type=(compliance_dossier.get("vehicle_type") if compliance_dossier else "car") or "car",
+                event_type=f"DIRECTORY_SCAN_{matched_type}" if matched_type else "ANPR_SCAN_VERIFIED",
+                alert_id=alert_dict.get("id") if alert_dict else None,
+                original_image="/vigitra_logo.jpg",
+                vehicle_image="/vigitra_logo.jpg",
+                review_status="VERIFIED" if directory_matched else "PENDING",
+                notes=f"Scanned at {location or 'Main Surveillance Junction'}. Status: {match_reason}. Action: {recommended_action}"
+            )
+            db.add(evd)
+            db.commit()
+        except Exception as ee:
+            db.rollback()
+            logger.debug(f"Note on evidence record indexing: {ee}")
+
         return {
             "plate_number": clean_plate,
             "detected_via": source,
@@ -266,7 +314,8 @@ class DirectoryService:
             "alert": alert_dict,
             "recommended_action": recommended_action,
             "scan_timestamp": datetime.now(timezone.utc).isoformat(),
-            "sightings_count": past_sightings_count
+            "sightings_count": past_sightings_count,
+            "location": location
         }
 
 directory_service = DirectoryService()

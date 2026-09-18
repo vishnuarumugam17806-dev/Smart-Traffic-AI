@@ -228,6 +228,7 @@ class BlacklistCreate(BaseModel):
     reason: str
     directory_type: Optional[str] = "SECURITY_WATCHLIST" # STOLEN_VEHICLES, SECURITY_WATCHLIST, CHALLAN_DEFAULTER, RTO_COMPLIANCE, VIP_WHITELIST
     severity: Optional[str] = "CRITICAL" # CRITICAL, HIGH, MEDIUM, LOW
+    location: Optional[str] = None # Surveillance location / checkpoint provided
     vehicle_model: Optional[str] = None
     owner_name: Optional[str] = None
     fir_number: Optional[str] = None
@@ -241,6 +242,7 @@ class BlacklistOut(BaseModel):
     reason: str
     directory_type: Optional[str] = "SECURITY_WATCHLIST"
     severity: Optional[str] = "CRITICAL"
+    location: Optional[str] = None
     vehicle_model: Optional[str] = None
     owner_name: Optional[str] = None
     fir_number: Optional[str] = None
@@ -268,6 +270,7 @@ class DirectoryEntryUpdate(BaseModel):
     reason: Optional[str] = None
     directory_type: Optional[str] = None
     severity: Optional[str] = None
+    location: Optional[str] = None
     vehicle_model: Optional[str] = None
     owner_name: Optional[str] = None
     fir_number: Optional[str] = None
@@ -300,6 +303,7 @@ class PlateScanCheckResponse(BaseModel):
     recommended_action: str
     scan_timestamp: str
     sightings_count: int = 1
+    location: Optional[str] = None
 
 # Route Anomaly
 class RouteAnomalyOut(BaseModel):

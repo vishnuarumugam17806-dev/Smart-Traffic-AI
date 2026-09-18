@@ -230,3 +230,50 @@ class TrafficVisionProcessor:
             ],
             "annotated_frame": annotated_frame
         }
+
+    def detect_vehicles(self, frame: np.ndarray) -> List[Dict[str, Any]]:
+        """
+        Vehicle-First detector (Section 5): Returns detected vehicle bounding boxes and labels.
+        Returns empty list if no vehicle is visible in the frame.
+        """
+        if frame is None or frame.size == 0:
+            return []
+        h, w = frame.shape[:2]
+        vehicles = []
+
+        if self.yolo_model is not None:
+            results = self.yolo_model(frame, verbose=False, conf=self.conf_threshold)[0]
+            for box in results.boxes:
+                cls_id = int(box.cls[0].item())
+                conf = float(box.conf[0].item())
+                label = VEHICLE_CLASSES.get(cls_id, None)
+                if label is not None or cls_id in [2, 3, 5, 7]:
+                    xyxy = box.xyxy[0].cpu().numpy().tolist()
+                    x1, y1, x2, y2 = max(0, int(xyxy[0])), max(0, int(xyxy[1])), min(w, int(xyxy[2])), min(h, int(xyxy[3]))
+                    vehicles.append({
+                        "bbox": [x1, y1, x2, y2],
+                        "label": label or "car",
+                        "confidence": round(conf, 2)
+                    })
+
+        # Fallback CV vehicle detection via contour geometry if no vehicle detected yet
+        if not vehicles:
+            gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+            blur = cv2.GaussianBlur(gray, (5, 5), 0)
+            thresh = cv2.threshold(blur, 60, 255, cv2.THRESH_BINARY_INV + cv2.THRESH_OTSU)[1]
+            contours, _ = cv2.findContours(thresh, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+            for cnt in contours:
+                area = cv2.contourArea(cnt)
+                if area > 1000:
+                    x, y, bw, bh = cv2.boundingRect(cnt)
+                    aspect = bw / float(bh) if bh > 0 else 0
+                    if 0.5 < aspect < 6.0:
+                        vehicles.append({
+                            "bbox": [x, y, x + bw, y + bh],
+                            "label": "car" if area < 4000 else "bus",
+                            "confidence": 0.85
+                        })
+        return vehicles
+
+traffic_vision_processor = TrafficVisionProcessor()
+vehicle_detector = traffic_vision_processor

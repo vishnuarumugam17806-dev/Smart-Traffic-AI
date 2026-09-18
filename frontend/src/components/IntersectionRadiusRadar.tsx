@@ -388,7 +388,7 @@ export const IntersectionRadiusRadar: React.FC<IntersectionRadiusRadarProps> = (
       color: profile.color,
       type: profile.type,
       passedRadius: false,
-      plate: `${profile.plate.slice(0, 4)}${Math.floor(1000 + Math.random() * 9000)}`,
+      plate: profile.plate,
       ocrConfidence: +(97.5 + Math.random() * 2.3).toFixed(1),
       complianceStatus: profile.status,
       statusReason: profile.reason,

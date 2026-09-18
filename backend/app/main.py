@@ -56,7 +56,9 @@ try:
             "ALTER TABLE signal_decisions ADD COLUMN signal_state VARCHAR(50) DEFAULT 'GREEN';",
             "ALTER TABLE signal_decisions ADD COLUMN decision_reason TEXT;",
             "ALTER TABLE evidence_records ADD COLUMN event_type VARCHAR(100) DEFAULT 'FIELD_PHOTO_CAPTURE';",
-            "ALTER TABLE evidence_records ADD COLUMN alert_id INTEGER;"
+            "ALTER TABLE evidence_records ADD COLUMN alert_id INTEGER;",
+            "ALTER TABLE blacklist ADD COLUMN location VARCHAR(255);",
+            "ALTER TABLE plate_observations ADD COLUMN location VARCHAR(255);"
         ]:
             try:
                 conn.execute(text(col_def))
