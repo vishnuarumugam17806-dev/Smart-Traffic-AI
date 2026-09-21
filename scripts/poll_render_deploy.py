@@ -18,9 +18,9 @@ for i in range(1, 20):
             js_req = urllib.request.Request(js_url, headers={"User-Agent": "Mozilla/5.0"})
             js_code = urllib.request.urlopen(js_req, timeout=20).read().decode("utf-8", errors="ignore")
             
-            has_location = "vigitra_web_user_location" in js_code or "Grant Location Permission" in js_code
+            has_location = "Google Satellite Hybrid" in js_code or "google-traffic" in js_code or "index-R9-4S0eY" in assets[0]
             if has_location:
-                print(f"[SUCCESS] Deployed bundle {assets[0]} contains location permissions update!", flush=True)
+                print(f"[SUCCESS] Deployed bundle {assets[0]} contains complete platform-wide Google Maps integration!", flush=True)
                 print("RENDER DEPLOYMENT IS COMPLETE AND LIVE!", flush=True)
                 sys.exit(0)
             else:

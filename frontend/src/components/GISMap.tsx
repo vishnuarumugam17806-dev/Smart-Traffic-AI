@@ -2,6 +2,8 @@ import React, { useEffect, useRef, useState } from 'react';
 import { useStore } from '../store/useStore';
 import { apiClient } from '../api/client';
 import { Camera, Video, Layers, AlertTriangle, RefreshCw, Zap, Shield, Navigation } from 'lucide-react';
+import { MapStyleSelector } from './MapStyleSelector';
+import { MapStyleId, getDefaultMapStyleId, getTileUrlForStyle } from '../utils/mapProviders';
 
 interface GISMapProps {
   onSelectIntersection?: (id: number) => void;
@@ -20,6 +22,8 @@ export const GISMap: React.FC<GISMapProps> = ({
 }) => {
   const mapContainerRef = useRef<HTMLDivElement | null>(null);
   const mapRef = useRef<any>(null);
+  const tileLayerRef = useRef<any>(null);
+  const [mapStyle, setMapStyle] = useState<MapStyleId>(getDefaultMapStyleId());
   const markersRef = useRef<any[]>([]);
   const roadLinesRef = useRef<any[]>([]);
   const trajectoryLineRef = useRef<any>(null);
@@ -96,15 +100,12 @@ export const GISMap: React.FC<GISMapProps> = ({
 
       mapRef.current = map;
 
-      // High quality free OpenStreetMap tile layer (0 API key required)
-      const envStyleUrl = (import.meta as any).env?.VITE_MAP_STYLE_URL;
-      const styleUrl = (envStyleUrl && !envStyleUrl.includes('cartocdn.com/light_all')) 
-        ? envStyleUrl 
-        : 'https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png';
-
-      const tileLayer = L.tileLayer(styleUrl, {
-        maxZoom: 19,
-        attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
+      // Initialize with Google Maps or configured default layer
+      const tileCfg = getTileUrlForStyle(mapStyle);
+      const tileLayer = L.tileLayer(tileCfg.url, {
+        maxZoom: mapStyle.startsWith('google') ? 20 : 19,
+        subdomains: tileCfg.subdomains || ['a', 'b', 'c'],
+        attribution: mapStyle.startsWith('google') ? '&copy; Google Maps' : '&copy; OpenStreetMap'
       });
 
       tileLayer.on('tileerror', (error: any) => {
@@ -115,6 +116,7 @@ export const GISMap: React.FC<GISMapProps> = ({
       });
 
       tileLayer.addTo(map);
+      tileLayerRef.current = tileLayer;
 
       L.control.zoom({ position: 'bottomright' }).addTo(map);
     } catch (err) {
@@ -132,6 +134,31 @@ export const GISMap: React.FC<GISMapProps> = ({
       }
     };
   }, []);
+
+  // Dynamically switch base map tiles when user changes mapStyle
+  useEffect(() => {
+    const L = (window as any).L;
+    if (!L || !mapRef.current) return;
+    if (tileLayerRef.current) {
+      try {
+        mapRef.current.removeLayer(tileLayerRef.current);
+      } catch (e) {}
+    }
+    const tileCfg = getTileUrlForStyle(mapStyle);
+    const newTileLayer = L.tileLayer(tileCfg.url, {
+      maxZoom: mapStyle.startsWith('google') ? 20 : 19,
+      subdomains: tileCfg.subdomains || ['a', 'b', 'c'],
+      attribution: mapStyle.startsWith('google') ? '&copy; Google Maps' : '&copy; OpenStreetMap'
+    });
+    newTileLayer.on('tileerror', (error: any) => {
+      if (error.tile && !error.tile.dataset.retried) {
+        error.tile.dataset.retried = 'true';
+        error.tile.src = `https://tile.openstreetmap.org/${error.coords.z}/${error.coords.x}/${error.coords.y}.png`;
+      }
+    });
+    newTileLayer.addTo(mapRef.current);
+    tileLayerRef.current = newTileLayer;
+  }, [mapStyle]);
 
   // Re-draw all map layers on state & toggle changes
   useEffect(() => {
@@ -365,6 +392,11 @@ export const GISMap: React.FC<GISMapProps> = ({
           <span className="w-2 h-2 rounded-full bg-[#2E7D5B] animate-pulse"></span>
           REALTIME SYNC
         </div>
+      </div>
+
+      {/* Map Style Selector (Google Maps / Satellite / Traffic / Dark) */}
+      <div className="absolute top-3 right-14 z-20">
+        <MapStyleSelector currentStyle={mapStyle} onStyleChange={setMapStyle} />
       </div>
 
       {/* Layer Control Button */}

@@ -101,3 +101,5 @@ services:
         value: https://vigitra-frontend.onrender.com
       - key: VITE_GOOGLE_MAPS_API_KEY
         value: AIzaSyBVfJPYHj37Lerr02nT_WW8Fn_h4G8VRsQ
+      - key: VITE_MAP_PROVIDER
+        value: GoogleMaps

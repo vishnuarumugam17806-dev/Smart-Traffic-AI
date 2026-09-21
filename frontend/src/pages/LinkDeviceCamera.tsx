@@ -26,6 +26,8 @@ import {
 import { QRCodeSVG } from 'qrcode.react';
 import { apiClient } from '../api/client';
 import { Link } from 'react-router-dom';
+import { MapStyleSelector } from '../components/MapStyleSelector';
+import { MapStyleId, getDefaultMapStyleId, getTileUrlForStyle, createGoogleMapsDirectionsUrl } from '../utils/mapProviders';
 
 export const LinkDeviceCamera: React.FC = () => {
   const [devices, setDevices] = useState<any[]>([]);
@@ -59,6 +61,8 @@ export const LinkDeviceCamera: React.FC = () => {
   // Map Refs for Leaflet GIS (Section 20, 33)
   const mapContainerRef = useRef<HTMLDivElement | null>(null);
   const mapInstanceRef = useRef<any>(null);
+  const tileLayerRef = useRef<any>(null);
+  const [mapStyle, setMapStyle] = useState<MapStyleId>(getDefaultMapStyleId());
   const markerRef = useRef<any>(null);
   const circleRef = useRef<any>(null);
 
@@ -140,9 +144,20 @@ export const LinkDeviceCamera: React.FC = () => {
         zoomControl: true
       });
 
-      L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-        attribution: '&copy; OpenStreetMap contributors'
-      }).addTo(map);
+      const tileCfg = getTileUrlForStyle(mapStyle);
+      const tileLayer = L.tileLayer(tileCfg.url, {
+        maxZoom: mapStyle.startsWith('google') ? 20 : 19,
+        subdomains: tileCfg.subdomains || ['a', 'b', 'c'],
+        attribution: mapStyle.startsWith('google') ? '&copy; Google Maps' : '&copy; OpenStreetMap'
+      });
+      tileLayer.on('tileerror', (error: any) => {
+        if (error.tile && !error.tile.dataset.retried) {
+          error.tile.dataset.retried = 'true';
+          error.tile.src = `https://tile.openstreetmap.org/${error.coords.z}/${error.coords.x}/${error.coords.y}.png`;
+        }
+      });
+      tileLayer.addTo(map);
+      tileLayerRef.current = tileLayer;
 
       mapInstanceRef.current = map;
     }
@@ -213,6 +228,31 @@ export const LinkDeviceCamera: React.FC = () => {
       }
     }
   }, [activeGps, selectedStreamDeviceId]);
+
+  // Dynamically swap base map tiles on mapStyle change
+  useEffect(() => {
+    const L = (window as any).L;
+    if (!L || !mapInstanceRef.current) return;
+    if (tileLayerRef.current) {
+      try {
+        mapInstanceRef.current.removeLayer(tileLayerRef.current);
+      } catch (e) {}
+    }
+    const tileCfg = getTileUrlForStyle(mapStyle);
+    const newTileLayer = L.tileLayer(tileCfg.url, {
+      maxZoom: mapStyle.startsWith('google') ? 20 : 19,
+      subdomains: tileCfg.subdomains || ['a', 'b', 'c'],
+      attribution: mapStyle.startsWith('google') ? '&copy; Google Maps' : '&copy; OpenStreetMap'
+    });
+    newTileLayer.on('tileerror', (error: any) => {
+      if (error.tile && !error.tile.dataset.retried) {
+        error.tile.dataset.retried = 'true';
+        error.tile.src = `https://tile.openstreetmap.org/${error.coords.z}/${error.coords.x}/${error.coords.y}.png`;
+      }
+    });
+    newTileLayer.addTo(mapInstanceRef.current);
+    tileLayerRef.current = newTileLayer;
+  }, [mapStyle]);
 
   // 5-minute Countdown Timer Effect for QR Pairing
   useEffect(() => {
@@ -658,7 +698,20 @@ export const LinkDeviceCamera: React.FC = () => {
               MOBILE PATROL DEVICE LOCATION (GPS MAP & ACCURACY RADIUS)
             </h2>
           </div>
-          <div className="flex items-center gap-2 text-[11px] font-mono">
+          <div className="flex items-center gap-2 text-[11px] font-mono flex-wrap">
+            <MapStyleSelector currentStyle={mapStyle} onStyleChange={setMapStyle} />
+            {activeGps && activeGps.status === 'AVAILABLE' && (
+              <a
+                href={createGoogleMapsDirectionsUrl(activeGps.latitude, activeGps.longitude, selectedStreamDeviceId)}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="px-2.5 py-1.5 bg-white hover:bg-slate-50 text-blue-600 hover:text-blue-800 rounded-lg border border-slate-200 font-bold flex items-center gap-1 shadow-xs transition-colors"
+                title="Navigate directly in Google Maps"
+              >
+                <ExternalLink className="w-3.5 h-3.5" />
+                <span className="hidden sm:inline">Open in</span> Google Maps
+              </a>
+            )}
             {activeGps && activeGps.status === 'AVAILABLE' ? (
               <span className="px-2.5 py-1 bg-emerald-100 text-emerald-800 rounded font-bold flex items-center gap-1">
                 <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />

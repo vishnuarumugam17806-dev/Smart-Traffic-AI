@@ -1,6 +1,8 @@
 import React, { useEffect, useState, useRef } from 'react';
 import { Search, Navigation, Info, Eye, Activity, ShieldAlert, CheckCircle, Clock, MapPin, Gauge } from 'lucide-react';
 import { apiClient } from '../api/client';
+import { MapStyleSelector } from '../components/MapStyleSelector';
+import { MapStyleId, getDefaultMapStyleId, getTileUrlForStyle } from '../utils/mapProviders';
 
 interface GraphNode {
   id: number;
@@ -38,6 +40,8 @@ export const Trajectories: React.FC = () => {
   const [speed, setSpeed] = useState<number>(0);
   const [distance, setDistance] = useState<number>(0);
 
+  const [mapStyle, setMapStyle] = useState<MapStyleId>(getDefaultMapStyleId());
+  const tileLayerRef = useRef<any>(null);
   const mapContainerRef = useRef<HTMLDivElement | null>(null);
   const mapRef = useRef<any>(null);
   const pathLayerRef = useRef<any>(null);
@@ -92,9 +96,11 @@ export const Trajectories: React.FC = () => {
       }).setView([13.0604, 80.2496], 13);
       mapRef.current = map;
 
-      const tileLayer = L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-        attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors',
-        maxZoom: 19
+      const tileCfg = getTileUrlForStyle(mapStyle);
+      const tileLayer = L.tileLayer(tileCfg.url, {
+        maxZoom: mapStyle.startsWith('google') ? 20 : 19,
+        subdomains: tileCfg.subdomains || ['a', 'b', 'c'],
+        attribution: mapStyle.startsWith('google') ? '&copy; Google Maps' : '&copy; OpenStreetMap'
       });
 
       tileLayer.on('tileerror', (error: any) => {
@@ -105,6 +111,7 @@ export const Trajectories: React.FC = () => {
       });
 
       tileLayer.addTo(map);
+      tileLayerRef.current = tileLayer;
 
       L.control.zoom({ position: 'bottomright' }).addTo(map);
 
@@ -239,6 +246,31 @@ export const Trajectories: React.FC = () => {
     }
   }, [graphData]);
 
+  // Dynamically swap base map tiles on mapStyle change
+  useEffect(() => {
+    const L = (window as any).L;
+    if (!L || !mapRef.current) return;
+    if (tileLayerRef.current) {
+      try {
+        mapRef.current.removeLayer(tileLayerRef.current);
+      } catch (e) {}
+    }
+    const tileCfg = getTileUrlForStyle(mapStyle);
+    const newTileLayer = L.tileLayer(tileCfg.url, {
+      maxZoom: mapStyle.startsWith('google') ? 20 : 19,
+      subdomains: tileCfg.subdomains || ['a', 'b', 'c'],
+      attribution: mapStyle.startsWith('google') ? '&copy; Google Maps' : '&copy; OpenStreetMap'
+    });
+    newTileLayer.on('tileerror', (error: any) => {
+      if (error.tile && !error.tile.dataset.retried) {
+        error.tile.dataset.retried = 'true';
+        error.tile.src = `https://tile.openstreetmap.org/${error.coords.z}/${error.coords.x}/${error.coords.y}.png`;
+      }
+    });
+    newTileLayer.addTo(mapRef.current);
+    tileLayerRef.current = newTileLayer;
+  }, [mapStyle]);
+
   return (
     <div className="flex flex-col lg:flex-row h-auto lg:h-[calc(100vh-64px)] overflow-x-hidden bg-[#F4F8FA]">
       {/* Sidebar Controls */}
@@ -362,6 +394,11 @@ export const Trajectories: React.FC = () => {
               TRAJECTORY VISUALIZATION
             </span>
           </div>
+        </div>
+
+        {/* Map Style Selector */}
+        <div className="absolute top-3 right-3 z-20">
+          <MapStyleSelector currentStyle={mapStyle} onStyleChange={setMapStyle} />
         </div>
       </div>
     </div>

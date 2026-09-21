@@ -2,6 +2,8 @@ import React, { useEffect, useState, useRef } from 'react';
 import { Flame } from 'lucide-react';
 import { apiClient } from '../api/client';
 import { useStore } from '../store/useStore';
+import { MapStyleSelector } from '../components/MapStyleSelector';
+import { MapStyleId, getDefaultMapStyleId, getTileUrlForStyle } from '../utils/mapProviders';
 
 interface GraphNode {
   id: number;
@@ -18,6 +20,8 @@ export const HeatMap: React.FC = () => {
   const [measurements, setMeasurements] = useState<any>({});
   const { activeLiveUpdate } = useStore();
   
+  const [mapStyle, setMapStyle] = useState<MapStyleId>(getDefaultMapStyleId());
+  const tileLayerRef = useRef<any>(null);
   const mapContainerRef = useRef<HTMLDivElement | null>(null);
   const mapRef = useRef<any>(null);
   const circlesRef = useRef<any[]>([]);
@@ -84,9 +88,11 @@ export const HeatMap: React.FC = () => {
       }).setView([13.0604, 80.2496], 13);
       mapRef.current = map;
 
-      const tileLayer = L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-        attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors',
-        maxZoom: 19
+      const tileCfg = getTileUrlForStyle(mapStyle);
+      const tileLayer = L.tileLayer(tileCfg.url, {
+        maxZoom: mapStyle.startsWith('google') ? 20 : 19,
+        subdomains: tileCfg.subdomains || ['a', 'b', 'c'],
+        attribution: mapStyle.startsWith('google') ? '&copy; Google Maps' : '&copy; OpenStreetMap'
       });
 
       tileLayer.on('tileerror', (error: any) => {
@@ -97,6 +103,7 @@ export const HeatMap: React.FC = () => {
       });
 
       tileLayer.addTo(map);
+      tileLayerRef.current = tileLayer;
 
       L.control.zoom({ position: 'bottomright' }).addTo(map);
 
@@ -107,6 +114,31 @@ export const HeatMap: React.FC = () => {
       console.warn("HeatMap Leaflet initialization warning:", err);
     }
   }, [nodes, measurements]);
+
+  // Dynamically swap base map tiles on mapStyle change
+  useEffect(() => {
+    const L = (window as any).L;
+    if (!L || !mapRef.current) return;
+    if (tileLayerRef.current) {
+      try {
+        mapRef.current.removeLayer(tileLayerRef.current);
+      } catch (e) {}
+    }
+    const tileCfg = getTileUrlForStyle(mapStyle);
+    const newTileLayer = L.tileLayer(tileCfg.url, {
+      maxZoom: mapStyle.startsWith('google') ? 20 : 19,
+      subdomains: tileCfg.subdomains || ['a', 'b', 'c'],
+      attribution: mapStyle.startsWith('google') ? '&copy; Google Maps' : '&copy; OpenStreetMap'
+    });
+    newTileLayer.on('tileerror', (error: any) => {
+      if (error.tile && !error.tile.dataset.retried) {
+        error.tile.dataset.retried = 'true';
+        error.tile.src = `https://tile.openstreetmap.org/${error.coords.z}/${error.coords.x}/${error.coords.y}.png`;
+      }
+    });
+    newTileLayer.addTo(mapRef.current);
+    tileLayerRef.current = newTileLayer;
+  }, [mapStyle]);
 
   const updateHeatmap = (nodesList: GraphNode[], measureMap: any) => {
     const L = (window as any).L;
@@ -169,6 +201,10 @@ export const HeatMap: React.FC = () => {
         <div className="absolute top-4 left-4 z-20 pointer-events-none p-3 bg-white/90 border border-[#DCE4EA] rounded shadow-sm flex items-center gap-2">
           <Flame className="w-4 h-4 text-accent-teal animate-pulse" />
           <span className="text-[10px] font-mono font-bold text-slate-700 uppercase tracking-wider">Spatial density overlay active</span>
+        </div>
+        {/* Map Style Selector */}
+        <div className="absolute top-4 right-4 z-20">
+          <MapStyleSelector currentStyle={mapStyle} onStyleChange={setMapStyle} />
         </div>
         <div ref={mapContainerRef} className="w-full h-full z-10" />
       </div>
