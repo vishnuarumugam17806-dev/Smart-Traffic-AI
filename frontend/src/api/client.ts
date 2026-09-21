@@ -25,6 +25,17 @@ export const resolveVideoUrl = (url?: string): string => {
   return url;
 };
 
+export const resolveImageUrl = (url?: string): string => {
+  if (!url) return '/vigitra_logo.jpg';
+  if (url.startsWith('blob:') || url.startsWith('data:') || url.startsWith('http://') || url.startsWith('https://')) {
+    return url;
+  }
+  if (url.startsWith('/storage/')) {
+    return `${BACKEND_URL}${url}`;
+  }
+  return url;
+};
+
 export const apiClient = axios.create({
   baseURL: API_BASE_URL,
   headers: {

@@ -81,6 +81,17 @@ class FieldCapturePhotoInput(BaseModel):
     latitude: Optional[float] = None
     longitude: Optional[float] = None
 
+class WebUserLocationInput(BaseModel):
+    user_id: Optional[str] = "WEB-OPERATOR"
+    session_id: Optional[str] = None
+    latitude: Optional[float] = None
+    longitude: Optional[float] = None
+    accuracy_meters: Optional[float] = None
+    address_label: Optional[str] = None
+    permission_status: Optional[str] = "GRANTED"  # GRANTED, DENIED, WAITING, UNAVAILABLE
+    timestamp: Optional[str] = None
+    user_agent: Optional[str] = None
+
 from app.services.report_service import report_service
 from app.services.prediction_service import prediction_engine
 from app.trajectory.graph import trajectory_engine
@@ -1379,6 +1390,86 @@ def update_mobile_location(loc_in: DeviceLocationInput, db: Session = Depends(ge
 
     return {"status": "SUCCESS", "location": loc_res}
 
+# Web Client Location Tracking & Storage
+_latest_web_user_location = {
+    "user_id": "WEB-OPERATOR",
+    "latitude": None,
+    "longitude": None,
+    "accuracy_meters": None,
+    "address_label": "Waiting for device GPS location...",
+    "permission_status": "WAITING",
+    "timestamp": datetime.now(timezone.utc).isoformat(),
+    "recorded_count": 0
+}
+
+@router.post("/web/location")
+async def record_web_user_location(loc_in: WebUserLocationInput, db: Session = Depends(get_db)):
+    """
+    Receives and records the web client's live geolocation and permission status (GPS latitude, longitude, accuracy).
+    Broadcasts the real-time location to connected dashboards and registers it for surveillance geotagging.
+    """
+    global _latest_web_user_location
+    resolved_label = loc_in.address_label
+    if not resolved_label or resolved_label in ["Waiting for device GPS location...", "Detecting device location..."]:
+        if loc_in.latitude is not None and loc_in.longitude is not None:
+            resolved_label = f"Device GPS ({loc_in.latitude:.4f}°, {loc_in.longitude:.4f}°)"
+        else:
+            resolved_label = "Device Location Waiting"
+
+    _latest_web_user_location.update({
+        "user_id": loc_in.user_id or "WEB-OPERATOR",
+        "session_id": loc_in.session_id,
+        "latitude": loc_in.latitude,
+        "longitude": loc_in.longitude,
+        "accuracy_meters": loc_in.accuracy_meters,
+        "address_label": resolved_label,
+        "permission_status": loc_in.permission_status or "GRANTED",
+        "timestamp": loc_in.timestamp or datetime.now(timezone.utc).isoformat(),
+        "recorded_count": _latest_web_user_location.get("recorded_count", 0) + 1
+    })
+
+    # Persist or update as a registered operator session device
+    web_device_id = f"WEB-CLIENT-{loc_in.session_id[:8]}" if loc_in.session_id else "WEB-OPERATOR-CONSOLE"
+    dev = db.query(MobileDevice).filter(MobileDevice.device_id == web_device_id).first()
+    if not dev:
+        dev = MobileDevice(
+            device_id=web_device_id,
+            name="Web Operator Console",
+            operator_id=loc_in.user_id or "WEB-OPERATOR",
+            assigned_location=_latest_web_user_location["address_label"],
+            connection_status="CONNECTED",
+            permission_location=loc_in.permission_status or "GRANTED",
+            latitude=loc_in.latitude,
+            longitude=loc_in.longitude,
+            accuracy_meters=loc_in.accuracy_meters,
+            last_location_status="AVAILABLE" if loc_in.latitude is not None else "PERMISSION_DENIED",
+            last_location_timestamp=datetime.now(timezone.utc).replace(tzinfo=None)
+        )
+        db.add(dev)
+    else:
+        dev.assigned_location = _latest_web_user_location["address_label"]
+        dev.latitude = loc_in.latitude
+        dev.longitude = loc_in.longitude
+        dev.accuracy_meters = loc_in.accuracy_meters
+        dev.permission_location = loc_in.permission_status or "GRANTED"
+        dev.last_location_status = "AVAILABLE" if loc_in.latitude is not None else "PERMISSION_DENIED"
+        dev.last_location_timestamp = datetime.now(timezone.utc).replace(tzinfo=None)
+    try:
+        db.commit()
+    except Exception:
+        db.rollback()
+
+    await ws_manager.broadcast({
+        "event": "WEB_USER_LOCATION_UPDATED",
+        "location": _latest_web_user_location
+    })
+    return {"status": "SUCCESS", "location": _latest_web_user_location}
+
+@router.get("/web/location")
+def get_web_user_location():
+    """Returns the latest recorded web client GPS location and permission status."""
+    return _latest_web_user_location
+
 @router.get("/mobile-camera/events")
 def get_mobile_anpr_events(limit: int = 50):
     """
@@ -1707,21 +1798,36 @@ async def analyze_field_photo(photo_in: FieldCapturePhotoInput, db: Session = De
 
         # Resolve location respecting privacy & user permission
         resolved_location = photo_in.location or photo_in.location_text
-        if not resolved_location:
+        if not resolved_location or resolved_location.strip() in ["", "Location unavailable", "Device location unavailable"]:
             if photo_in.latitude is not None and photo_in.longitude is not None:
                 resolved_location = f"{photo_in.latitude:.4f}, {photo_in.longitude:.4f}"
+            elif _latest_web_user_location.get("address_label"):
+                resolved_location = _latest_web_user_location["address_label"]
+            elif _latest_web_user_location.get("latitude") and _latest_web_user_location.get("longitude"):
+                resolved_location = f"{_latest_web_user_location['latitude']:.4f}, {_latest_web_user_location['longitude']:.4f}"
             else:
-                resolved_location = "Location unavailable"
+                resolved_location = "Field Patrol Checkpoint"
 
         sha256 = hashlib.sha256(img_bytes).hexdigest()
         rec_count = db.query(EvidenceRecord).count() + 1
         timestamp_str = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
         record_id = f"PHO-{timestamp_str}-{rec_count:03d}"
         filename = f"{record_id}.jpg"
-        dest_path = os.path.join(evidence_dir, filename)
 
-        # Write actual image file to disk
-        cv2.imwrite(dest_path, img)
+        # Persist to both backend/storage/evidence (FastAPI mount) and root storage/evidence
+        backend_storage_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "..", "storage", "evidence"))
+        root_storage_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "..", "..", "storage", "evidence"))
+
+        for s_dir in [backend_storage_dir, root_storage_dir]:
+            try:
+                os.makedirs(s_dir, exist_ok=True)
+                dest = os.path.join(s_dir, filename)
+                with open(dest, "wb") as f_out:
+                    f_out.write(img_bytes)
+            except Exception as write_err:
+                logger.warning(f"Error saving to evidence dir {s_dir}: {write_err}")
+
+        dest_path = os.path.join(backend_storage_dir, filename)
 
         # Run ANPR OCR extraction
         plate_res = anpr_engine.extract_plate(img)
@@ -1949,7 +2055,9 @@ def get_all_records(
             p_recs = []
 
         for p in p_recs:
-            file_url = p.original_image if (p.original_image and (p.original_image.startswith('/') or p.original_image.startswith('http'))) else f"/storage/evidence/{p.record_id}.jpg"
+            file_url = p.original_image
+            if not file_url or file_url.lower().endswith(('.mp4', '.avi', '.mov', '.mkv', '.webm')) or not (file_url.startswith('/') or file_url.startswith('http')):
+                file_url = f"/storage/evidence/{p.record_id}.jpg"
             photo_list.append({
                 "id": p.id,
                 "photo_id": p.record_id,
@@ -2400,11 +2508,29 @@ async def add_to_blacklist(entry_in: BlacklistCreate, db: Session = Depends(get_
             "notes": entry_in.notes or f"Flagged in {dir_type}"
         }
 
+    # Dynamic camera lookup to avoid foreign key violations on missing camera IDs
+    cam = None
+    if req_loc:
+        cam = db.query(Camera).filter(Camera.name.ilike(f"%{req_loc[:12]}%")).first()
+    if not cam:
+        cam = db.query(Camera).first()
+    if not cam:
+        cam = Camera(
+            name=f"SURVEILLANCE-CCTV ({req_loc or 'Central'})",
+            source_url="/videos/sample_traffic_urban.mp4",
+            source_type="FILE",
+            status=CameraStatusEnum.ACTIVE
+        )
+        db.add(cam)
+        db.commit()
+        db.refresh(cam)
+    valid_cam_id = cam.id
+
     # Record registration observation at the specified location
     try:
         reg_obs = PlateObservation(
             plate_number=clean_p,
-            camera_id=1,
+            camera_id=valid_cam_id,
             location=req_loc,
             timestamp=datetime.now(timezone.utc).replace(tzinfo=None),
             ocr_confidence=0.98,
@@ -2420,20 +2546,20 @@ async def add_to_blacklist(entry_in: BlacklistCreate, db: Session = Depends(get_
         db.commit()
     except Exception as oe:
         db.rollback()
-        logger.debug(f"Observation creation on registration: {oe}")
+        logger.warning(f"Observation creation on registration: {oe}")
 
     # Create Evidence Record in RECORDS Archive
     try:
         rec_id = f"REG-{clean_p}-{int(datetime.now(timezone.utc).timestamp())}"
         evd = EvidenceRecord(
             record_id=rec_id,
-            camera_id=1,
+            camera_id=valid_cam_id,
             device_id="DIR-REGISTRY",
             operator_id="ADMIN-OPERATOR",
             location=req_loc,
             plate_number=clean_p,
             ocr_confidence=0.98,
-            vehicle_type="car",
+            vehicle_type=entry_in.vehicle_model or "car",
             event_type=f"DIRECTORY_REGISTRATION_{dir_type}",
             original_image="/vigitra_logo.jpg",
             vehicle_image="/vigitra_logo.jpg",
@@ -2444,7 +2570,7 @@ async def add_to_blacklist(entry_in: BlacklistCreate, db: Session = Depends(get_
         db.commit()
     except Exception as ee:
         db.rollback()
-        logger.debug(f"Evidence record registration: {ee}")
+        logger.warning(f"Evidence record registration: {ee}")
 
     # Query crossings count and last sighting
     obs_query = db.query(PlateObservation).filter(PlateObservation.plate_number.like(f"%{clean_p}%"))
@@ -2467,7 +2593,7 @@ async def add_to_blacklist(entry_in: BlacklistCreate, db: Session = Depends(get_
             alert = Alert(
                 type=dir_type,
                 severity=sev if sev != "NORMAL" else "HIGH",
-                camera_id=1,
+                camera_id=valid_cam_id,
                 location=req_loc,
                 vehicle_plate=clean_p,
                 message=alert_msg,

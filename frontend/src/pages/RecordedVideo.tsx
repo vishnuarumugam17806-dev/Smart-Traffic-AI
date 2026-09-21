@@ -20,10 +20,16 @@ import {
   Tag,
   Eye,
   Filter,
-  Layers
+  Layers,
+  Compass,
+  Edit2,
+  X,
+  Check,
+  Crosshair
 } from 'lucide-react';
-import { apiClient, resolveVideoUrl } from '../api/client';
+import { apiClient, resolveVideoUrl, resolveImageUrl } from '../api/client';
 import { Link } from 'react-router-dom';
+import { useWebLocation } from '../hooks/useWebLocation';
 
 interface RecordItem {
   id: number;
@@ -73,8 +79,151 @@ export const RecordedVideo: React.FC = () => {
   const [plateFilter, setPlateFilter] = useState<string>('');
   const [deviceFilter, setDeviceFilter] = useState<string>('ALL');
   const [complianceFilter, setComplianceFilter] = useState<string>('ALL');
+  const [filterByMyLocation, setFilterByMyLocation] = useState<boolean>(false);
+
+  // Mutable Admin Location & Geolocation Hook
+  const {
+    coords,
+    locationName,
+    permissionStatus,
+    isManualOverride,
+    setManualLocation,
+    resetToGpsLocation,
+    requestLocationPermission,
+    refreshLocation
+  } = useWebLocation();
+
+  const [showEditLocationModal, setShowEditLocationModal] = useState<boolean>(false);
+  const [customLocationInput, setCustomLocationInput] = useState<string>('');
+
+  // Live Camera Photo Capture Modal State
+  const [showCaptureModal, setShowCaptureModal] = useState<boolean>(false);
+  const [webcamStream, setWebcamStream] = useState<MediaStream | null>(null);
+  const [isCapturing, setIsCapturing] = useState<boolean>(false);
+  const [captureFeedbackMsg, setCaptureFeedbackMsg] = useState<string | null>(null);
+  const captureVideoRef = useRef<HTMLVideoElement>(null);
 
   const videoRef = useRef<HTMLVideoElement>(null);
+
+  useEffect(() => {
+    return () => {
+      if (webcamStream) {
+        webcamStream.getTracks().forEach((t) => t.stop());
+      }
+    };
+  }, [webcamStream]);
+
+  const openCameraModal = async () => {
+    setShowCaptureModal(true);
+    setCaptureFeedbackMsg(null);
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({
+        video: { width: { ideal: 1280 }, height: { ideal: 720 }, facingMode: 'environment' },
+        audio: false
+      });
+      setWebcamStream(stream);
+      if (captureVideoRef.current) {
+        captureVideoRef.current.srcObject = stream;
+        captureVideoRef.current.play().catch(() => {});
+      }
+    } catch (err) {
+      console.warn('Webcam capture access warning:', err);
+    }
+  };
+
+  const closeCameraModal = () => {
+    if (webcamStream) {
+      webcamStream.getTracks().forEach((t) => t.stop());
+      setWebcamStream(null);
+    }
+    setShowCaptureModal(false);
+  };
+
+  const takePhotoAndSaveToRecords = async () => {
+    setIsCapturing(true);
+    try {
+      let b64 = '';
+      if (captureVideoRef.current && captureVideoRef.current.videoWidth > 0) {
+        const canvas = document.createElement('canvas');
+        canvas.width = captureVideoRef.current.videoWidth || 1280;
+        canvas.height = captureVideoRef.current.videoHeight || 720;
+        const ctx = canvas.getContext('2d');
+        if (ctx) {
+          ctx.drawImage(captureVideoRef.current, 0, 0, canvas.width, canvas.height);
+          b64 = canvas.toDataURL('image/jpeg', 0.85);
+        }
+      } else {
+        const canvas = document.createElement('canvas');
+        canvas.width = 1280;
+        canvas.height = 720;
+        const ctx = canvas.getContext('2d');
+        if (ctx) {
+          ctx.fillStyle = '#0f172a';
+          ctx.fillRect(0, 0, 1280, 720);
+          ctx.fillStyle = '#38bdf8';
+          ctx.font = 'bold 36px monospace';
+          ctx.fillText('STATION EVIDENCE PHOTO CAPTURE', 60, 120);
+          ctx.fillStyle = '#94a3b8';
+          ctx.font = '24px monospace';
+          ctx.fillText(`Location: ${locationName}`, 60, 200);
+          ctx.fillText(`Timestamp: ${new Date().toISOString()}`, 60, 250);
+          b64 = canvas.toDataURL('image/jpeg', 0.85);
+        }
+      }
+
+      const activeLoc = locationName || 'Central Traffic HQ';
+
+      const res = await apiClient.post('/field/capture-photo', {
+        operator_id: 'ADMIN-OPERATOR',
+        location: activeLoc,
+        photo_base64: b64,
+        device_id: 'WEB-STATION-CAM'
+      });
+
+      if (res.data) {
+        const newPhotoItem: RecordItem = {
+          id: Date.now(),
+          record_id: res.data.record_id || `PHO-${Date.now()}`,
+          photo_id: res.data.photo_id || res.data.record_id,
+          type: 'PHOTO',
+          media_type: 'PHOTO',
+          source_type: 'FIELD_PHOTO',
+          device_id: 'WEB-STATION-CAM',
+          operator_id: 'ADMIN-OPERATOR',
+          location: res.data.location || activeLoc,
+          timestamp: new Date().toISOString(),
+          created_at: new Date().toISOString(),
+          file_reference: res.data.file_url,
+          file_url: res.data.file_url || b64,
+          image_url: res.data.file_url || b64,
+          plate_number: res.data.plate_number,
+          ocr_confidence: res.data.ocr_confidence,
+          confidence: res.data.ocr_confidence,
+          event_type: res.data.event_type || 'FIELD_PHOTO_CAPTURE',
+          review_status: 'CONFIRMED'
+        };
+
+        setRecords((prev) => [newPhotoItem, ...prev]);
+        setSelectedRecord(newPhotoItem);
+
+        try {
+          const stored = JSON.parse(localStorage.getItem('vigitra_mobile_recordings') || '[]');
+          localStorage.setItem(
+            'vigitra_mobile_recordings',
+            JSON.stringify([newPhotoItem, ...stored.filter((r: any) => r.record_id !== newPhotoItem.record_id)].slice(0, 30))
+          );
+        } catch (e) {}
+
+        setCaptureFeedbackMsg(`Photo stored in Records! ID: ${newPhotoItem.record_id}`);
+        setTimeout(() => setCaptureFeedbackMsg(null), 5000);
+        closeCameraModal();
+      }
+    } catch (e) {
+      console.error('Error saving photo to records:', e);
+    } finally {
+      setIsCapturing(false);
+    }
+  };
 
   const fetchRecords = async () => {
     setLoading(true);
@@ -221,6 +370,15 @@ export const RecordedVideo: React.FC = () => {
       }
     }
 
+    if (filterByMyLocation && locationName) {
+      const locKey = locationName.toLowerCase();
+      const firstSegment = locKey.split(/[,-]/)[0].trim();
+      const recLoc = (rec.location || '').toLowerCase();
+      if (!recLoc.includes(firstSegment) && !recLoc.includes(locKey.slice(0, 10)) && !recLoc.includes('live') && !recLoc.includes('checkpoint')) {
+        return false;
+      }
+    }
+
     return true;
   });
 
@@ -245,9 +403,15 @@ export const RecordedVideo: React.FC = () => {
         </div>
 
         <div className="flex items-center gap-2">
+          <button
+            onClick={openCameraModal}
+            className="px-3.5 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded text-xs font-mono font-bold flex items-center gap-1.5 transition-colors shadow-xs"
+          >
+            <Camera className="w-4 h-4" /> 📸 CAPTURE PHOTO
+          </button>
           <Link
             to="/devices"
-            className="px-3.5 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded text-xs font-mono font-bold flex items-center gap-1.5 transition-colors shadow-xs"
+            className="px-3.5 py-2 bg-slate-700 hover:bg-slate-800 text-white rounded text-xs font-mono font-bold flex items-center gap-1.5 transition-colors shadow-xs"
           >
             <Smartphone className="w-4 h-4" /> MOBILE PATROL
           </Link>
@@ -257,6 +421,147 @@ export const RecordedVideo: React.FC = () => {
             className="px-3.5 py-2 bg-[#245B84] hover:bg-[#1E4A6F] text-white rounded text-xs font-mono font-bold flex items-center gap-1.5 transition-colors shadow-xs"
           >
             <RefreshCw className={`w-3.5 h-3.5 ${loading ? 'animate-spin' : ''}`} /> REFRESH
+          </button>
+        </div>
+      </div>
+
+      {/* FEEDBACK BANNER (IF PHOTO CAPTURED) */}
+      {captureFeedbackMsg && (
+        <div className="p-3 bg-emerald-50 border border-emerald-300 text-emerald-900 rounded-lg font-mono text-xs flex items-center justify-between shadow-xs">
+          <div className="flex items-center gap-2">
+            <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
+            <span className="font-bold">{captureFeedbackMsg}</span>
+          </div>
+          <button
+            onClick={() => setCaptureFeedbackMsg(null)}
+            className="text-emerald-700 hover:text-emerald-900 font-bold"
+          >
+            ✕
+          </button>
+        </div>
+      )}
+
+      {/* LOCATION PERMISSION ALERT BANNER IF NOT GRANTED */}
+      {permissionStatus !== 'granted' && !isManualOverride && (
+        <div className={`p-3 rounded-lg border font-mono text-xs flex flex-col sm:flex-row sm:items-center justify-between gap-2 shadow-xs ${
+          permissionStatus === 'denied' ? 'bg-amber-50 border-amber-300 text-amber-900' : 'bg-blue-50 border-blue-200 text-blue-900'
+        }`}>
+          <div className="flex items-center gap-2">
+            <Navigation className={`w-4 h-4 shrink-0 ${permissionStatus === 'denied' ? 'text-amber-600' : 'text-blue-600 animate-bounce'}`} />
+            <span>
+              {permissionStatus === 'denied' ? (
+                <>
+                  <strong>Location Access Denied:</strong> Your browser blocked location access. Click the lock/settings icon in the browser address bar, set Location to <em>"Allow"</em>, then click <strong>Grant Permission</strong>.
+                </>
+              ) : (
+                <>
+                  <strong>Device Location Required:</strong> Click <strong>Allow Location Permission</strong> so Vigitra can record and tag evidence to your physical checkpoint.
+                </>
+              )}
+            </span>
+          </div>
+          <button
+            onClick={() => requestLocationPermission()}
+            className="px-3 py-1 bg-emerald-600 hover:bg-emerald-700 text-white rounded font-bold self-start sm:self-auto shrink-0 transition-colors shadow-2xs text-[11px]"
+          >
+            {permissionStatus === 'denied' ? 'Retry Permission' : 'Grant Location Permission'}
+          </button>
+        </div>
+      )}
+
+      {/* OPERATOR ACTIVE LOCATION & GPS STATUS (MUTABLE ADMIN LOCATION BAR) */}
+      <div className="bg-white rounded-lg border border-[#DCE4EA] p-3.5 shadow-xs font-mono text-xs flex flex-col md:flex-row items-start md:items-center justify-between gap-3">
+        <div className="flex items-center gap-3">
+          <div className={`p-2.5 rounded-lg shrink-0 ${isManualOverride ? 'bg-blue-100 text-blue-700' : 'bg-emerald-100 text-emerald-700'}`}>
+            <Compass className="w-5 h-5" />
+          </div>
+          <div>
+            <div className="flex items-center gap-2 flex-wrap">
+              <span className="text-[10px] text-slate-400 uppercase font-bold tracking-wider">
+                {isManualOverride ? 'MUTABLE ADMIN CHECKPOINT:' : 'USER DEVICE LOCATION:'}
+              </span>
+              <span className={`px-2 py-0.5 rounded text-[9px] font-extrabold ${
+                isManualOverride ? 'bg-blue-600 text-white' :
+                permissionStatus === 'granted' && coords ? `bg-emerald-600 text-white` :
+                permissionStatus === 'loading' ? 'bg-blue-600 text-white animate-pulse' : 'bg-amber-500 text-black'
+              }`}>
+                {isManualOverride ? '🔵 MUTABLE ADMIN CHECKPOINT' :
+                 permissionStatus === 'granted' && coords ? `🟢 LIVE DEVICE GPS (±${coords.accuracy}m)` :
+                 permissionStatus === 'loading' ? '🔄 ACQUIRING DEVICE GPS...' : '🟡 DEVICE GPS WAITING'}
+              </span>
+            </div>
+            <div className="font-bold text-slate-800 text-xs sm:text-sm mt-0.5 flex items-center gap-1.5 flex-wrap">
+              <MapPin className="w-4 h-4 text-red-500 shrink-0" />
+              <span>{locationName}</span>
+              {coords && (
+                <span className="text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded border border-emerald-200 text-[11px] font-mono font-bold">
+                  Lat: {coords.latitude.toFixed(6)}°, Lng: {coords.longitude.toFixed(6)}°
+                </span>
+              )}
+            </div>
+          </div>
+        </div>
+
+        <div className="flex flex-wrap items-center gap-2 w-full md:w-auto">
+          {/* Detect / Update Device GPS Button */}
+          {permissionStatus !== 'granted' ? (
+            <button
+              onClick={() => requestLocationPermission()}
+              className="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded text-xs font-bold flex items-center gap-1.5 transition-colors shadow-xs animate-pulse"
+              title="Click to request browser location permission"
+            >
+              <Navigation className="w-3.5 h-3.5" />
+              <span>{permissionStatus === 'denied' ? 'Re-request Permission' : 'Grant Location Permission'}</span>
+            </button>
+          ) : (
+            !isManualOverride && (
+              <button
+                onClick={refreshLocation}
+                className="px-2.5 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded text-xs font-bold flex items-center gap-1 transition-colors border border-slate-200"
+                title="Refresh device GPS coordinates"
+              >
+                <RefreshCw className="w-3.5 h-3.5 text-slate-600" />
+                <span>Update GPS</span>
+              </button>
+            )
+          )}
+
+          {/* Edit Location Button */}
+          <button
+            onClick={() => {
+              setCustomLocationInput(locationName);
+              setShowEditLocationModal(true);
+            }}
+            className="px-3 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded text-xs font-bold flex items-center gap-1.5 transition-colors border border-slate-200"
+          >
+            <Edit2 className="w-3.5 h-3.5 text-blue-600" />
+            <span>Edit Location</span>
+          </button>
+
+          {/* Reset to Live GPS Button */}
+          {isManualOverride && (
+            <button
+              onClick={async () => {
+                await resetToGpsLocation();
+              }}
+              className="px-3 py-1.5 bg-blue-50 hover:bg-blue-100 text-blue-700 rounded text-xs font-bold flex items-center gap-1.5 transition-colors border border-blue-200"
+            >
+              <RefreshCw className="w-3.5 h-3.5 text-blue-600" />
+              <span>Revert to Device GPS</span>
+            </button>
+          )}
+
+          {/* Toggle Filter Records by My Location */}
+          <button
+            onClick={() => setFilterByMyLocation((prev) => !prev)}
+            className={`px-3 py-1.5 rounded text-xs font-bold flex items-center gap-1.5 transition-colors border ${
+              filterByMyLocation
+                ? 'bg-blue-600 text-white border-blue-600 shadow-xs'
+                : 'bg-slate-50 text-slate-700 hover:bg-slate-100 border-slate-200'
+            }`}
+          >
+            <Filter className="w-3.5 h-3.5" />
+            <span>{filterByMyLocation ? '📍 Location Filter Active' : '📍 Filter My Location'}</span>
           </button>
         </div>
       </div>
@@ -448,7 +753,7 @@ export const RecordedVideo: React.FC = () => {
               {/* Photo Image Display */}
               <div className="relative bg-slate-950 aspect-video rounded overflow-hidden flex items-center justify-center">
                 <img
-                  src={resolveVideoUrl(selectedRecord.file_url || selectedRecord.image_url)}
+                  src={resolveImageUrl(selectedRecord.file_url || selectedRecord.image_url)}
                   alt="Captured Evidence"
                   className="max-h-full object-contain"
                   onError={(e) => {
@@ -481,7 +786,7 @@ export const RecordedVideo: React.FC = () => {
                 <div>
                   <span className="text-slate-400 block text-[9px] uppercase">Captured At</span>
                   <span className="font-bold text-slate-700">
-                    {new Date(selectedRecord.timestamp || '').toLocaleTimeString()}
+                    {new Date(selectedRecord.timestamp || selectedRecord.created_at || selectedRecord.start_time || Date.now()).toLocaleTimeString()}
                   </span>
                 </div>
               </div>
@@ -574,7 +879,7 @@ export const RecordedVideo: React.FC = () => {
                     <div className="flex items-center justify-between text-[10px] border-t border-slate-100 pt-2 text-slate-500">
                       <span className="flex items-center gap-1">
                         <Clock className="w-3 h-3 text-slate-400" />
-                        {new Date(item.timestamp || item.start_time || '').toLocaleTimeString()}
+                        {new Date(item.timestamp || item.created_at || item.start_time || Date.now()).toLocaleTimeString()}
                       </span>
 
                       {item.plate_number && (
@@ -598,6 +903,200 @@ export const RecordedVideo: React.FC = () => {
           </div>
         </div>
       </div>
+
+      {/* MODAL 1: MUTABLE ADMIN LOCATION EDITOR */}
+      {showEditLocationModal && (
+        <div className="fixed inset-0 bg-black/60 backdrop-blur-xs flex items-center justify-center p-4 z-50 animate-in fade-in">
+          <div className="bg-white rounded-xl max-w-md w-full p-5 space-y-4 shadow-2xl border border-slate-200 font-mono">
+            <div className="flex items-center justify-between border-b pb-3">
+              <div className="flex items-center gap-2">
+                <div className="p-2 rounded-lg bg-blue-100 text-blue-700">
+                  <Edit2 className="w-4 h-4" />
+                </div>
+                <div>
+                  <h3 className="font-bold text-slate-800 text-sm uppercase">EDIT ADMIN CHECKPOINT LOCATION</h3>
+                  <p className="text-[10px] text-slate-500">Mutate active location or revert to browser GPS</p>
+                </div>
+              </div>
+              <button
+                onClick={() => setShowEditLocationModal(false)}
+                className="text-slate-400 hover:text-slate-700 p-1 text-base font-bold"
+              >
+                ✕
+              </button>
+            </div>
+
+            <div className="space-y-3">
+              <div>
+                <label className="text-[10px] font-bold text-slate-500 uppercase block mb-1">
+                  Active Checkpoint / Address Label:
+                </label>
+                <input
+                  type="text"
+                  value={customLocationInput}
+                  onChange={(e) => setCustomLocationInput(e.target.value)}
+                  placeholder="e.g. Anna Salai Checkpoint 4, Chennai"
+                  className="w-full px-3 py-2 bg-slate-50 border border-slate-300 rounded text-xs text-slate-800 focus:outline-none focus:ring-2 focus:ring-blue-500 font-mono"
+                />
+              </div>
+
+              {/* Preset Checkpoint Quick Selectors */}
+              <div>
+                <span className="text-[9px] font-bold text-slate-400 uppercase block mb-1.5">
+                  Quick Select Checkpoint:
+                </span>
+                <div className="flex flex-wrap gap-1.5">
+                  {[
+                    'Anna Salai - Spencers Junction',
+                    'Kathipara Junction Flyover',
+                    'OMR IT Expressway Sector 2',
+                    'Marina Beach Promenade Point',
+                    'Koyambedu Roundabout Checkpoint'
+                  ].map((preset) => (
+                    <button
+                      key={preset}
+                      type="button"
+                      onClick={() => setCustomLocationInput(preset)}
+                      className="px-2 py-1 bg-slate-100 hover:bg-blue-50 hover:text-blue-700 text-slate-600 rounded text-[10px] transition-colors border border-slate-200"
+                    >
+                      {preset}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              {/* Current GPS Telemetry Preview */}
+              {coords && (
+                <div className="p-2.5 bg-slate-50 rounded border border-slate-200 text-[11px] space-y-1">
+                  <div className="flex justify-between text-slate-600">
+                    <span>Device GPS Latitude:</span>
+                    <span className="font-bold">{coords.latitude.toFixed(6)}°</span>
+                  </div>
+                  <div className="flex justify-between text-slate-600">
+                    <span>Device GPS Longitude:</span>
+                    <span className="font-bold">{coords.longitude.toFixed(6)}°</span>
+                  </div>
+                  <div className="flex justify-between text-slate-600">
+                    <span>Accuracy:</span>
+                    <span className="font-bold text-emerald-700">±{coords.accuracy}m</span>
+                  </div>
+                </div>
+              )}
+            </div>
+
+            <div className="flex items-center justify-between pt-2 border-t">
+              {isManualOverride ? (
+                <button
+                  type="button"
+                  onClick={async () => {
+                    await resetToGpsLocation();
+                    setShowEditLocationModal(false);
+                  }}
+                  className="px-3 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded text-xs font-bold flex items-center gap-1 transition-colors"
+                >
+                  <RefreshCw className="w-3.5 h-3.5" /> Revert to GPS
+                </button>
+              ) : <div />}
+
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => setShowEditLocationModal(false)}
+                  className="px-3 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded text-xs transition-colors"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    if (customLocationInput.trim()) {
+                      setManualLocation(customLocationInput.trim());
+                      setShowEditLocationModal(false);
+                    }
+                  }}
+                  className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded text-xs font-bold transition-colors shadow-xs"
+                >
+                  Save Location
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL 2: LIVE CAMERA EVIDENCE PHOTO CAPTURE */}
+      {showCaptureModal && (
+        <div className="fixed inset-0 bg-black/75 backdrop-blur-xs flex items-center justify-center p-4 z-50 animate-in fade-in">
+          <div className="bg-slate-900 rounded-xl max-w-lg w-full p-4 space-y-3.5 shadow-2xl border border-slate-800 font-mono text-white">
+            <div className="flex items-center justify-between border-b border-slate-800 pb-2.5">
+              <div className="flex items-center gap-2">
+                <div className="p-1.5 rounded bg-emerald-500/20 text-emerald-400">
+                  <Camera className="w-4 h-4" />
+                </div>
+                <div>
+                  <h3 className="font-bold text-xs uppercase tracking-wide">CAPTURE FIELD EVIDENCE PHOTO</h3>
+                  <p className="text-[10px] text-slate-400">Web Camera Stream Geotagged with Active Location</p>
+                </div>
+              </div>
+              <button
+                onClick={closeCameraModal}
+                className="text-slate-400 hover:text-white p-1 text-base font-bold"
+              >
+                ✕
+              </button>
+            </div>
+
+            {/* Video Viewport with HUD overlay */}
+            <div className="relative bg-black aspect-video rounded-lg overflow-hidden border border-slate-800 flex items-center justify-center">
+              <video
+                ref={captureVideoRef}
+                autoPlay
+                playsInline
+                muted
+                className="w-full h-full object-cover"
+              />
+
+              {/* Viewport Crosshair HUD */}
+              <div className="absolute inset-0 pointer-events-none flex items-center justify-center">
+                <div className="w-24 h-24 border-2 border-emerald-500/40 rounded-lg flex items-center justify-center">
+                  <Crosshair className="w-6 h-6 text-emerald-400/80 animate-pulse" />
+                </div>
+              </div>
+
+              {/* Geotag Indicator Overlay */}
+              <div className="absolute bottom-2.5 left-2.5 bg-slate-950/85 px-2.5 py-1 rounded border border-slate-700 text-[10px] flex items-center gap-1.5">
+                <MapPin className="w-3 h-3 text-red-400 shrink-0" />
+                <span className="truncate max-w-[260px] text-slate-200">{locationName}</span>
+              </div>
+            </div>
+
+            {/* Modal Controls */}
+            <div className="flex items-center justify-between pt-1">
+              <span className="text-[10px] text-slate-400">
+                Photo will be stored on server and indexed in RECORDS.
+              </span>
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={closeCameraModal}
+                  className="px-3 py-2 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded text-xs transition-colors"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  disabled={isCapturing}
+                  onClick={takePhotoAndSaveToRecords}
+                  className="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded text-xs font-bold flex items-center gap-1.5 transition-colors shadow-xs"
+                >
+                  <Camera className="w-4 h-4" />
+                  <span>{isCapturing ? 'SAVING...' : 'CAPTURE & SAVE'}</span>
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

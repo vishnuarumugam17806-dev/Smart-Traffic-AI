@@ -101,6 +101,27 @@ export const MobileCamera: React.FC = () => {
     }
   };
 
+  const safeSaveLocalRecord = (item: any) => {
+    try {
+      const existing = JSON.parse(localStorage.getItem('vigitra_mobile_recordings') || '[]');
+      let updated = [item, ...existing.filter((r: any) => r.record_id !== item.record_id)].slice(0, 30);
+      try {
+        localStorage.setItem('vigitra_mobile_recordings', JSON.stringify(updated));
+      } catch (quotaError) {
+        // QuotaExceededError fallback: prune and strip base64 data URLs
+        updated = updated.slice(0, 10).map((r: any) => ({
+          ...r,
+          file_url: (r.file_url && r.file_url.startsWith('data:')) ? undefined : r.file_url,
+          image_url: (r.image_url && r.image_url.startsWith('data:')) ? undefined : r.image_url
+        }));
+        localStorage.setItem('vigitra_mobile_recordings', JSON.stringify(updated));
+      }
+      setRecentMobileRecords(updated);
+    } catch (e) {
+      console.warn('LocalStorage safe save warning:', e);
+    }
+  };
+
   // 1. Geolocation Watching (Sections 10, 11, 12, 13, 14, 16)
   const sendLocationUpdate = useCallback(async (lat: number, lng: number, accuracy: number, timestampIso: string) => {
     try {
@@ -520,6 +541,7 @@ export const MobileCamera: React.FC = () => {
         device_id: deviceId
       });
 
+      const serverPhotoUrl = res.data?.file_url;
       const localPhotoRecord = {
         id: Date.now(),
         record_id: res.data?.record_id || `PHO-${Date.now()}`,
@@ -533,12 +555,11 @@ export const MobileCamera: React.FC = () => {
         plate_number: res.data?.plate_number,
         confidence: res.data?.ocr_confidence,
         event_type: res.data?.event_type || 'FIELD_PHOTO_CAPTURE',
-        file_url: photoBase64,
-        image_url: photoBase64,
+        file_url: serverPhotoUrl || photoBase64,
+        image_url: serverPhotoUrl || photoBase64,
         review_status: 'CONFIRMED'
       };
-      const existing = JSON.parse(localStorage.getItem('vigitra_mobile_recordings') || '[]');
-      localStorage.setItem('vigitra_mobile_recordings', JSON.stringify([localPhotoRecord, ...existing]));
+      safeSaveLocalRecord(localPhotoRecord);
 
       setEmergencyAlertSent(true);
       setTimeout(() => setEmergencyAlertSent(false), 4500);
