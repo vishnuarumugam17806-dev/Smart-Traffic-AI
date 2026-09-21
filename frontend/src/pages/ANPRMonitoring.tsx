@@ -561,6 +561,13 @@ export const ANPRMonitoring: React.FC = () => {
   // Dossier Modal state
   const [selectedDossier, setSelectedDossier] = useState<PlateDossier | null>(null);
   const [loadingDossier, setLoadingDossier] = useState<boolean>(false);
+
+  const fetchDossier = (plate: string) => {
+    if (!plate) return;
+    const p = plate.toUpperCase().replace(/[\s-]/g, '');
+    const dossier = generateFallbackDossier(p);
+    setSelectedDossier(dossier);
+  };
   // Add to Directory Modal states
   const [showAddDirModal, setShowAddDirModal] = useState<boolean>(false);
   const [newPlate, setNewPlate] = useState<string>('');

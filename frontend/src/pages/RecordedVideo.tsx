@@ -25,7 +25,8 @@ import {
   Edit2,
   X,
   Check,
-  Crosshair
+  Crosshair,
+  Navigation
 } from 'lucide-react';
 import { apiClient, resolveVideoUrl, resolveImageUrl } from '../api/client';
 import { Link } from 'react-router-dom';
