@@ -131,7 +131,9 @@ class TrajectoryGraphEngine:
                         # Anomaly: physically impossible speed (>150 km/h) or under 15% travel time
                         if transition_speed > 150.0 or time_diff < (road.expected_travel_time_sec * 0.15):
                             anomaly_flag = True
-                            reason = f"Impossible speed of {transition_speed:.1f} km/h detected between {prev_obs.camera.name} and {obs.camera.name}."
+                            prev_cam_label = prev_obs.camera.name if prev_obs.camera else f"CAM-{prev_obs.camera_id}"
+                            curr_cam_label = obs.camera.name if obs.camera else f"CAM-{obs.camera_id}"
+                            reason = f"Impossible speed of {transition_speed:.1f} km/h detected between {prev_cam_label} and {curr_cam_label}."
                             route_anomalies_detected.append({
                                 "prev_camera_id": prev_obs.camera_id,
                                 "curr_camera_id": obs.camera_id,

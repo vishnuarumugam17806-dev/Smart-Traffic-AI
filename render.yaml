@@ -99,3 +99,5 @@ services:
         value: wss://vigitra-backend-k0yj.onrender.com/ws/traffic
       - key: VITE_FRONTEND_BASE_URL
         value: https://vigitra-frontend.onrender.com
+      - key: VITE_GOOGLE_MAPS_API_KEY
+        value: AIzaSyBVfJPYHj37Lerr02nT_WW8Fn_h4G8VRsQ
