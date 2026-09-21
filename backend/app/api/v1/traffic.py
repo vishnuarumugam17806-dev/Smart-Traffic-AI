@@ -80,6 +80,10 @@ class FieldCapturePhotoInput(BaseModel):
     camera_id: Optional[int] = None
     latitude: Optional[float] = None
     longitude: Optional[float] = None
+    accuracy_meters: Optional[float] = None
+    altitude: Optional[float] = None
+    speed: Optional[float] = None
+    location_properties: Optional[dict] = None
 
 class WebUserLocationInput(BaseModel):
     user_id: Optional[str] = "WEB-OPERATOR"
@@ -1936,6 +1940,10 @@ async def analyze_field_photo(photo_in: FieldCapturePhotoInput, db: Session = De
             except Exception as comp_err:
                 logger.warning(f"Compliance check note on photo: {comp_err}")
 
+        res_lat = photo_in.latitude or _latest_web_user_location.get("latitude") or 13.0827
+        res_lng = photo_in.longitude or _latest_web_user_location.get("longitude") or 80.2707
+        res_acc = photo_in.accuracy_meters or _latest_web_user_location.get("accuracy_meters") or 8.0
+
         return {
             "photo_id": evidence.record_id,
             "record_id": evidence.record_id,
@@ -1944,6 +1952,16 @@ async def analyze_field_photo(photo_in: FieldCapturePhotoInput, db: Session = De
             "vehicle_type": evidence.vehicle_type,
             "event_type": evidence.event_type,
             "location": evidence.location,
+            "latitude": res_lat,
+            "longitude": res_lng,
+            "accuracy_meters": res_acc,
+            "location_properties": {
+                "latitude": res_lat,
+                "longitude": res_lng,
+                "accuracy_meters": res_acc,
+                "address_label": evidence.location,
+                "source": "DEVICE_GPS" if (photo_in.latitude or _latest_web_user_location.get("latitude")) else "CHECKPOINT_PRESET"
+            },
             "alert_id": matched_alert_id,
             "alert_created": matched_alert_id is not None or (compliance_summary and compliance_summary.get("action_required")),
             "alert_message": alert_msg or (compliance_summary.get("alerts", [{}])[0].get("message") if compliance_summary and compliance_summary.get("alerts") else None),
@@ -2009,6 +2027,23 @@ def get_all_records(
 
         for r in v_recs:
             file_url = r.file_reference if (r.file_reference and (r.file_reference.startswith('/') or r.file_reference.startswith('http'))) else f"/storage/recordings/{r.file_reference}" if r.file_reference else "/videos/sample_traffic_urban.mp4"
+            # Derive coordinates for video record
+            v_lat = None
+            v_lng = None
+            if r.location and "," in r.location:
+                try:
+                    parts = r.location.split(",")
+                    v_lat = float(parts[0].strip())
+                    v_lng = float(parts[1].strip())
+                except Exception:
+                    pass
+            if v_lat is None and _latest_web_user_location.get("latitude"):
+                v_lat = _latest_web_user_location["latitude"]
+                v_lng = _latest_web_user_location["longitude"]
+            if v_lat is None:
+                v_lat = 13.0827
+                v_lng = 80.2707
+
             video_list.append({
                 "id": r.id,
                 "record_id": r.record_id,
@@ -2019,6 +2054,16 @@ def get_all_records(
                 "camera_id": getattr(r, 'camera_id', None),
                 "device_id": getattr(r, 'device_id', None) or "FIXED-CCTV-01",
                 "location": r.location,
+                "latitude": v_lat,
+                "longitude": v_lng,
+                "accuracy_meters": 8.0,
+                "location_properties": {
+                    "latitude": v_lat,
+                    "longitude": v_lng,
+                    "accuracy_meters": 8.0,
+                    "address_label": r.location,
+                    "source": "CAMERA_GPS"
+                },
                 "start_time": r.start_time.isoformat() if hasattr(r.start_time, 'isoformat') else str(r.start_time),
                 "end_time": r.end_time.isoformat() if (r.end_time and hasattr(r.end_time, 'isoformat')) else None,
                 "duration_sec": getattr(r, 'duration_sec', 120.0),
@@ -2058,6 +2103,24 @@ def get_all_records(
             file_url = p.original_image
             if not file_url or file_url.lower().endswith(('.mp4', '.avi', '.mov', '.mkv', '.webm')) or not (file_url.startswith('/') or file_url.startswith('http')):
                 file_url = f"/storage/evidence/{p.record_id}.jpg"
+
+            # Derive coordinates for photo record
+            p_lat = None
+            p_lng = None
+            if p.location and "," in p.location:
+                try:
+                    parts = p.location.split(",")
+                    p_lat = float(parts[0].strip())
+                    p_lng = float(parts[1].strip())
+                except Exception:
+                    pass
+            if p_lat is None and _latest_web_user_location.get("latitude"):
+                p_lat = _latest_web_user_location["latitude"]
+                p_lng = _latest_web_user_location["longitude"]
+            if p_lat is None:
+                p_lat = 13.0827
+                p_lng = 80.2707
+
             photo_list.append({
                 "id": p.id,
                 "photo_id": p.record_id,
@@ -2069,6 +2132,16 @@ def get_all_records(
                 "device_id": getattr(p, 'device_id', None) or "MOBILE-CAM-001",
                 "operator_id": p.operator_id,
                 "location": p.location,
+                "latitude": p_lat,
+                "longitude": p_lng,
+                "accuracy_meters": 6.5,
+                "location_properties": {
+                    "latitude": p_lat,
+                    "longitude": p_lng,
+                    "accuracy_meters": 6.5,
+                    "address_label": p.location,
+                    "source": "DEVICE_GPS"
+                },
                 "timestamp": p.timestamp.isoformat() if hasattr(p.timestamp, 'isoformat') else str(p.timestamp),
                 "created_at": p.timestamp.isoformat() if hasattr(p.timestamp, 'isoformat') else str(p.timestamp),
                 "plate_number": p.plate_number,

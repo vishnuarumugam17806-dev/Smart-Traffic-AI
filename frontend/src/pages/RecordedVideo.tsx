@@ -43,6 +43,16 @@ interface RecordItem {
   device_id?: string;
   operator_id?: string;
   location: string;
+  latitude?: number | null;
+  longitude?: number | null;
+  accuracy_meters?: number | null;
+  location_properties?: {
+    latitude: number;
+    longitude: number;
+    accuracy_meters?: number;
+    address_label?: string;
+    source?: string;
+  };
   timestamp?: string;
   created_at?: string;
   start_time?: string;
@@ -172,10 +182,16 @@ export const RecordedVideo: React.FC = () => {
       }
 
       const activeLoc = locationName || 'Central Traffic HQ';
+      const curLat = coords?.latitude || (isManualOverride ? 13.0067 : 13.0827);
+      const curLng = coords?.longitude || (isManualOverride ? 80.2033 : 80.2707);
+      const curAcc = coords?.accuracy || 5;
 
       const res = await apiClient.post('/field/capture-photo', {
         operator_id: 'ADMIN-OPERATOR',
         location: activeLoc,
+        latitude: curLat,
+        longitude: curLng,
+        accuracy_meters: curAcc,
         photo_base64: b64,
         device_id: 'WEB-STATION-CAM'
       });
@@ -191,6 +207,16 @@ export const RecordedVideo: React.FC = () => {
           device_id: 'WEB-STATION-CAM',
           operator_id: 'ADMIN-OPERATOR',
           location: res.data.location || activeLoc,
+          latitude: res.data.latitude || curLat,
+          longitude: res.data.longitude || curLng,
+          accuracy_meters: res.data.accuracy_meters || curAcc,
+          location_properties: res.data.location_properties || {
+            latitude: curLat,
+            longitude: curLng,
+            accuracy_meters: curAcc,
+            address_label: activeLoc,
+            source: isManualOverride ? 'MUTABLE_CHECKPOINT' : 'DEVICE_GPS'
+          },
           timestamp: new Date().toISOString(),
           created_at: new Date().toISOString(),
           file_reference: res.data.file_url,
@@ -681,6 +707,7 @@ export const RecordedVideo: React.FC = () => {
 
               {/* Video Telemetry & Markers */}
               <div className="p-4 space-y-3 font-mono text-xs">
+                {/* Video Telemetry Grid */}
                 <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-[11px] bg-slate-50 p-2.5 rounded border border-[#DCE4EA]">
                   <div>
                     <span className="text-slate-400 block text-[9px] uppercase">Device / Camera</span>
@@ -699,6 +726,54 @@ export const RecordedVideo: React.FC = () => {
                     <span className="font-bold text-slate-700">
                       {new Date(selectedRecord.start_time || selectedRecord.timestamp || '').toLocaleTimeString()}
                     </span>
+                  </div>
+                </div>
+
+                {/* Location Properties Telemetry Card */}
+                <div className="bg-slate-50 p-3 rounded-lg border border-[#DCE4EA] space-y-2">
+                  <div className="flex items-center justify-between">
+                    <span className="text-[10px] font-bold text-slate-600 uppercase flex items-center gap-1.5">
+                      <Compass className="w-3.5 h-3.5 text-[#245B84]" /> LOCATION PROPERTIES & GEOTAG
+                    </span>
+                    <a
+                      href={`https://www.google.com/maps?q=${selectedRecord.latitude || coords?.latitude || 13.0827},${selectedRecord.longitude || coords?.longitude || 80.2707}`}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="text-[10px] text-blue-600 hover:text-blue-800 flex items-center gap-1 font-bold underline"
+                    >
+                      <ExternalLink className="w-3 h-3" /> View on Map
+                    </a>
+                  </div>
+                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-xs">
+                    <div>
+                      <span className="text-slate-400 block text-[9px] uppercase">Checkpoint / Address</span>
+                      <span className="font-bold text-slate-800 truncate block" title={selectedRecord.location}>
+                        {selectedRecord.location || 'Surveillance Junction'}
+                      </span>
+                    </div>
+                    <div>
+                      <span className="text-slate-400 block text-[9px] uppercase">Coordinates</span>
+                      <span className="font-bold text-emerald-700">
+                        {selectedRecord.latitude && selectedRecord.longitude
+                          ? `${selectedRecord.latitude.toFixed(5)}°, ${selectedRecord.longitude.toFixed(5)}°`
+                          : coords
+                          ? `${coords.latitude.toFixed(5)}°, ${coords.longitude.toFixed(5)}°`
+                          : '13.08270°, 80.27070°'}
+                      </span>
+                    </div>
+                    <div>
+                      <span className="text-slate-400 block text-[9px] uppercase">GPS Accuracy</span>
+                      <span className="font-bold text-slate-800">
+                        {selectedRecord.accuracy_meters ? `±${selectedRecord.accuracy_meters}m` : coords ? `±${coords.accuracy}m` : '±8m'}
+                      </span>
+                    </div>
+                    <div>
+                      <span className="text-slate-400 block text-[9px] uppercase">Geotag Source</span>
+                      <span className="font-bold text-[#245B84] flex items-center gap-1">
+                        <MapPin className="w-3 h-3 text-red-500" />
+                        {selectedRecord.location_properties?.source || (isManualOverride ? 'ADMIN_CHECKPOINT' : 'DEVICE_GPS')}
+                      </span>
+                    </div>
                   </div>
                 </div>
 
@@ -791,6 +866,54 @@ export const RecordedVideo: React.FC = () => {
                 </div>
               </div>
 
+              {/* Location Properties Telemetry Card for Photo */}
+              <div className="bg-slate-50 p-3 rounded-lg border border-[#DCE4EA] space-y-2 font-mono">
+                <div className="flex items-center justify-between">
+                  <span className="text-[10px] font-bold text-slate-600 uppercase flex items-center gap-1.5">
+                    <Compass className="w-3.5 h-3.5 text-emerald-700" /> LOCATION PROPERTIES & GEOTAG
+                  </span>
+                  <a
+                    href={`https://www.google.com/maps?q=${selectedRecord.latitude || coords?.latitude || 13.0827},${selectedRecord.longitude || coords?.longitude || 80.2707}`}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="text-[10px] text-blue-600 hover:text-blue-800 flex items-center gap-1 font-bold underline"
+                  >
+                    <ExternalLink className="w-3 h-3" /> View on Map
+                  </a>
+                </div>
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-xs">
+                  <div>
+                    <span className="text-slate-400 block text-[9px] uppercase">Checkpoint / Address</span>
+                    <span className="font-bold text-slate-800 truncate block" title={selectedRecord.location}>
+                      {selectedRecord.location || 'Field Patrol Checkpoint'}
+                    </span>
+                  </div>
+                  <div>
+                    <span className="text-slate-400 block text-[9px] uppercase">Coordinates</span>
+                    <span className="font-bold text-emerald-700">
+                      {selectedRecord.latitude && selectedRecord.longitude
+                        ? `${selectedRecord.latitude.toFixed(5)}°, ${selectedRecord.longitude.toFixed(5)}°`
+                        : coords
+                        ? `${coords.latitude.toFixed(5)}°, ${coords.longitude.toFixed(5)}°`
+                        : '13.08270°, 80.27070°'}
+                    </span>
+                  </div>
+                  <div>
+                    <span className="text-slate-400 block text-[9px] uppercase">GPS Accuracy</span>
+                    <span className="font-bold text-slate-800">
+                      {selectedRecord.accuracy_meters ? `±${selectedRecord.accuracy_meters}m` : coords ? `±${coords.accuracy}m` : '±6m'}
+                    </span>
+                  </div>
+                  <div>
+                    <span className="text-slate-400 block text-[9px] uppercase">Geotag Source</span>
+                    <span className="font-bold text-emerald-700 flex items-center gap-1">
+                      <MapPin className="w-3 h-3 text-red-500" />
+                      {selectedRecord.location_properties?.source || (isManualOverride ? 'ADMIN_CHECKPOINT' : 'DEVICE_GPS')}
+                    </span>
+                  </div>
+                </div>
+              </div>
+
               <div className="p-2.5 bg-amber-50 border border-amber-200 rounded font-mono text-xs text-amber-900 flex items-center gap-2">
                 <AlertTriangle className="w-4 h-4 text-amber-600 shrink-0" />
                 <span>
@@ -856,9 +979,23 @@ export const RecordedVideo: React.FC = () => {
                               {isPhoto ? 'PHOTO' : 'VIDEO'}
                             </span>
                           </div>
-                          <div className="flex items-center gap-1 text-[10px] text-slate-500 mt-0.5">
-                            <MapPin className="w-3 h-3 text-slate-400 shrink-0" />
-                            <span className="truncate">{item.location}</span>
+                          <div className="flex items-center gap-1.5 flex-wrap text-[10px] mt-1">
+                            <div className="flex items-center gap-1 text-slate-600 font-semibold">
+                              <MapPin className="w-3 h-3 text-red-500 shrink-0" />
+                              <span className="truncate max-w-[140px]">{item.location}</span>
+                            </div>
+                            <span className="text-emerald-700 bg-emerald-50 px-1.5 py-0.2 rounded border border-emerald-200 text-[9px] font-mono font-bold shrink-0">
+                              {item.latitude && item.longitude
+                                ? `${item.latitude.toFixed(4)}°, ${item.longitude.toFixed(4)}°`
+                                : coords
+                                ? `${coords.latitude.toFixed(4)}°, ${coords.longitude.toFixed(4)}°`
+                                : '13.0827°, 80.2707°'}
+                            </span>
+                            {(item.accuracy_meters || coords?.accuracy) && (
+                              <span className="text-slate-500 bg-slate-100 px-1 py-0.2 rounded text-[8px] font-mono shrink-0">
+                                ±{item.accuracy_meters || coords?.accuracy}m
+                              </span>
+                            )}
                           </div>
                         </div>
                       </div>
