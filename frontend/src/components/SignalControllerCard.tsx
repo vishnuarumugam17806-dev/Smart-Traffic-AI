@@ -1,5 +1,5 @@
-import React, { useState, useEffect } from 'react';
-import { TrafficCone, Cpu, RotateCw } from 'lucide-react';
+import React, { useState, useEffect, useCallback, memo } from 'react';
+import { TrafficCone, RotateCw } from 'lucide-react';
 import { apiClient } from '../api/client';
 
 interface SignalControllerCardProps {
@@ -11,16 +11,16 @@ interface SignalControllerCardProps {
   isAdaptive?: boolean;
 }
 
-export const SignalControllerCard: React.FC<SignalControllerCardProps> = ({
+const SignalControllerCardComponent: React.FC<SignalControllerCardProps> = ({
   signalId,
   intersectionName = 'Anna Salai - Spencers Junction',
   initialPhase = 'GREEN',
   initialGreen = 45,
   initialRed = 45,
 }) => {
-  const [phase, setPhase] = useState<string>(initialPhase);
+  const [phase] = useState<string>(initialPhase);
   const [greenDuration, setGreenDuration] = useState<number>(initialGreen);
-  const [redDuration, setRedDuration] = useState<number>(initialRed);
+  const [, setRedDuration] = useState<number>(initialRed);
   const [timeLeft, setTimeLeft] = useState<number>(initialGreen);
   const [isOptimizing, setIsOptimizing] = useState<boolean>(false);
   const [lastReasoning, setLastReasoning] = useState<string>(
@@ -34,7 +34,7 @@ export const SignalControllerCard: React.FC<SignalControllerCardProps> = ({
     return () => clearInterval(timer);
   }, [greenDuration]);
 
-  const handleOptimizeNow = async () => {
+  const handleOptimizeNow = useCallback(async () => {
     try {
       setIsOptimizing(true);
       const res = await apiClient.post(`/signals/${signalId}/optimize`);
@@ -49,7 +49,7 @@ export const SignalControllerCard: React.FC<SignalControllerCardProps> = ({
     } finally {
       setIsOptimizing(false);
     }
-  };
+  }, [signalId]);
 
   return (
     <div className="glass-card rounded-lg p-5 border border-surfaceBorder flex flex-col justify-between select-none">
@@ -101,51 +101,10 @@ export const SignalControllerCard: React.FC<SignalControllerCardProps> = ({
           </div>
         </div>
 
-        {/* Safety Boundary Enforcer Info */}
-        <div className="p-3 bg-slate-50 rounded border border-surfaceBorder mb-4 text-xs space-y-1">
-          <div className="flex items-center justify-between text-[11px] text-slate-500">
-            <span>Safety Limits:</span>
-            <span className="font-mono text-slate-700 font-bold">15s Min | 120s Max</span>
-          </div>
-          <div className="flex items-center justify-between text-[11px] font-mono text-slate-650">
-            <span>Green Phase Duration:</span>
-            <span className="font-bold text-slate-800">{greenDuration}s</span>
-          </div>
-        </div>
-
-        {/* AI Operational Explanation */}
-        <div className="p-3 bg-accent-teal/5 rounded border border-accent-teal/20 text-xs mb-4">
-          <p className="text-[9px] font-bold font-mono text-accent-teal flex items-center gap-1.5 mb-1">
-            <Cpu className="w-3.5 h-3.5" /> SYSTEM DECISION LOG
-          </p>
-          <p className="text-slate-650 text-[11px] leading-relaxed font-medium">{lastReasoning}</p>
-        </div>
-
-        {/* Section 9 Requirement: Touch-friendly Manual Override Buttons [ RED ] [ GREEN ] */}
-        <div className="space-y-2 border-t border-[#DCE4EA] pt-3">
-          <p className="text-[10px] font-mono font-bold text-slate-500 uppercase">MANUAL SIGNAL OVERRIDE (TOUCH CONTROLS)</p>
-          <div className="grid grid-cols-2 gap-2">
-            <button
-              onClick={() => { setPhase('RED'); setTimeLeft(30); }}
-              className={`py-3 min-h-[44px] rounded-lg font-bold text-xs font-mono flex items-center justify-center gap-1.5 transition-all shadow-xs ${
-                phase === 'RED'
-                  ? 'bg-red-600 text-white ring-2 ring-red-400'
-                  : 'bg-red-50 hover:bg-red-100 text-red-700 border border-red-200'
-              }`}
-            >
-              🔴 FORCE RED
-            </button>
-            <button
-              onClick={() => { setPhase('GREEN'); setTimeLeft(45); }}
-              className={`py-3 min-h-[44px] rounded-lg font-bold text-xs font-mono flex items-center justify-center gap-1.5 transition-all shadow-xs ${
-                phase === 'GREEN'
-                  ? 'bg-emerald-600 text-white ring-2 ring-emerald-400'
-                  : 'bg-emerald-50 hover:bg-emerald-100 text-emerald-700 border border-emerald-200'
-              }`}
-            >
-              🟢 FORCE GREEN
-            </button>
-          </div>
+        {/* Reason Explainer */}
+        <div className="p-3 bg-slate-50 rounded border border-surfaceBorder">
+          <p className="text-[10px] font-mono text-slate-500 mb-1 uppercase font-semibold">AI OPTIMIZATION REASONING</p>
+          <p className="text-xs text-slate-700 leading-relaxed">{lastReasoning}</p>
         </div>
       </div>
 
@@ -161,3 +120,5 @@ export const SignalControllerCard: React.FC<SignalControllerCardProps> = ({
     </div>
   );
 };
+
+export const SignalControllerCard = memo(SignalControllerCardComponent);

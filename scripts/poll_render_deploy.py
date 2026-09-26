@@ -18,13 +18,13 @@ for i in range(1, 20):
             js_req = urllib.request.Request(js_url, headers={"User-Agent": "Mozilla/5.0"})
             js_code = urllib.request.urlopen(js_req, timeout=20).read().decode("utf-8", errors="ignore")
             
-            has_location = "Google Satellite Hybrid" in js_code or "google-traffic" in js_code or "index-R9-4S0eY" in assets[0]
-            if has_location:
-                print(f"[SUCCESS] Deployed bundle {assets[0]} contains complete platform-wide Google Maps integration!", flush=True)
-                print("RENDER DEPLOYMENT IS COMPLETE AND LIVE!", flush=True)
+            has_traffic = "TrafficLayer" in js_code or "TRAFFIC INTELLIGENCE MAP" in js_code or "Google Live Traffic" in js_code
+            if has_traffic:
+                print(f"[SUCCESS] Deployed bundle {assets[0]} contains complete Google Traffic Layer & VIGITRA AI overlays!", flush=True)
+                print("RENDER DEPLOYMENT IS COMPLETE AND LIVE ON https://vigitra-frontend.onrender.com!", flush=True)
                 sys.exit(0)
             else:
-                print(f"[{i}/20] Current bundle {assets[0]} is previous build. Waiting 10s for Render build...", flush=True)
+                print(f"[{i}/25] Current deployed bundle {assets[0]} is previous build. Waiting 12s for Render build & deploy...", flush=True)
         else:
             print(f"[{i}/20] Could not find JS assets in HTML", flush=True)
     except Exception as e:

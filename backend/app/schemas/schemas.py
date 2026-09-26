@@ -1,18 +1,28 @@
+"""
+Pydantic schemas for Vigitra / Smart Traffic AI.
+Defines data validation and serialization models for request bodies and API responses.
+All output models use Pydantic V2 ConfigDict(from_attributes=True) for ORM compatibility.
+"""
+
 from datetime import datetime
 from typing import Optional, List, Any, Dict
-from pydantic import BaseModel, EmailStr
+from pydantic import BaseModel, ConfigDict, EmailStr, Field
 from app.models.models import RoleEnum, CongestionLevelEnum, IncidentStatusEnum, CameraStatusEnum
 
-# Token
+# ---------------------------------------------------------
+# Authentication & User Schemas
+# ---------------------------------------------------------
+
 class Token(BaseModel):
     access_token: str
     token_type: str
     user: "UserOut"
 
+
 class TokenData(BaseModel):
     username: Optional[str] = None
 
-# User
+
 class UserCreate(BaseModel):
     username: Optional[str] = None
     email: Optional[str] = None
@@ -23,13 +33,17 @@ class UserCreate(BaseModel):
     area_jurisdiction: Optional[str] = None
     mobile_number: Optional[str] = None
 
+
 class UserLogin(BaseModel):
     username: Optional[str] = None
     police_id: Optional[str] = None
     mobile_number: Optional[str] = None
     password: str
 
+
 class UserOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
     id: int
     username: str
     email: str
@@ -42,14 +56,15 @@ class UserOut(BaseModel):
     is_approved: bool = True
     created_at: datetime
 
-    class Config:
-        from_attributes = True
 
 class UserApprove(BaseModel):
     is_approved: bool
 
 
-# Intersection
+# ---------------------------------------------------------
+# Intersection & Road Schemas
+# ---------------------------------------------------------
+
 class IntersectionCreate(BaseModel):
     name: str
     location: str
@@ -59,7 +74,10 @@ class IntersectionCreate(BaseModel):
     num_approaches: int = 4
     approaches_config: Optional[List[Dict[str, Any]]] = None
 
+
 class IntersectionOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
     id: int
     name: str
     location: str
@@ -71,15 +89,28 @@ class IntersectionOut(BaseModel):
     approaches_config: Optional[List[Dict[str, Any]]] = None
     created_at: datetime
 
-    class Config:
-        from_attributes = True
 
 class JunctionConfigUpdate(BaseModel):
     num_approaches: int
     approaches: List[Dict[str, Any]]
 
 
-# Camera
+class RoadOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    name: str
+    source_camera_id: int
+    target_camera_id: int
+    distance_km: float
+    expected_travel_time_sec: float
+    direction: str
+
+
+# ---------------------------------------------------------
+# Camera & Stream Schemas
+# ---------------------------------------------------------
+
 class CameraCreate(BaseModel):
     name: str
     source_url: str
@@ -87,7 +118,10 @@ class CameraCreate(BaseModel):
     intersection_id: Optional[int] = None
     direction: str = "NORTH"
 
+
 class CameraOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
     id: int
     name: str
     source_url: str
@@ -98,24 +132,27 @@ class CameraOut(BaseModel):
     fps: float
     created_at: datetime
 
-    class Config:
-        from_attributes = True
 
-# Road
-class RoadOut(BaseModel):
-    id: int
-    name: str
-    source_camera_id: int
-    target_camera_id: int
-    distance_km: float
-    expected_travel_time_sec: float
-    direction: str
+class CameraUpdate(BaseModel):
+    name: Optional[str] = None
+    source_url: Optional[str] = None
+    source_type: Optional[str] = None
+    direction: Optional[str] = None
+    status: Optional[CameraStatusEnum] = None
+    fps: Optional[float] = None
 
-    class Config:
-        from_attributes = True
 
-# Signal
+class CameraStreamAction(BaseModel):
+    action: str  # start, stop, reconnect
+
+
+# ---------------------------------------------------------
+# Signal Control Schemas
+# ---------------------------------------------------------
+
 class SignalOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
     id: int
     intersection_id: int
     current_phase: str
@@ -126,8 +163,6 @@ class SignalOut(BaseModel):
     emergency_override: bool
     last_phase_change: datetime
 
-    class Config:
-        from_attributes = True
 
 class SignalUpdate(BaseModel):
     green_duration: Optional[int] = None
@@ -135,8 +170,14 @@ class SignalUpdate(BaseModel):
     is_adaptive: Optional[bool] = None
     current_phase: Optional[str] = None
 
-# Detection & Measurement
+
+# ---------------------------------------------------------
+# Detection & Measurement Schemas
+# ---------------------------------------------------------
+
 class TrafficMeasurementOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
     id: int
     camera_id: int
     intersection_id: Optional[int]
@@ -147,11 +188,14 @@ class TrafficMeasurementOut(BaseModel):
     congestion_level: CongestionLevelEnum
     timestamp: datetime
 
-    class Config:
-        from_attributes = True
 
-# Emergency & Incidents
+# ---------------------------------------------------------
+# Emergency & Incidents Schemas
+# ---------------------------------------------------------
+
 class EmergencyEventOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
     id: int
     vehicle_type: str
     camera_id: Optional[int]
@@ -161,10 +205,10 @@ class EmergencyEventOut(BaseModel):
     status: str
     detected_at: datetime
 
-    class Config:
-        from_attributes = True
 
 class IncidentOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
     id: int
     incident_type: str
     severity: str
@@ -175,11 +219,14 @@ class IncidentOut(BaseModel):
     description: Optional[str]
     detected_at: datetime
 
-    class Config:
-        from_attributes = True
 
-# Violation & ANPR
+# ---------------------------------------------------------
+# Violations & ANPR Schemas
+# ---------------------------------------------------------
+
 class ViolationOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
     id: int
     violation_type: str
     camera_id: int
@@ -189,10 +236,10 @@ class ViolationOut(BaseModel):
     status: str
     timestamp: datetime
 
-    class Config:
-        from_attributes = True
 
 class NumberPlateOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
     id: int
     plate_number: str
     confidence: float
@@ -201,11 +248,10 @@ class NumberPlateOut(BaseModel):
     image_path: Optional[str]
     timestamp: datetime
 
-    class Config:
-        from_attributes = True
 
-# Plate Sighting / Observation
 class PlateObservationOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
     id: int
     plate_number: str
     camera_id: int
@@ -219,16 +265,17 @@ class PlateObservationOut(BaseModel):
     lane: int
     direction: str
 
-    class Config:
-        from_attributes = True
 
-# Blacklist Watchlist & Directory Management
+# ---------------------------------------------------------
+# Blacklist & Directory Management Schemas
+# ---------------------------------------------------------
+
 class BlacklistCreate(BaseModel):
     plate: str
     reason: str
-    directory_type: Optional[str] = "SECURITY_WATCHLIST" # STOLEN_VEHICLES, SECURITY_WATCHLIST, CHALLAN_DEFAULTER, RTO_COMPLIANCE, VIP_WHITELIST
-    severity: Optional[str] = "CRITICAL" # CRITICAL, HIGH, MEDIUM, LOW
-    location: Optional[str] = None # Surveillance location / checkpoint provided
+    directory_type: Optional[str] = "SECURITY_WATCHLIST"
+    severity: Optional[str] = "CRITICAL"
+    location: Optional[str] = None
     vehicle_model: Optional[str] = None
     owner_name: Optional[str] = None
     fir_number: Optional[str] = None
@@ -236,7 +283,10 @@ class BlacklistCreate(BaseModel):
     auto_alert: Optional[bool] = True
     notes: Optional[str] = None
 
+
 class BlacklistOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
     id: int
     plate: str
     reason: str
@@ -259,12 +309,11 @@ class BlacklistOut(BaseModel):
     last_crossing_time: Optional[str] = None
     sighted: Optional[bool] = False
 
-    class Config:
-        from_attributes = True
 
-# Alias for semantic directory schemas
+# Aliases for semantic directory schemas
 DirectoryEntryCreate = BlacklistCreate
 DirectoryEntryOut = BlacklistOut
+
 
 class DirectoryEntryUpdate(BaseModel):
     reason: Optional[str] = None
@@ -279,21 +328,26 @@ class DirectoryEntryUpdate(BaseModel):
     status: Optional[str] = None
     notes: Optional[str] = None
 
-# Number Plate Scan & Directory Verification Schemas
+
+# ---------------------------------------------------------
+# Plate Scan & Directory Verification Schemas
+# ---------------------------------------------------------
+
 class PlateScanCheckRequest(BaseModel):
     plate_number: Optional[str] = None
     image_base64: Optional[str] = None
     camera_id: Optional[int] = 1
     location: Optional[str] = "Main Surveillance Junction"
-    source: Optional[str] = "MANUAL_SCAN" # MANUAL_SCAN, LIVE_CCTV, MOBILE_FIELD, FIELD_PHOTO
+    source: Optional[str] = "MANUAL_SCAN"
     auto_create_alert: Optional[bool] = True
+
 
 class PlateScanCheckResponse(BaseModel):
     plate_number: str
-    detected_via: str # OCR or DIRECT_INPUT
+    detected_via: str
     confidence: float
     directory_matched: bool
-    matched_directory_type: Optional[str] = None # STOLEN_VEHICLES, SECURITY_WATCHLIST, CHALLAN_DEFAULTER, RTO_COMPLIANCE, VIP_WHITELIST
+    matched_directory_type: Optional[str] = None
     severity: str
     match_reason: Optional[str] = None
     directory_entry: Optional[Dict[str, Any]] = None
@@ -305,8 +359,14 @@ class PlateScanCheckResponse(BaseModel):
     sightings_count: int = 1
     location: Optional[str] = None
 
-# Route Anomaly
+
+# ---------------------------------------------------------
+# Route Anomaly & Alerts Schemas
+# ---------------------------------------------------------
+
 class RouteAnomalyOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
     id: int
     plate_number: str
     reason: str
@@ -315,11 +375,10 @@ class RouteAnomalyOut(BaseModel):
     expected_route: Optional[str]
     timestamp: datetime
 
-    class Config:
-        from_attributes = True
 
-# Alert Schema
 class AlertOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
     id: int
     type: str
     severity: str
@@ -331,16 +390,20 @@ class AlertOut(BaseModel):
     status: str
     confidence: float
 
-    class Config:
-        from_attributes = True
 
 class AlertStatusUpdate(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
     status: str
 
-    class Config:
-        from_attributes = True
+
+# ---------------------------------------------------------
+# AI & Prediction Schemas
+# ---------------------------------------------------------
 
 class PredictionOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
     id: int
     intersection_id: int
     horizon_minutes: int
@@ -353,10 +416,10 @@ class PredictionOut(BaseModel):
     created_at: datetime
     explanation: Optional[Any] = None
 
-    class Config:
-        from_attributes = True
 
 class AgentDecisionOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
     id: int
     agent_name: str
     input_summary: Optional[Any]
@@ -367,12 +430,10 @@ class AgentDecisionOut(BaseModel):
     result: Optional[str]
     timestamp: datetime
 
-    class Config:
-        from_attributes = True
 
-# AI Assistant Query
 class AIQueryRequest(BaseModel):
     query: str
+
 
 class AIQueryResponse(BaseModel):
     query: str
@@ -381,24 +442,15 @@ class AIQueryResponse(BaseModel):
     context_data: Optional[Any] = None
     timestamp: datetime
 
-# Camera Update & Stream Actions
-class CameraUpdate(BaseModel):
-    name: Optional[str] = None
-    source_url: Optional[str] = None
-    source_type: Optional[str] = None
-    direction: Optional[str] = None
-    status: Optional[CameraStatusEnum] = None
-    fps: Optional[float] = None
 
-class CameraStreamAction(BaseModel):
-    action: str  # start, stop, reconnect
-
-# AI Feedback Loops
 class AIFeedbackCreate(BaseModel):
     observation_id: int
     corrected_plate: str
 
+
 class AIFeedbackOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
     id: int
     observation_id: int
     original_plate: str
@@ -407,10 +459,7 @@ class AIFeedbackOut(BaseModel):
     timestamp: datetime
     applied: bool
 
-    class Config:
-        from_attributes = True
 
-# AI Model Performance Metrics
 class AIModelPerformanceOut(BaseModel):
     exact_accuracy: float
     char_accuracy: float
@@ -422,11 +471,12 @@ class AIModelPerformanceOut(BaseModel):
     condition_breakdown: Any
     timestamp: datetime
 
-# Scenario Simulation & What-If
+
 class ScenarioSimulationInput(BaseModel):
     intersection_id: int
     closed_lanes: int = 0
     green_time_delta: int = 0
+
 
 class ScenarioSimulationOutput(BaseModel):
     intersection_id: int
@@ -437,15 +487,13 @@ class ScenarioSimulationOutput(BaseModel):
     average_travel_time_before_sec: float
     average_travel_time_after_sec: float
 
-# Weather Observation
+
 class WeatherObservationOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
     id: int
     condition: str
     temperature_c: float
     visibility_km: float
     precipitation_mm: float
     timestamp: datetime
-
-    class Config:
-        from_attributes = True
-

@@ -425,7 +425,7 @@ export const MobileCamera: React.FC = () => {
           const videoBlob = new Blob(recordedChunksRef.current, { type: finalMime });
           const blobUrl = URL.createObjectURL(videoBlob);
           const ext = finalMime.includes('mp4') ? '.mp4' : '.webm';
-          const timestampStr = new Date().toISOString().replace(/[-:T.]/g, '').slice(0, 14);
+          const timestampStr = new Date().toISOString().replace(/[^0-9]/g, '').slice(0, 14);
           const localRecordId = `REC-MOB-${timestampStr}`;
 
           const locString = (gpsReading && locationStatus === 'AVAILABLE')

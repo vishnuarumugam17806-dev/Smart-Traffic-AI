@@ -17,7 +17,7 @@ interface CameraCanvasFeedProps {
 
 export type AspectRatioMode = 'AUTO' | '16:9' | '4:3' | '16:10' | '3:4';
 
-export const CameraCanvasFeed: React.FC<CameraCanvasFeedProps> = ({
+const CameraCanvasFeedComponent: React.FC<CameraCanvasFeedProps> = ({
   cameraName = 'CCTV-01 Anna Salai North',
   sourceUrl,
   sourceType = 'REAL',
@@ -53,10 +53,10 @@ export const CameraCanvasFeed: React.FC<CameraCanvasFeedProps> = ({
     : 'aspect-video';
 
   // Sync tab with overlay state
-  const handleTabChange = (tab: 'REAL' | 'OVERLAY') => {
+  const handleTabChange = React.useCallback((tab: 'REAL' | 'OVERLAY') => {
     setActiveTab(tab);
     setShowOverlays(tab === 'OVERLAY');
-  };
+  }, []);
 
   // Resolve video source if provided
   let resolvedVideoUrl: string | null = null;
@@ -937,3 +937,6 @@ export const CameraCanvasFeed: React.FC<CameraCanvasFeedProps> = ({
     </div>
   );
 };
+
+export const CameraCanvasFeed = React.memo(CameraCanvasFeedComponent);
+

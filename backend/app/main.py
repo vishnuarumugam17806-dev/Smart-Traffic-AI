@@ -524,3 +524,6 @@ async def websocket_endpoint(websocket: WebSocket):
             await websocket.send_json({"event": "PONG", "received": data})
     except WebSocketDisconnect:
         ws_manager.disconnect(websocket)
+    except Exception as ws_err:
+        logger.debug("WebSocket connection error: %s", ws_err)
+        ws_manager.disconnect(websocket)

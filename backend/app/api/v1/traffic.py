@@ -1,4 +1,5 @@
 import os
+import asyncio
 import hashlib
 import random
 import logging
@@ -1597,8 +1598,31 @@ async def ingest_mobile_frame(stream_in: FrameStreamInput, db: Session = Depends
         logger.warning(f"Note on device sync: {dbe}")
 
     # SECTION 4 & 5: VEHICLE-FIRST ANPR PIPELINE
-    # Step 1: Detect vehicles in frame. If NO vehicle is present, DO NOT perform ANPR!
-    detected_vehicles = traffic_vision_processor.detect_vehicles(frame)
+    # Offload CPU-bound vehicle detection and plate crop extraction to worker threadpool
+    def _process_frame_vision(target_frame):
+        v_list = traffic_vision_processor.detect_vehicles(target_frame)
+        if not v_list:
+            return v_list, None, "car", 0.85
+        best_cand = None
+        best_type = "car"
+        best_conf = 0.85
+        h_f, w_f = target_frame.shape[:2]
+        for v in v_list:
+            vx1, vy1, vx2, vy2 = v["bbox"]
+            v_crop = target_frame[max(0, vy1):min(h_f, vy2), max(0, vx1):min(w_f, vx2)]
+            if v_crop.size > 0:
+                plate_res = anpr_engine.extract_plate(v_crop)
+                if plate_res and plate_res.get("plate_number"):
+                    best_cand = plate_res
+                    best_type = v.get("label", "car")
+                    best_conf = v.get("confidence", 0.85)
+                    break
+        return v_list, best_cand, best_type, best_conf
+
+    detected_vehicles, best_candidate_result, best_vehicle_type, best_vehicle_conf = await asyncio.to_thread(
+        _process_frame_vision, frame
+    )
+
     if not detected_vehicles:
         mobile_manager.update_plate_detection(stream_in.device_id, None)
         return {
@@ -1613,23 +1637,6 @@ async def ingest_mobile_frame(stream_in: FrameStreamInput, db: Session = Depends
             "message": "Vehicle detector: No vehicle detected in frame (ANPR skipped)",
             "timestamp": datetime.now(timezone.utc).isoformat()
         }
-
-    # Step 2: Search for number-plate region inside or directly adjacent to detected vehicle bounding boxes
-    h_f, w_f = frame.shape[:2]
-    best_candidate_result = None
-    best_vehicle_type = "car"
-    best_vehicle_conf = 0.85
-
-    for v in detected_vehicles:
-        vx1, vy1, vx2, vy2 = v["bbox"]
-        v_crop = frame[max(0, vy1):min(h_f, vy2), max(0, vx1):min(w_f, vx2)]
-        if v_crop.size > 0:
-            plate_res = anpr_engine.extract_plate(v_crop)
-            if plate_res and plate_res.get("plate_number"):
-                best_candidate_result = plate_res
-                best_vehicle_type = v.get("label", "car")
-                best_vehicle_conf = v.get("confidence", 0.85)
-                break
 
     # If no readable plate detected inside any vehicle
     if not best_candidate_result or not best_candidate_result.get("plate_number"):
@@ -2886,23 +2893,25 @@ async def scan_and_check_plate(scan_in: PlateScanCheckRequest, db: Session = Dep
     confidence = 0.95
     detected_via = scan_in.source or "MANUAL_SCAN"
 
-    # If image base64 provided, run ANPR OCR extraction
+    # If image base64 provided, run ANPR OCR extraction off the main event loop
     if scan_in.image_base64:
-        try:
-            raw_b64 = scan_in.image_base64
-            if "," in raw_b64:
-                raw_b64 = raw_b64.split(",")[1]
-            img_bytes = base64.b64decode(raw_b64)
-            nparr = np.frombuffer(img_bytes, np.uint8)
-            img = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
-            if img is not None:
-                plate_res = anpr_engine.extract_plate(img)
-                if plate_res and plate_res.get("plate_number"):
-                    target_plate = plate_res["plate_number"]
-                    confidence = round(plate_res.get("final_confidence", 0.94), 2)
-                    detected_via = "IMAGE_OCR_EXTRACTION"
-        except Exception as ocre:
-            logger.warning(f"ANPR image decode fallback: {ocre}")
+        def _extract_plate_from_b64(raw_b64_str: str):
+            try:
+                clean_b64 = raw_b64_str.split(",")[1] if "," in raw_b64_str else raw_b64_str
+                img_bytes = base64.b64decode(clean_b64)
+                nparr = np.frombuffer(img_bytes, np.uint8)
+                img = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
+                if img is not None:
+                    return anpr_engine.extract_plate(img)
+            except Exception as ocre:
+                logger.warning(f"ANPR image decode fallback: {ocre}")
+            return None
+
+        plate_res = await asyncio.to_thread(_extract_plate_from_b64, scan_in.image_base64)
+        if plate_res and plate_res.get("plate_number"):
+            target_plate = plate_res["plate_number"]
+            confidence = round(plate_res.get("final_confidence", 0.94), 2)
+            detected_via = "IMAGE_OCR_EXTRACTION"
 
     if not target_plate:
         raise HTTPException(

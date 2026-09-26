@@ -1,7 +1,7 @@
 import os
-from typing import List, Optional
+from typing import List, Optional, Any
 from dotenv import load_dotenv
-# pyrefly: ignore [missing-import]
+from pydantic import field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 _env_backend_path = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", ".env"))
@@ -55,7 +55,8 @@ class Settings(BaseSettings):
     REDIS_URL: str = "redis://localhost:6379/0"
     RABBITMQ_URL: str = "amqp://guest:guest@localhost:5672/"
 
-    # CORS
+    # CORS Configuration
+    # NOTE: In production environments, replace wildcard "*" with specific trusted origins via BACKEND_CORS_ORIGINS env var.
     BACKEND_CORS_ORIGINS: List[str] = [
         "http://localhost",
         "http://localhost:3000",
@@ -65,6 +66,19 @@ class Settings(BaseSettings):
         "https://vigitra-frontend.onrender.com",
         "*"
     ]
+
+    @field_validator("BACKEND_CORS_ORIGINS", mode="before")
+    @classmethod
+    def parse_cors_origins(cls, v: Any) -> List[str]:
+        if isinstance(v, str):
+            if v.startswith("[") and v.endswith("]"):
+                import json
+                try:
+                    return json.loads(v)
+                except Exception:
+                    pass
+            return [origin.strip() for origin in v.split(",") if origin.strip()]
+        return v
 
     # Signal Safety Boundaries
     MIN_GREEN_TIME: int = 15

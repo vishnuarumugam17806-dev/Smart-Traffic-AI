@@ -41,15 +41,18 @@ class AdaptiveSignalOptimizer:
 
     def normalize_queue(self, queue_length: float) -> float:
         """Normalizes queue length to [0.0, 1.0] using configured MAX_EXPECTED_QUEUE."""
-        return min(1.0, max(0.0, float(queue_length) / float(settings.MAX_EXPECTED_QUEUE)))
+        scale = max(1.0, float(getattr(settings, "MAX_EXPECTED_QUEUE", 50)))
+        return min(1.0, max(0.0, float(queue_length) / scale))
 
     def normalize_vehicle_count(self, vehicle_count: float) -> float:
         """Normalizes vehicle count to [0.0, 1.0] using configured MAX_EXPECTED_VEHICLES."""
-        return min(1.0, max(0.0, float(vehicle_count) / float(settings.MAX_EXPECTED_VEHICLES)))
+        scale = max(1.0, float(getattr(settings, "MAX_EXPECTED_VEHICLES", 60)))
+        return min(1.0, max(0.0, float(vehicle_count) / scale))
 
     def normalize_waiting_time(self, waiting_time: float) -> float:
         """Normalizes waiting time to [0.0, 1.0] using MAX_ALLOWED_WAIT."""
-        return min(1.0, max(0.0, float(waiting_time) / float(settings.MAX_ALLOWED_WAIT)))
+        scale = max(1.0, float(getattr(settings, "MAX_ALLOWED_WAIT", 120.0)))
+        return min(1.0, max(0.0, float(waiting_time) / scale))
 
     def normalize_density(self, density: Any) -> float:
         """Maps categorical density or percentage to normalized [0.0, 1.0]."""
@@ -91,7 +94,8 @@ class AdaptiveSignalOptimizer:
 
     def calculate_waiting_fairness_bonus(self, waiting_time: float) -> float:
         """Gradually increases priority as waiting time grows, preventing approach neglect."""
-        ratio = min(1.0, max(0.0, float(waiting_time) / float(settings.MAX_ALLOWED_WAIT)))
+        scale = max(1.0, float(getattr(settings, "MAX_ALLOWED_WAIT", 120.0)))
+        ratio = min(1.0, max(0.0, float(waiting_time) / scale))
         return round(ratio * settings.WAITING_BONUS_WEIGHT, 4)
 
     def calculate_starvation_prevention_bonus(self, waiting_time: float) -> float:
@@ -100,9 +104,10 @@ class AdaptiveSignalOptimizer:
         If an approach has waited >= 50% of MAX_ALLOWED_WAIT, exponentially escalates priority
         so that it is guaranteed service regardless of competing traffic volume.
         """
-        threshold = settings.MAX_ALLOWED_WAIT * 0.50
+        max_wait = max(1.0, float(getattr(settings, "MAX_ALLOWED_WAIT", 120.0)))
+        threshold = max_wait * 0.50
         if waiting_time > threshold:
-            excess = (waiting_time - threshold) / (settings.MAX_ALLOWED_WAIT - threshold + 1e-5)
+            excess = (waiting_time - threshold) / (max_wait - threshold + 1e-5)
             return round(min(1.5, max(0.0, excess * 1.5)), 4)
         return 0.0
 

@@ -1,10 +1,18 @@
-export type Role = 'ADMIN' | 'OPERATOR' | 'ANALYST' | 'VIEWER';
+/**
+ * Core TypeScript type definitions for Vigitra / Smart Traffic AI.
+ * Single source of truth for API models, WebSocket live update payloads,
+ * junction approaches, and compliance records.
+ */
+
+export type Role = 'ADMIN' | 'OPERATOR' | 'ANALYST' | 'VIEWER' | 'FIELD_OPERATOR';
 
 export type CongestionLevel = 'LOW' | 'MODERATE' | 'HIGH' | 'SEVERE';
 
 export type CameraStatus = 'LIVE' | 'SIMULATION' | 'OFFLINE' | 'DEGRADED' | 'ONLINE' | 'MAINTENANCE';
 
 export type IncidentStatus = 'DETECTED' | 'INVESTIGATING' | 'CONFIRMED' | 'RESOLVED';
+
+export type AlertSeverity = 'CRITICAL' | 'HIGH' | 'MEDIUM' | 'LOW';
 
 export interface User {
   id: number;
@@ -20,6 +28,14 @@ export interface User {
   created_at: string;
 }
 
+export interface ApproachConfig {
+  id?: string;
+  name: string;
+  direction: string;
+  camera_id?: number | null;
+  lanes?: number;
+}
+
 export interface Intersection {
   id: number;
   name: string;
@@ -29,7 +45,7 @@ export interface Intersection {
   current_status: CongestionLevel;
   total_lanes: number;
   num_approaches?: number;
-  approaches_config?: any[];
+  approaches_config?: ApproachConfig[];
   created_at?: string;
 }
 
@@ -106,7 +122,7 @@ export interface Violation {
 export interface Alert {
   id: number;
   type: string;
-  severity: 'CRITICAL' | 'HIGH' | 'MEDIUM' | 'LOW';
+  severity: AlertSeverity;
   timestamp: string;
   camera_id?: number | null;
   location?: string | null;
@@ -143,7 +159,7 @@ export interface TrafficPrediction {
 export interface AgentDecision {
   id: number;
   agent_name: string;
-  input_summary?: any;
+  input_summary?: Record<string, unknown>;
   decision: string;
   reasoning: string;
   confidence: number;
@@ -156,7 +172,7 @@ export interface AIQueryResponse {
   query: string;
   answer: string;
   sources: string[];
-  context_data?: any;
+  context_data?: Record<string, unknown>;
   timestamp: string;
 }
 
@@ -165,4 +181,66 @@ export interface SystemHealth {
   services: Record<string, string>;
   system_load: string;
   uptime: string;
+}
+
+export interface TrackedVehicle {
+  track_id: number;
+  label: string;
+  bbox: [number, number, number, number];
+  confidence: number;
+  speed_kmh: number;
+  direction?: string;
+  lane?: number;
+  plate_info?: {
+    plate_number: string;
+    final_confidence?: number;
+    ocr_confidence?: number;
+  } | null;
+}
+
+export interface LiveTrafficUpdate {
+  event: string;
+  camera_id?: number;
+  intersection_id?: number;
+  total_vehicles?: number;
+  vehicle_count?: number;
+  queue_length?: number;
+  occupancy_percentage?: number;
+  density_state?: CongestionLevel | string;
+  average_speed?: number;
+  fps?: number;
+  camera_health?: string;
+  alert?: Alert;
+  step?: number;
+  description?: string;
+  status?: string;
+  tracked_objects?: TrackedVehicle[];
+  signal?: {
+    current_phase: string;
+    state?: string;
+    countdown?: number;
+    green_duration?: number;
+  };
+  timestamp?: string;
+  [key: string]: any;
+}
+
+export interface DirectoryEntry {
+  id: number;
+  plate: string;
+  reason: string;
+  directory_type: string;
+  severity: AlertSeverity;
+  location?: string | null;
+  vehicle_model?: string | null;
+  owner_name?: string | null;
+  fir_number?: string | null;
+  police_station?: string | null;
+  auto_alert?: boolean;
+  scan_count?: number;
+  last_scanned_at?: string | null;
+  created_by?: string;
+  created_at?: string;
+  status?: string;
+  notes?: string | null;
 }

@@ -31,6 +31,7 @@ import {
 import { apiClient, resolveVideoUrl, resolveImageUrl } from '../api/client';
 import { Link } from 'react-router-dom';
 import { useWebLocation } from '../hooks/useWebLocation';
+import { createGoogleMapsEmbedUrl } from '../utils/mapProviders';
 
 interface RecordItem {
   id: number;
@@ -827,11 +828,11 @@ export const RecordedVideo: React.FC = () => {
                           loading="lazy"
                           allowFullScreen
                           referrerPolicy="no-referrer-when-downgrade"
-                          src={
-                            googleApiKey
-                              ? `https://www.google.com/maps/embed/v1/place?key=${googleApiKey}&q=${selectedRecord.latitude || coords?.latitude || 13.0827},${selectedRecord.longitude || coords?.longitude || 80.2707}&zoom=16&maptype=${mapEmbedType}`
-                              : `https://maps.google.com/maps?q=${selectedRecord.latitude || coords?.latitude || 13.0827},${selectedRecord.longitude || coords?.longitude || 80.2707}&hl=en&z=15&output=embed`
-                          }
+                          src={createGoogleMapsEmbedUrl(
+                            selectedRecord.latitude || coords?.latitude || 13.0827,
+                            selectedRecord.longitude || coords?.longitude || 80.2707,
+                            mapEmbedType
+                          )}
                         />
                       </div>
                     </div>
@@ -1019,11 +1020,11 @@ export const RecordedVideo: React.FC = () => {
                         loading="lazy"
                         allowFullScreen
                         referrerPolicy="no-referrer-when-downgrade"
-                        src={
-                          googleApiKey
-                            ? `https://www.google.com/maps/embed/v1/place?key=${googleApiKey}&q=${selectedRecord.latitude || coords?.latitude || 13.0827},${selectedRecord.longitude || coords?.longitude || 80.2707}&zoom=16&maptype=${mapEmbedType}`
-                            : `https://maps.google.com/maps?q=${selectedRecord.latitude || coords?.latitude || 13.0827},${selectedRecord.longitude || coords?.longitude || 80.2707}&hl=en&z=15&output=embed`
-                        }
+                        src={createGoogleMapsEmbedUrl(
+                          selectedRecord.latitude || coords?.latitude || 13.0827,
+                          selectedRecord.longitude || coords?.longitude || 80.2707,
+                          mapEmbedType
+                        )}
                       />
                     </div>
                   </div>

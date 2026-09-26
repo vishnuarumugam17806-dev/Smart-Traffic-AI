@@ -125,9 +125,17 @@ class VehicleComplianceService:
             }
             return unclear_result
 
-        # 3. Retrieve vehicle records from active provider (Demo or Parivahan)
+        # 3. Retrieve vehicle records from active provider (Demo or Parivahan with fallback)
         provider = self.get_active_provider()
         vehicle_raw = provider.get_vehicle_details(clean_plate)
+
+        # Resilient fallback: if Parivahan is active but returns no data or fails, query Demo registry
+        if not vehicle_raw and provider != self.demo_provider:
+            logger.info(
+                "[VehicleComplianceService] Primary provider returned no data for %s; attempting fallback to Demo provider.",
+                clean_plate,
+            )
+            vehicle_raw = self.demo_provider.get_vehicle_details(clean_plate)
 
         # Handle provider failure or unregistered plate
         if not vehicle_raw:

@@ -4,18 +4,7 @@ import { ShieldAlert, Plus, Trash2, Bell, Shield, Lock, Radio, MapPin, Navigatio
 import { apiClient } from '../api/client';
 import { useStore } from '../store/useStore';
 
-interface Alert {
-  id: number;
-  type: string;
-  severity: string;
-  timestamp: string;
-  camera_id: number | null;
-  location: string | null;
-  vehicle_plate: string | null;
-  message: string;
-  status: string;
-  confidence: number;
-}
+import { Alert } from '../types';
 
 interface WatchlistEntry {
   id: number;
