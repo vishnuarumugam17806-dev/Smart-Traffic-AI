@@ -79,14 +79,48 @@ const getJunctionSvg = (status: string, isSelected: boolean) => {
   </svg>`;
 };
 
-const getSignalSvg = (phase: string) => {
-  const isGreen = phase.toUpperCase().includes('GREEN') || phase.toUpperCase().includes('NORTH') || phase === 'AUTO';
-  const color = isGreen ? '#10B981' : '#EF4444';
-  return `<svg xmlns="http://www.w3.org/2000/svg" width="26" height="26" viewBox="0 0 26 26">
-    <rect x="5" y="3" width="16" height="20" rx="4" fill="#0F172A" stroke="#475569" stroke-width="1.5"/>
-    <circle cx="13" cy="8" r="3" fill="${color === '#EF4444' ? '#EF4444' : '#334155'}"/>
-    <circle cx="13" cy="13" r="3" fill="#334155"/>
-    <circle cx="13" cy="18" r="3" fill="${color === '#10B981' ? '#10B981' : '#334155'}"/>
+export interface NetworkSignalState {
+  id: number;
+  intersection_id: number;
+  current_phase: string;
+  state: 'GREEN' | 'YELLOW' | 'RED';
+  active_approach: string;
+  phase_index: number;
+  countdown: number;
+  green_duration: number;
+  is_adaptive: boolean;
+}
+
+export const NETWORK_SIGNAL_PHASES = [
+  { phase: 'NORTH_SOUTH_GREEN', state: 'GREEN' as const, approach: 'North-South Arterial', duration: 25 },
+  { phase: 'NORTH_SOUTH_YELLOW', state: 'YELLOW' as const, approach: 'North-South Clearance', duration: 4 },
+  { phase: 'EAST_WEST_GREEN', state: 'GREEN' as const, approach: 'East-West Crossway', duration: 22 },
+  { phase: 'EAST_WEST_YELLOW', state: 'YELLOW' as const, approach: 'East-West Clearance', duration: 4 }
+];
+
+const getSignalSvg = (phase: string, state: 'GREEN' | 'YELLOW' | 'RED' = 'GREEN') => {
+  const p = (phase || '').toUpperCase();
+  const s = (state || '').toUpperCase();
+
+  const isRed = s === 'RED' || p.includes('RED') || p.includes('STOP');
+  const isYellow = s === 'YELLOW' || p.includes('YELLOW') || p.includes('CLEARANCE');
+  const isGreen = !isRed && !isYellow;
+
+  const redFill = isRed ? '#EF4444' : '#1E293B';
+  const yellowFill = isYellow ? '#FBBF24' : '#1E293B';
+  const greenFill = isGreen ? '#10B981' : '#1E293B';
+
+  const glowColor = isRed ? '#EF4444' : isYellow ? '#FBBF24' : '#10B981';
+
+  return `<svg xmlns="http://www.w3.org/2000/svg" width="30" height="30" viewBox="0 0 30 30">
+    <circle cx="15" cy="15" r="14" fill="${glowColor}" opacity="0.32"/>
+    <rect x="7" y="3" width="16" height="24" rx="4" fill="#0F172A" stroke="#475569" stroke-width="1.8"/>
+    <circle cx="15" cy="8" r="3.2" fill="${redFill}"/>
+    ${isRed ? '<circle cx="15" cy="8" r="1.3" fill="#FFFFFF" opacity="0.8"/>' : ''}
+    <circle cx="15" cy="15" r="3.2" fill="${yellowFill}"/>
+    ${isYellow ? '<circle cx="15" cy="15" r="1.3" fill="#FFFFFF" opacity="0.8"/>' : ''}
+    <circle cx="15" cy="22" r="3.2" fill="${greenFill}"/>
+    ${isGreen ? '<circle cx="15" cy="22" r="1.3" fill="#FFFFFF" opacity="0.8"/>' : ''}
   </svg>`;
 };
 
@@ -136,6 +170,7 @@ export const GISMapComponent: React.FC<GISMapProps> = ({
   const googleMapRef = useRef<any>(null);
   const googleTrafficLayerRef = useRef<any>(null);
   const googleMarkersRef = useRef<any[]>([]);
+  const googleSignalMarkersRef = useRef<any[]>([]);
   const googleCirclesRef = useRef<any[]>([]);
   const googlePolylinesRef = useRef<any[]>([]);
 
@@ -143,6 +178,7 @@ export const GISMapComponent: React.FC<GISMapProps> = ({
   const leafletMapRef = useRef<any>(null);
   const leafletTileLayerRef = useRef<any>(null);
   const leafletMarkersRef = useRef<any[]>([]);
+  const leafletSignalMarkersRef = useRef<any[]>([]);
   const leafletCirclesRef = useRef<any[]>([]);
   const leafletPolylinesRef = useRef<any[]>([]);
 
@@ -153,7 +189,7 @@ export const GISMapComponent: React.FC<GISMapProps> = ({
   const activeLiveUpdate = useStore((state) => state.activeLiveUpdate);
   const [intersections, setIntersections] = useState<any[]>([]);
   const [cameras, setCameras] = useState<any[]>([]);
-  const [signals, setSignals] = useState<any[]>([]);
+  const [signals, setSignals] = useState<NetworkSignalState[]>([]);
   const [measurements, setMeasurements] = useState<Record<number, any>>({});
   const [devices, setDevices] = useState<any[]>([]);
   const [alerts, setAlerts] = useState<any[]>([]);
@@ -199,9 +235,33 @@ export const GISMapComponent: React.FC<GISMapProps> = ({
         apiClient.get('/roads').catch(() => ({ data: [] }))
       ]);
 
-      if (Array.isArray(intRes.data)) setIntersections(intRes.data);
+      if (Array.isArray(intRes.data)) {
+        setIntersections(intRes.data);
+
+        // Seed dynamic signals across network intersections with staggered phase offsets
+        const sigData = Array.isArray(sigRes.data) ? sigRes.data : [];
+        const networkSignals: NetworkSignalState[] = intRes.data.map((inter: any, idx: number) => {
+          const existing = sigData.find((s: any) => s.intersection_id === inter.id);
+          const initialPhaseIdx = (idx * 3) % NETWORK_SIGNAL_PHASES.length;
+          const initialCountdown = ((idx * 7) % 22) + 4;
+          const phaseCfg = NETWORK_SIGNAL_PHASES[initialPhaseIdx];
+
+          return {
+            id: existing?.id || inter.id * 100,
+            intersection_id: inter.id,
+            current_phase: existing?.current_phase || phaseCfg.phase,
+            state: phaseCfg.state,
+            active_approach: phaseCfg.approach,
+            phase_index: initialPhaseIdx,
+            countdown: initialCountdown,
+            green_duration: existing?.green_duration || 25,
+            is_adaptive: existing?.is_adaptive ?? true
+          };
+        });
+        setSignals(networkSignals);
+      }
+
       if (Array.isArray(camRes.data)) setCameras(camRes.data);
-      if (Array.isArray(sigRes.data)) setSignals(sigRes.data);
       if (Array.isArray(devRes.data)) setDevices(devRes.data);
       if (Array.isArray(alertRes.data)) setAlerts(alertRes.data);
       if (Array.isArray(roadRes.data)) setRoads(roadRes.data);
@@ -223,6 +283,40 @@ export const GISMapComponent: React.FC<GISMapProps> = ({
 
   useEffect(() => {
     fetchAllData();
+  }, []);
+
+  // Dynamic Network Signal Cycling Engine (periodically transitions signals across the network)
+  useEffect(() => {
+    const timer = setInterval(() => {
+      setSignals((prevSignals) => {
+        if (!prevSignals || prevSignals.length === 0) return prevSignals;
+
+        return prevSignals.map((sig) => {
+          const nextCountdown = (sig.countdown || 10) - 1;
+
+          if (nextCountdown <= 0) {
+            const nextIdx = ((sig.phase_index ?? 0) + 1) % NETWORK_SIGNAL_PHASES.length;
+            const nextPhaseCfg = NETWORK_SIGNAL_PHASES[nextIdx];
+
+            return {
+              ...sig,
+              phase_index: nextIdx,
+              current_phase: nextPhaseCfg.phase,
+              state: nextPhaseCfg.state,
+              active_approach: nextPhaseCfg.approach,
+              countdown: nextPhaseCfg.duration
+            };
+          }
+
+          return {
+            ...sig,
+            countdown: nextCountdown
+          };
+        });
+      });
+    }, 1000);
+
+    return () => clearInterval(timer);
   }, []);
 
   // Update data freshness age counter every second
@@ -265,6 +359,21 @@ export const GISMapComponent: React.FC<GISMapProps> = ({
           )
         );
       }
+    } else if (activeLiveUpdate.event === 'SIGNAL_STATE_CHANGED' && activeLiveUpdate.intersection_id) {
+      const { intersection_id, state, active_phase, active_approach, countdown } = activeLiveUpdate;
+      setSignals((prev) =>
+        prev.map((s) =>
+          s.intersection_id === intersection_id
+            ? {
+                ...s,
+                state: (state === 'YELLOW' ? 'YELLOW' : state === 'RED' ? 'RED' : 'GREEN'),
+                current_phase: active_phase || s.current_phase,
+                active_approach: active_approach || s.active_approach,
+                countdown: countdown !== undefined ? countdown : s.countdown
+              }
+            : s
+        )
+      );
     } else if (activeLiveUpdate.event === 'ALERT_CREATED' && activeLiveUpdate.alert) {
       setAlerts((prev) => [activeLiveUpdate.alert, ...prev]);
     } else if (activeLiveUpdate.event === 'DEVICE_LOCATION_UPDATE' && activeLiveUpdate.device) {
@@ -444,7 +553,6 @@ export const GISMapComponent: React.FC<GISMapProps> = ({
     mapEngine,
     intersections,
     cameras,
-    signals,
     measurements,
     devices,
     alerts,
@@ -458,6 +566,8 @@ export const GISMapComponent: React.FC<GISMapProps> = ({
   const clearGoogleOverlays = () => {
     googleMarkersRef.current.forEach((m) => m.setMap(null));
     googleMarkersRef.current = [];
+    googleSignalMarkersRef.current.forEach((m) => m.setMap(null));
+    googleSignalMarkersRef.current = [];
     googleCirclesRef.current.forEach((c) => c.setMap(null));
     googleCirclesRef.current = [];
     googlePolylinesRef.current.forEach((p) => p.setMap(null));
@@ -470,6 +580,8 @@ export const GISMapComponent: React.FC<GISMapProps> = ({
     if (!map) return;
     leafletMarkersRef.current.forEach((m) => map.removeLayer(m));
     leafletMarkersRef.current = [];
+    leafletSignalMarkersRef.current.forEach((m) => map.removeLayer(m));
+    leafletSignalMarkersRef.current = [];
     leafletCirclesRef.current.forEach((c) => map.removeLayer(c));
     leafletCirclesRef.current = [];
     leafletPolylinesRef.current.forEach((p) => map.removeLayer(p));
@@ -581,30 +693,7 @@ export const GISMapComponent: React.FC<GISMapProps> = ({
       });
     }
 
-    // 4. Traffic Signal Status Indicators (Section 8)
-    if (layers.signals) {
-      signals.forEach((sig) => {
-        const inter = intersections.find((i) => i.id === sig.intersection_id);
-        if (!inter || inter.latitude === undefined || inter.longitude === undefined) return;
-
-        const offsetLat = inter.latitude - 0.00045;
-        const offsetLng = inter.longitude + 0.00045;
-
-        const marker = new google.maps.Marker({
-          position: { lat: offsetLat, lng: offsetLng },
-          map: map,
-          title: `Signal: ${inter.name} (${sig.current_phase || 'AUTO'})`,
-          icon: createSvgIcon(getSignalSvg(sig.current_phase || 'GREEN'), 24, 24),
-          zIndex: 22
-        });
-
-        marker.addListener('click', () => {
-          setSelectedIntersectionPopup(inter);
-        });
-
-        googleMarkersRef.current.push(marker);
-      });
-    }
+    // 4. Traffic Signal Status Indicators: Managed dynamically by dedicated signal updater effect below to animate phase cycles smoothly without base tile redrawing
 
     // 5. Mobile Device Locations (Section 10)
     if (layers.mobileDevices) {
@@ -874,6 +963,76 @@ export const GISMapComponent: React.FC<GISMapProps> = ({
       map.fitBounds(polyline.getBounds(), { padding: [40, 40] });
     }
   };
+
+  // 4. Dedicated Network Signal Dynamic Updater (Google Maps & Leaflet)
+  // Dynamically cycles signal phase lights across the network without redrawing base layers or tiles
+  useEffect(() => {
+    if (!mapLoaded) return;
+
+    if (mapEngine === 'google' && googleMapRef.current && (window as any).google?.maps) {
+      const google = (window as any).google;
+      const map = googleMapRef.current;
+
+      // Clean up previous signal markers
+      googleSignalMarkersRef.current.forEach((m) => m.setMap(null));
+      googleSignalMarkersRef.current = [];
+
+      if (layers.signals) {
+        signals.forEach((sig) => {
+          const inter = intersections.find((i) => i.id === sig.intersection_id);
+          if (!inter || inter.latitude === undefined || inter.longitude === undefined) return;
+
+          const offsetLat = inter.latitude - 0.00045;
+          const offsetLng = inter.longitude + 0.00045;
+
+          const marker = new google.maps.Marker({
+            position: { lat: offsetLat, lng: offsetLng },
+            map: map,
+            title: `Signal: ${inter.name} [${sig.state}] ${sig.active_approach || sig.current_phase} (${sig.countdown}s remaining)`,
+            icon: createSvgIcon(getSignalSvg(sig.current_phase, sig.state), 30, 30),
+            zIndex: 32
+          });
+
+          marker.addListener('click', () => {
+            setSelectedIntersectionPopup(inter);
+          });
+
+          googleSignalMarkersRef.current.push(marker);
+        });
+      }
+    } else if (mapEngine === 'leaflet' && leafletMapRef.current && (window as any).L) {
+      const L = (window as any).L;
+      const map = leafletMapRef.current;
+
+      leafletSignalMarkersRef.current.forEach((m) => map.removeLayer(m));
+      leafletSignalMarkersRef.current = [];
+
+      if (layers.signals) {
+        signals.forEach((sig) => {
+          const inter = intersections.find((i) => i.id === sig.intersection_id);
+          if (!inter || inter.latitude === undefined || inter.longitude === undefined) return;
+
+          const offsetLat = inter.latitude - 0.00045;
+          const offsetLng = inter.longitude + 0.00045;
+
+          const sigColor = sig.state === 'RED' ? '#EF4444' : sig.state === 'YELLOW' ? '#FBBF24' : '#10B981';
+
+          const marker = L.circleMarker([offsetLat, offsetLng], {
+            radius: 9,
+            fillColor: sigColor,
+            fillOpacity: 0.95,
+            color: '#0F172A',
+            weight: 2.5
+          }).addTo(map);
+
+          marker.bindTooltip(`Signal: ${inter.name} [${sig.state}] ${sig.active_approach || ''} (${sig.countdown}s)`, { direction: 'top' });
+          marker.on('click', () => setSelectedIntersectionPopup(inter));
+
+          leafletSignalMarkersRef.current.push(marker);
+        });
+      }
+    }
+  }, [signals, layers.signals, mapEngine, mapLoaded, intersections]);
 
   // Helper to format date safely
   const formatTime = (ts?: string | Date) => {
@@ -1283,21 +1442,42 @@ export const GISMapComponent: React.FC<GISMapProps> = ({
             {(() => {
               const sig = signals.find((s) => s.intersection_id === selectedIntersectionPopup.id);
               if (sig) {
+                const isGreen = sig.state === 'GREEN';
+                const isYellow = sig.state === 'YELLOW';
+                const badgeBg = isGreen
+                  ? 'bg-emerald-100 text-emerald-800 border-emerald-300'
+                  : isYellow
+                  ? 'bg-amber-100 text-amber-800 border-amber-300'
+                  : 'bg-rose-100 text-rose-800 border-rose-300';
+                const dotColor = isGreen ? 'bg-emerald-500' : isYellow ? 'bg-amber-500' : 'bg-rose-500';
+
                 return (
-                  <div className="mt-2 pt-2 border-t border-slate-100 bg-slate-50 p-2 rounded-lg space-y-1">
-                    <div className="text-[10px] font-bold text-emerald-700 uppercase">Adaptive Signal Engine</div>
-                    <div className="flex justify-between">
-                      <span className="text-slate-500">Current Phase:</span>
-                      <b className="text-slate-800">{sig.current_phase || 'AUTO DYNAMIC'}</b>
+                  <div className="mt-2 pt-2 border-t border-slate-100 bg-slate-50 p-2.5 rounded-lg space-y-1.5 border border-slate-200">
+                    <div className="flex items-center justify-between">
+                      <div className="text-[10px] font-bold text-slate-700 uppercase tracking-wide flex items-center gap-1.5">
+                        <span className={`w-2 h-2 rounded-full ${dotColor} animate-ping`} />
+                        <span>Adaptive Signal</span>
+                      </div>
+                      <span className={`px-2 py-0.5 rounded text-[10px] font-bold border ${badgeBg}`}>
+                        {sig.state || 'GREEN'} • {sig.countdown ?? 0}s
+                      </span>
                     </div>
                     <div className="flex justify-between">
-                      <span className="text-slate-500">Recommended Green:</span>
-                      <b className="text-slate-800">{sig.green_duration ? `${sig.green_duration} sec` : 'N/A'}</b>
+                      <span className="text-slate-500">Active Flow:</span>
+                      <b className="text-slate-800">{sig.active_approach || sig.current_phase}</b>
                     </div>
                     <div className="flex justify-between">
-                      <span className="text-slate-500">Cycle State:</span>
+                      <span className="text-slate-500">Phase Code:</span>
+                      <code className="text-slate-700 bg-white px-1 rounded border border-slate-200 text-[10px]">{sig.current_phase || 'AUTO_DYNAMIC'}</code>
+                    </div>
+                    <div className="flex justify-between">
+                      <span className="text-slate-500">Nominal Green:</span>
+                      <b className="text-slate-800">{sig.green_duration || 25}s</b>
+                    </div>
+                    <div className="flex justify-between">
+                      <span className="text-slate-500">Cycle Engine:</span>
                       <span className="text-emerald-700 font-bold">
-                        {sig.is_adaptive ? 'ADAPTIVE OPTIMIZED' : 'FIXED CYCLE'}
+                        {sig.is_adaptive ? 'VIGITRA ADAPTIVE' : 'FIXED CYCLE'}
                       </span>
                     </div>
                   </div>
