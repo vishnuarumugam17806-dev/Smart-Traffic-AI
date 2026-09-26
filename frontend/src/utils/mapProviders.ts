@@ -125,9 +125,14 @@ export const getTileUrlForStyle = (styleId: MapStyleId, apiKey?: string): { url:
  * Dynamically loads the official Google Maps JavaScript API SDK if not already loaded.
  */
 let googleSdkPromise: Promise<void> | null = null;
+
+export const hasGoogleMapsSdk = (): boolean => {
+  return typeof window !== 'undefined' && Boolean((window as any).google?.maps);
+};
+
 export const loadGoogleMapsSdk = (apiKey?: string): Promise<void> => {
   if (typeof window === 'undefined') return Promise.resolve();
-  if ((window as any).google?.maps) return Promise.resolve();
+  if ((window as any).google?.maps?.Map) return Promise.resolve();
   if (googleSdkPromise) return googleSdkPromise;
 
   const key = apiKey || getGoogleMapsApiKey();
@@ -135,19 +140,48 @@ export const loadGoogleMapsSdk = (apiKey?: string): Promise<void> => {
     return Promise.reject(new Error('Google Maps API key is not configured.'));
   }
 
-  googleSdkPromise = new Promise((resolve, reject) => {
-    const scriptId = 'google-maps-sdk-script';
-    if (document.getElementById(scriptId)) {
+  googleSdkPromise = new Promise<void>((resolve, reject) => {
+    const callbackName = '__vigitraGoogleMapsCallback';
+    (window as any)[callbackName] = () => {
       resolve();
+    };
+
+    // Watch for Google Maps authentication errors (invalid key, unbilled project, or unauthorized referrer)
+    const originalGmAuthFailure = (window as any).gm_authFailure;
+    (window as any).gm_authFailure = () => {
+      console.warn('Google Maps authentication failure detected (invalid key or unauthorized referrer).');
+      if (typeof originalGmAuthFailure === 'function') {
+        originalGmAuthFailure();
+      }
+      window.dispatchEvent(new CustomEvent('vigitra:google_auth_failure'));
+    };
+
+    const scriptId = 'google-maps-sdk-script';
+    const existing = document.getElementById(scriptId) as HTMLScriptElement | null;
+    if (existing) {
+      if ((window as any).google?.maps?.Map) {
+        resolve();
+      } else {
+        existing.addEventListener('load', () => {
+          if ((window as any).google?.maps?.Map) resolve();
+        });
+        existing.addEventListener('error', (err) => {
+          googleSdkPromise = null;
+          reject(err);
+        });
+      }
       return;
     }
+
     const script = document.createElement('script');
     script.id = scriptId;
-    script.src = `https://maps.googleapis.com/maps/api/js?key=${encodeURIComponent(key)}&libraries=places,geometry,visualization&loading=async`;
+    script.src = `https://maps.googleapis.com/maps/api/js?key=${encodeURIComponent(key)}&libraries=places,geometry,visualization&callback=${callbackName}`;
     script.async = true;
     script.defer = true;
-    script.onload = () => resolve();
-    script.onerror = (err) => reject(err);
+    script.onerror = (err) => {
+      googleSdkPromise = null;
+      reject(err);
+    };
     document.head.appendChild(script);
   });
 
@@ -159,4 +193,17 @@ export const loadGoogleMapsSdk = (apiKey?: string): Promise<void> => {
  */
 export const createGoogleMapsDirectionsUrl = (lat: number, lng: number, label?: string): string => {
   return `https://www.google.com/maps/search/?api=1&query=${lat},${lng}${label ? `&query_place_id=${encodeURIComponent(label)}` : ''}`;
+};
+
+/**
+ * Creates a universal Google Maps embed URL that works seamlessly across all environments
+ * without throwing API activation errors, supporting both roadmap and satellite modes.
+ */
+export const createGoogleMapsEmbedUrl = (
+  lat: number,
+  lng: number,
+  type: 'roadmap' | 'satellite' = 'roadmap'
+): string => {
+  const mapTypeParam = type === 'satellite' ? 'k' : 'm';
+  return `https://maps.google.com/maps?q=${lat},${lng}&t=${mapTypeParam}&z=16&output=embed`;
 };

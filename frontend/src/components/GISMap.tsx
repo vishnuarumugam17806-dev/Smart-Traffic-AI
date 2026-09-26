@@ -1,59 +1,228 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useEffect, useRef, useState, useMemo } from 'react';
 import { useStore } from '../store/useStore';
 import { apiClient } from '../api/client';
-import { Camera, Video, Layers, AlertTriangle, RefreshCw, Zap, Shield, Navigation } from 'lucide-react';
+import {
+  Camera, Video, Layers, AlertTriangle, RefreshCw, Zap, Shield, Navigation,
+  Activity, Radio, Smartphone, AlertCircle, Info, Check, Eye, EyeOff, X,
+  MapPin, HelpCircle
+} from 'lucide-react';
 import { MapStyleSelector } from './MapStyleSelector';
-import { MapStyleId, getDefaultMapStyleId, getTileUrlForStyle } from '../utils/mapProviders';
+import {
+  MapStyleId,
+  getDefaultMapStyleId,
+  getTileUrlForStyle,
+  loadGoogleMapsSdk,
+  hasGoogleMapsSdk,
+  getGoogleMapsApiKey
+} from '../utils/mapProviders';
 
-interface GISMapProps {
-  onSelectIntersection?: (id: number) => void;
-  selectedIntersectionId?: number | null;
-  activeTrajectoryPath?: { lat: number; lng: number; cameraName: string; timestamp: string; speed?: number; confidence?: string }[];
-  showHeatmap?: boolean;
-  onSelectCameraForVideo?: (cameraId: number) => void;
+export interface TrajectoryPoint {
+  lat: number;
+  lng: number;
+  cameraName: string;
+  timestamp: string;
+  speed?: number;
+  confidence?: string;
 }
 
-export const GISMap: React.FC<GISMapProps> = ({
+export interface GISMapProps {
+  onSelectIntersection?: (id: number) => void;
+  selectedIntersectionId?: number | null;
+  activeTrajectoryPath?: TrajectoryPoint[];
+  showHeatmap?: boolean;
+  onSelectCameraForVideo?: (cameraId: number) => void;
+  fullScreenPage?: boolean;
+  initialLayers?: Partial<{
+    googleTraffic: boolean;
+    vigitraTraffic: boolean;
+    fixedCameras: boolean;
+    junctions: boolean;
+    signals: boolean;
+    mobileDevices: boolean;
+    trajectories: boolean;
+    alerts: boolean;
+    roadDensity: boolean;
+  }>;
+}
+
+// Helper SVG Marker generators for Google Maps
+const createSvgIcon = (svgString: string, width = 30, height = 30) => {
+  return {
+    url: `data:image/svg+xml;charset=UTF-8,${encodeURIComponent(svgString)}`,
+    scaledSize: (window as any).google?.maps?.Size ? new (window as any).google.maps.Size(width, height) : null,
+    anchor: (window as any).google?.maps?.Point ? new (window as any).google.maps.Point(width / 2, height / 2) : null
+  };
+};
+
+const getCameraSvg = (isOnline: boolean, isSelected: boolean) => {
+  const stroke = isSelected ? '#3B82F6' : '#0F172A';
+  const fill = isOnline ? '#10B981' : '#EF4444';
+  return `<svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 32 32">
+    ${isSelected ? `<circle cx="16" cy="16" r="15" fill="${fill}" opacity="0.3" stroke="${stroke}" stroke-width="2"/>` : ''}
+    <circle cx="16" cy="16" r="11" fill="#FFFFFF" stroke="${stroke}" stroke-width="2"/>
+    <circle cx="16" cy="16" r="8" fill="${fill}"/>
+    <path d="M12 14v4l3-2-3-2zm5-1h3v6h-3z" fill="#FFFFFF"/>
+  </svg>`;
+};
+
+const getJunctionSvg = (status: string, isSelected: boolean) => {
+  let color = '#10B981'; // LOW
+  if (status === 'MODERATE') color = '#F59E0B';
+  if (status === 'HIGH') color = '#F97316';
+  if (status === 'SEVERE' || status === 'CRITICAL') color = '#EF4444';
+
+  return `<svg xmlns="http://www.w3.org/2000/svg" width="34" height="34" viewBox="0 0 34 34">
+    ${isSelected ? `<circle cx="17" cy="17" r="16" fill="${color}" opacity="0.3"/>` : ''}
+    <circle cx="17" cy="17" r="12" fill="#FFFFFF" stroke="#1E293B" stroke-width="2.5"/>
+    <circle cx="17" cy="17" r="8" fill="${color}"/>
+    <circle cx="17" cy="17" r="3.5" fill="#FFFFFF"/>
+  </svg>`;
+};
+
+const getSignalSvg = (phase: string) => {
+  const isGreen = phase.toUpperCase().includes('GREEN') || phase.toUpperCase().includes('NORTH') || phase === 'AUTO';
+  const color = isGreen ? '#10B981' : '#EF4444';
+  return `<svg xmlns="http://www.w3.org/2000/svg" width="26" height="26" viewBox="0 0 26 26">
+    <rect x="5" y="3" width="16" height="20" rx="4" fill="#0F172A" stroke="#475569" stroke-width="1.5"/>
+    <circle cx="13" cy="8" r="3" fill="${color === '#EF4444' ? '#EF4444' : '#334155'}"/>
+    <circle cx="13" cy="13" r="3" fill="#334155"/>
+    <circle cx="13" cy="18" r="3" fill="${color === '#10B981' ? '#10B981' : '#334155'}"/>
+  </svg>`;
+};
+
+const getMobileDeviceSvg = (isStale: boolean) => {
+  const fill = isStale ? '#94A3B8' : '#2563EB';
+  return `<svg xmlns="http://www.w3.org/2000/svg" width="30" height="30" viewBox="0 0 30 30">
+    <circle cx="15" cy="15" r="14" fill="#FFFFFF" stroke="${fill}" stroke-width="2.5"/>
+    <rect x="10" y="7" width="10" height="16" rx="2" fill="${fill}"/>
+    <circle cx="15" cy="20.5" r="1" fill="#FFFFFF"/>
+    <rect x="12" y="9" width="6" height="9" rx="1" fill="#FFFFFF" opacity="0.9"/>
+  </svg>`;
+};
+
+const getAlertSvg = (severity: string) => {
+  const color = severity === 'CRITICAL' || severity === 'HIGH' ? '#DC2626' : '#D97706';
+  return `<svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 32 32">
+    <circle cx="16" cy="16" r="15" fill="${color}" opacity="0.25"/>
+    <polygon points="16,4 29,27 3,27" fill="${color}" stroke="#FFFFFF" stroke-width="2"/>
+    <rect x="15" y="12" width="2" height="7" fill="#FFFFFF"/>
+    <circle cx="16" cy="23" r="1.5" fill="#FFFFFF"/>
+  </svg>`;
+};
+
+const getTrajectorySvg = (index: number) => {
+  return `<svg xmlns="http://www.w3.org/2000/svg" width="28" height="28" viewBox="0 0 28 28">
+    <circle cx="14" cy="14" r="13" fill="#245B84" stroke="#FFFFFF" stroke-width="2.5"/>
+    <text x="14" y="18" font-size="11" font-weight="bold" fill="#FFFFFF" text-anchor="middle" font-family="monospace">${index + 1}</text>
+  </svg>`;
+};
+
+export const GISMapComponent: React.FC<GISMapProps> = ({
   onSelectIntersection,
   selectedIntersectionId,
   activeTrajectoryPath,
-  showHeatmap = false,
-  onSelectCameraForVideo
+  showHeatmap = true,
+  onSelectCameraForVideo,
+  fullScreenPage = false,
+  initialLayers
 }) => {
   const mapContainerRef = useRef<HTMLDivElement | null>(null);
-  const mapRef = useRef<any>(null);
-  const tileLayerRef = useRef<any>(null);
-  const [mapStyle, setMapStyle] = useState<MapStyleId>(getDefaultMapStyleId());
-  const markersRef = useRef<any[]>([]);
-  const roadLinesRef = useRef<any[]>([]);
-  const trajectoryLineRef = useRef<any>(null);
-  const trajectoryMarkersRef = useRef<any[]>([]);
-  const heatmapOverlayCirclesRef = useRef<any[]>([]);
+  const [mapEngine, setMapEngine] = useState<'google' | 'leaflet'>('google');
+  const [googleTrafficUnavailable, setGoogleTrafficUnavailable] = useState<boolean>(false);
+  const [mapLoaded, setMapLoaded] = useState<boolean>(false);
+  const [loadingError, setLoadingError] = useState<string | null>(null);
 
-  const { intersections, cameras, activeLiveUpdate } = useStore();
+  // Google Maps Instance References
+  const googleMapRef = useRef<any>(null);
+  const googleTrafficLayerRef = useRef<any>(null);
+  const googleMarkersRef = useRef<any[]>([]);
+  const googleCirclesRef = useRef<any[]>([]);
+  const googlePolylinesRef = useRef<any[]>([]);
+
+  // Leaflet Fallback Instance References
+  const leafletMapRef = useRef<any>(null);
+  const leafletTileLayerRef = useRef<any>(null);
+  const leafletMarkersRef = useRef<any[]>([]);
+  const leafletCirclesRef = useRef<any[]>([]);
+  const leafletPolylinesRef = useRef<any[]>([]);
+
+  // Map Style State
+  const [mapStyle, setMapStyle] = useState<MapStyleId>(getDefaultMapStyleId());
+
+  // Store & API Data State
+  const activeLiveUpdate = useStore((state) => state.activeLiveUpdate);
+  const [intersections, setIntersections] = useState<any[]>([]);
+  const [cameras, setCameras] = useState<any[]>([]);
+  const [signals, setSignals] = useState<any[]>([]);
+  const [measurements, setMeasurements] = useState<Record<number, any>>({});
+  const [devices, setDevices] = useState<any[]>([]);
+  const [alerts, setAlerts] = useState<any[]>([]);
   const [roads, setRoads] = useState<any[]>([]);
-  const [selectedRoad, setSelectedRoad] = useState<any | null>(null);
+
+  // Selection & Detail Modals
   const [selectedCameraPopup, setSelectedCameraPopup] = useState<any | null>(null);
+  const [selectedIntersectionPopup, setSelectedIntersectionPopup] = useState<any | null>(null);
+  const [selectedDevicePopup, setSelectedDevicePopup] = useState<any | null>(null);
+  const [selectedAlertPopup, setSelectedAlertPopup] = useState<any | null>(null);
+  const [selectedRoadPopup, setSelectedRoadPopup] = useState<any | null>(null);
+
+  // Telemetry Freshness
   const [lastDataUpdate, setLastDataUpdate] = useState<Date>(new Date());
   const [dataAgeSec, setDataAgeSec] = useState<number>(0);
 
-  // Layer Toggles
+  // Comprehensive 8-Layer Controls (Section 3 & 4)
   const [layers, setLayers] = useState({
-    fixedCameras: true,
-    mobileCameras: true,
-    roadDensity: true,
-    heatmap: showHeatmap,
-    signals: true,
-    incidents: true
+    googleTraffic: initialLayers?.googleTraffic ?? true,    // Official Google Maps TrafficLayer
+    vigitraTraffic: initialLayers?.vigitraTraffic ?? true,  // VIGITRA AI Spatial Congestion Heatmap Overlays
+    fixedCameras: initialLayers?.fixedCameras ?? true,      // Fixed CCTV Cameras
+    junctions: initialLayers?.junctions ?? true,            // Intersections / Junctions
+    signals: initialLayers?.signals ?? true,                // Signals & Adaptive Phase
+    mobileDevices: initialLayers?.mobileDevices ?? true,    // Connected Mobile GPS Units
+    trajectories: initialLayers?.trajectories ?? true,      // Vehicle Trajectories
+    alerts: initialLayers?.alerts ?? true,                  // System Alerts
+    roadDensity: initialLayers?.roadDensity ?? true         // Road network links
   });
 
   const [showLayerPanel, setShowLayerPanel] = useState<boolean>(false);
+  const [showLegend, setShowLegend] = useState<boolean>(true);
 
-  // Fetch roads topology
+  // 1. Fetch real application data from backend
+  const fetchAllData = async () => {
+    try {
+      const [intRes, camRes, sigRes, measureRes, devRes, alertRes, roadRes] = await Promise.all([
+        apiClient.get('/intersections').catch(() => ({ data: [] })),
+        apiClient.get('/cameras').catch(() => ({ data: [] })),
+        apiClient.get('/signals').catch(() => ({ data: [] })),
+        apiClient.get('/traffic/measurements', { params: { limit: 100 } }).catch(() => ({ data: [] })),
+        apiClient.get('/devices').catch(() => ({ data: [] })),
+        apiClient.get('/alerts').catch(() => ({ data: [] })),
+        apiClient.get('/roads').catch(() => ({ data: [] }))
+      ]);
+
+      if (Array.isArray(intRes.data)) setIntersections(intRes.data);
+      if (Array.isArray(camRes.data)) setCameras(camRes.data);
+      if (Array.isArray(sigRes.data)) setSignals(sigRes.data);
+      if (Array.isArray(devRes.data)) setDevices(devRes.data);
+      if (Array.isArray(alertRes.data)) setAlerts(alertRes.data);
+      if (Array.isArray(roadRes.data)) setRoads(roadRes.data);
+
+      if (Array.isArray(measureRes.data)) {
+        const mMap: Record<number, any> = {};
+        measureRes.data.forEach((m: any) => {
+          if (!mMap[m.camera_id]) {
+            mMap[m.camera_id] = m;
+          }
+        });
+        setMeasurements(mMap);
+      }
+      setLastDataUpdate(new Date());
+    } catch (err) {
+      console.warn('Error fetching map data from backend:', err);
+    }
+  };
+
   useEffect(() => {
-    apiClient.get('/roads')
-      .then(res => setRoads(res.data))
-      .catch(err => console.error("Error fetching road network:", err));
+    fetchAllData();
   }, []);
 
   // Update data freshness age counter every second
@@ -65,442 +234,1223 @@ export const GISMap: React.FC<GISMapProps> = ({
     return () => clearInterval(timer);
   }, [lastDataUpdate]);
 
-  // Update last data update time when live WebSocket updates arrive
+  // Handle Real-Time WebSocket updates (Section 14)
   useEffect(() => {
-    if (activeLiveUpdate) {
-      setLastDataUpdate(new Date());
+    if (!activeLiveUpdate) return;
+    setLastDataUpdate(new Date());
+
+    if (activeLiveUpdate.event === 'TRAFFIC_UPDATE') {
+      const camId = activeLiveUpdate.camera_id || 1;
+      setMeasurements((prev) => ({
+        ...prev,
+        [camId]: {
+          ...prev[camId],
+          camera_id: camId,
+          vehicle_count: activeLiveUpdate.vehicle_count,
+          density_state: activeLiveUpdate.density_state,
+          queue_length: activeLiveUpdate.queue_length,
+          occupancy_percentage: activeLiveUpdate.occupancy_percentage,
+          average_speed_kmh: activeLiveUpdate.average_speed || prev[camId]?.average_speed_kmh,
+          timestamp: new Date().toISOString()
+        }
+      }));
+
+      // Update intersection status if provided
+      if (activeLiveUpdate.intersection_id) {
+        setIntersections((prev) =>
+          prev.map((inter) =>
+            inter.id === activeLiveUpdate.intersection_id
+              ? { ...inter, current_status: activeLiveUpdate.density_state || inter.current_status }
+              : inter
+          )
+        );
+      }
+    } else if (activeLiveUpdate.event === 'ALERT_CREATED' && activeLiveUpdate.alert) {
+      setAlerts((prev) => [activeLiveUpdate.alert, ...prev]);
+    } else if (activeLiveUpdate.event === 'DEVICE_LOCATION_UPDATE' && activeLiveUpdate.device) {
+      const updated = activeLiveUpdate.device;
+      setDevices((prev) =>
+        prev.map((d) => (d.id === updated.id || d.device_id === updated.device_id ? { ...d, ...updated } : d))
+      );
     }
   }, [activeLiveUpdate]);
 
-  // Initialize Map Provider safely
+  // 2. Initialize Map (Google Maps Primary + Leaflet Resilient Fallback)
   useEffect(() => {
-    const L = (window as any).L;
-    if (!L || !mapContainerRef.current) return;
-
-    if (mapRef.current) {
-      try {
-        mapRef.current.remove();
-      } catch (e) {
-        // ignore cleanup error
-      }
-      mapRef.current = null;
-    }
-
+    let isCancelled = false;
     const container = mapContainerRef.current;
-    if ((container as any)._leaflet_id) {
-      (container as any)._leaflet_id = null;
-    }
+    if (!container) return;
 
-    try {
-      // Center map around Chennai central coordinates (Anna Salai / Spencers Junction)
-      const map = L.map(container, {
-        zoomControl: false,
-        attributionControl: false
-      }).setView([13.0604, 80.2496], 13);
+    const apiKey = getGoogleMapsApiKey();
 
-      mapRef.current = map;
+    const initMap = async () => {
+      if (apiKey) {
+        try {
+          await loadGoogleMapsSdk(apiKey);
+          if (isCancelled) return;
 
-      // Initialize with Google Maps or configured default layer
-      const tileCfg = getTileUrlForStyle(mapStyle);
-      const tileLayer = L.tileLayer(tileCfg.url, {
-        maxZoom: mapStyle.startsWith('google') ? 20 : 19,
-        subdomains: tileCfg.subdomains || ['a', 'b', 'c'],
-        attribution: mapStyle.startsWith('google') ? '&copy; Google Maps' : '&copy; OpenStreetMap'
-      });
+          const google = (window as any).google;
+          if (google?.maps) {
+            // Clean up any existing leaflet map
+            if (leafletMapRef.current) {
+              try { leafletMapRef.current.remove(); } catch (e) {}
+              leafletMapRef.current = null;
+            }
 
-      tileLayer.on('tileerror', (error: any) => {
-        if (error.tile && !error.tile.dataset.retried) {
-          error.tile.dataset.retried = 'true';
-          error.tile.src = `https://tile.openstreetmap.org/${error.coords.z}/${error.coords.x}/${error.coords.y}.png`;
+            // Create official Google Maps instance
+            const map = new google.maps.Map(container, {
+              center: { lat: 13.0604, lng: 80.2496 }, // Chennai Central / Spencers Junction
+              zoom: 13,
+              mapTypeId: mapStyle === 'google-hybrid'
+                ? google.maps.MapTypeId.HYBRID
+                : mapStyle === 'google-terrain'
+                ? google.maps.MapTypeId.TERRAIN
+                : google.maps.MapTypeId.ROADMAP,
+              zoomControl: true,
+              zoomControlOptions: {
+                position: google.maps.ControlPosition.RIGHT_BOTTOM
+              },
+              mapTypeControl: false,
+              scaleControl: true,
+              streetViewControl: false,
+              fullscreenControl: false,
+              gestureHandling: 'greedy'
+            });
+
+            googleMapRef.current = map;
+
+            // SECTION 1: Create and manage official Google Maps TrafficLayer
+            const trafficLayer = new google.maps.TrafficLayer();
+            googleTrafficLayerRef.current = trafficLayer;
+            // Attach traffic layer to map based on layer toggle
+            trafficLayer.setMap(layers.googleTraffic ? map : null);
+
+            setMapEngine('google');
+            setGoogleTrafficUnavailable(false);
+            setMapLoaded(true);
+            return;
+          }
+        } catch (err) {
+          console.warn('Google Maps JS SDK load warning (switching to resilient GIS mode):', err);
         }
-      });
+      }
 
-      tileLayer.addTo(map);
-      tileLayerRef.current = tileLayer;
+      // Fallback to Leaflet if Google Maps API failed or no key
+      if (isCancelled) return;
+      setGoogleTrafficUnavailable(true);
+      setMapEngine('leaflet');
 
-      L.control.zoom({ position: 'bottomright' }).addTo(map);
-    } catch (err) {
-      console.warn('GISMap Leaflet initialization warning:', err);
-    }
+      const L = (window as any).L;
+      if (!L || !container) return;
+
+      if (leafletMapRef.current) {
+        try { leafletMapRef.current.remove(); } catch (e) {}
+        leafletMapRef.current = null;
+      }
+      if ((container as any)._leaflet_id) {
+        (container as any)._leaflet_id = null;
+      }
+
+      try {
+        const map = L.map(container, {
+          zoomControl: false,
+          attributionControl: false
+        }).setView([13.0604, 80.2496], 13);
+        leafletMapRef.current = map;
+
+        const tileCfg = getTileUrlForStyle(mapStyle);
+        const tileLayer = L.tileLayer(tileCfg.url, {
+          maxZoom: 19,
+          subdomains: tileCfg.subdomains || ['a', 'b', 'c'],
+          attribution: '&copy; OpenStreetMap contributors'
+        }).addTo(map);
+
+        leafletTileLayerRef.current = tileLayer;
+        L.control.zoom({ position: 'bottomright' }).addTo(map);
+        setMapLoaded(true);
+      } catch (e) {
+        console.warn('Leaflet fallback initialization error:', e);
+      }
+    };
+
+    const onAuthFailure = () => {
+      setGoogleTrafficUnavailable(true);
+    };
+    window.addEventListener('vigitra:google_auth_failure', onAuthFailure);
+
+    initMap();
 
     return () => {
-      if (mapRef.current) {
-        try {
-          mapRef.current.remove();
-        } catch (e) {
-          // ignore
-        }
-        mapRef.current = null;
+      isCancelled = true;
+      window.removeEventListener('vigitra:google_auth_failure', onAuthFailure);
+      if (googleTrafficLayerRef.current) {
+        try { googleTrafficLayerRef.current.setMap(null); } catch (e) {}
+        googleTrafficLayerRef.current = null;
+      }
+      if (googleMapRef.current) {
+        googleMapRef.current = null;
+      }
+      if (leafletMapRef.current) {
+        try { leafletMapRef.current.remove(); } catch (e) {}
+        leafletMapRef.current = null;
       }
     };
   }, []);
 
-  // Dynamically switch base map tiles when user changes mapStyle
+  // SECTION 1: Toggle Google TrafficLayer independently
   useEffect(() => {
-    const L = (window as any).L;
-    if (!L || !mapRef.current) return;
-    if (tileLayerRef.current) {
-      try {
-        mapRef.current.removeLayer(tileLayerRef.current);
-      } catch (e) {}
+    if (googleTrafficLayerRef.current && googleMapRef.current) {
+      googleTrafficLayerRef.current.setMap(layers.googleTraffic ? googleMapRef.current : null);
     }
-    const tileCfg = getTileUrlForStyle(mapStyle);
-    const newTileLayer = L.tileLayer(tileCfg.url, {
-      maxZoom: mapStyle.startsWith('google') ? 20 : 19,
-      subdomains: tileCfg.subdomains || ['a', 'b', 'c'],
-      attribution: mapStyle.startsWith('google') ? '&copy; Google Maps' : '&copy; OpenStreetMap'
-    });
-    newTileLayer.on('tileerror', (error: any) => {
-      if (error.tile && !error.tile.dataset.retried) {
-        error.tile.dataset.retried = 'true';
-        error.tile.src = `https://tile.openstreetmap.org/${error.coords.z}/${error.coords.x}/${error.coords.y}.png`;
-      }
-    });
-    newTileLayer.addTo(mapRef.current);
-    tileLayerRef.current = newTileLayer;
-  }, [mapStyle]);
+  }, [layers.googleTraffic]);
 
-  // Re-draw all map layers on state & toggle changes
+  // Handle Map Style switching
   useEffect(() => {
-    const L = (window as any).L;
-    if (!L || !mapRef.current) return;
-
-    const map = mapRef.current;
-
-    // Clear previous layers
-    markersRef.current.forEach(m => map.removeLayer(m));
-    markersRef.current = [];
-
-    roadLinesRef.current.forEach(line => map.removeLayer(line));
-    roadLinesRef.current = [];
-
-    heatmapOverlayCirclesRef.current.forEach(circle => map.removeLayer(circle));
-    heatmapOverlayCirclesRef.current = [];
-
-    // 1. Draw Intersections / Fixed & Mobile Camera Nodes
-    intersections.forEach((inter) => {
-      if (inter.latitude === undefined || inter.longitude === undefined) return;
-
-      const isSelected = selectedIntersectionId === inter.id;
-      const statusStr = inter.current_status as string;
-      let color = '#2E7D5B'; // LOW (Success Green)
-      if (statusStr === 'MODERATE') color = '#B7791F'; // Warning Amber
-      if (statusStr === 'HIGH') color = '#D17A4A'; // High Orange
-      if (statusStr === 'SEVERE' || statusStr === 'CRITICAL') color = '#C85D5D'; // Severe Red
-
-      // Find associated cameras for this intersection
-      const assocCams = cameras.filter(c => c.intersection_id === inter.id);
-      const hasMobileCam = assocCams.some(c => c.source_type === 'MOBILE_DEVICE' || c.name.includes('MOBILE'));
-
-      if ((hasMobileCam && !layers.mobileCameras) || (!hasMobileCam && !layers.fixedCameras)) {
-        return;
+    if (mapEngine === 'google' && googleMapRef.current && (window as any).google?.maps) {
+      const google = (window as any).google;
+      if (mapStyle === 'google-hybrid') {
+        googleMapRef.current.setMapTypeId(google.maps.MapTypeId.HYBRID);
+      } else if (mapStyle === 'google-terrain') {
+        googleMapRef.current.setMapTypeId(google.maps.MapTypeId.TERRAIN);
+      } else {
+        googleMapRef.current.setMapTypeId(google.maps.MapTypeId.ROADMAP);
       }
+    } else if (mapEngine === 'leaflet' && leafletMapRef.current) {
+      const L = (window as any).L;
+      if (!L) return;
+      if (leafletTileLayerRef.current) {
+        try { leafletMapRef.current.removeLayer(leafletTileLayerRef.current); } catch (e) {}
+      }
+      const tileCfg = getTileUrlForStyle(mapStyle);
+      const newLayer = L.tileLayer(tileCfg.url, {
+        maxZoom: 19,
+        subdomains: tileCfg.subdomains || ['a', 'b', 'c']
+      }).addTo(leafletMapRef.current);
+      leafletTileLayerRef.current = newLayer;
+    }
+  }, [mapStyle, mapEngine]);
 
-      // Custom marker HTML depending on fixed vs mobile camera
-      const badgeIcon = hasMobileCam ? '📱' : '📹';
-      const strokeColor = hasMobileCam ? '#D97706' : '#1E293B';
+  // 3. Render VIGITRA AI Overlays on Google Maps or Leaflet
+  useEffect(() => {
+    if (!mapLoaded) return;
 
-      const htmlIcon = L.divIcon({
-        className: 'custom-leaflet-marker',
-        html: `
-          <div style="position: relative; display: flex; align-items: center; justify-content: center;">
-            ${isSelected ? `<div style="position: absolute; width: 34px; height: 34px; background-color: ${color}; opacity: 0.25; border-radius: 50%; animation: pulse 2s infinite;"></div>` : ''}
-            <div style="position: absolute; width: 24px; height: 24px; background-color: ${color}; opacity: 0.35; border-radius: 50%;"></div>
-            <div style="position: absolute; width: 14px; height: 14px; background-color: ${color}; border: 2px solid ${strokeColor}; border-radius: 50%; box-shadow: 0 2px 5px rgba(0,0,0,0.3); display: flex; align-items: center; justify-content: center; font-size: 8px;">
-            </div>
-          </div>
-        `,
-        iconSize: [34, 34],
-        iconAnchor: [17, 17]
-      });
+    if (mapEngine === 'google' && googleMapRef.current && (window as any).google?.maps) {
+      renderGoogleOverlays();
+    } else if (mapEngine === 'leaflet' && leafletMapRef.current) {
+      renderLeafletOverlays();
+    }
+  }, [
+    mapLoaded,
+    mapEngine,
+    intersections,
+    cameras,
+    signals,
+    measurements,
+    devices,
+    alerts,
+    roads,
+    layers,
+    selectedIntersectionId,
+    activeTrajectoryPath
+  ]);
 
-      const marker = L.marker([inter.latitude, inter.longitude], { icon: htmlIcon })
-        .addTo(map)
-        .on('click', () => {
-          if (onSelectIntersection) {
-            onSelectIntersection(inter.id);
-          }
-          if (assocCams.length > 0) {
-            setSelectedCameraPopup(assocCams[0]);
-          }
-        });
+  // Clear previous Google Maps overlays
+  const clearGoogleOverlays = () => {
+    googleMarkersRef.current.forEach((m) => m.setMap(null));
+    googleMarkersRef.current = [];
+    googleCirclesRef.current.forEach((c) => c.setMap(null));
+    googleCirclesRef.current = [];
+    googlePolylinesRef.current.forEach((p) => p.setMap(null));
+    googlePolylinesRef.current = [];
+  };
 
-      marker.bindTooltip(`
-        <div style="padding: 8px; font-family: monospace; font-size: 11px; color: #1E293B; line-height: 1.4;">
-          <b>${badgeIcon} ${inter.name}</b><br/>
-          <span style="color: #245B84; font-weight: bold;">Approaches: ${inter.num_approaches || 4}-Side Dynamic</span><br/>
-          <span style="color: ${color}; font-weight: bold;">Traffic Density: ${inter.current_status}</span><br/>
-          <span style="color: #10B981; font-size: 10px; font-weight: bold;">Signal Engine: ACTIVE OPTIMIZATION</span><br/>
-          <span style="color: #64748B; font-size: 10px;">Node: ${hasMobileCam ? 'LINKED MOBILE CAMERA' : 'FIXED CCTV JUNCTION'}</span>
-        </div>
-      `, { direction: 'top', offset: [0, -10] });
+  // Clear previous Leaflet overlays
+  const clearLeafletOverlays = () => {
+    const map = leafletMapRef.current;
+    if (!map) return;
+    leafletMarkersRef.current.forEach((m) => map.removeLayer(m));
+    leafletMarkersRef.current = [];
+    leafletCirclesRef.current.forEach((c) => map.removeLayer(c));
+    leafletCirclesRef.current = [];
+    leafletPolylinesRef.current.forEach((p) => map.removeLayer(p));
+    leafletPolylinesRef.current = [];
+  };
 
-      markersRef.current.push(marker);
+  // Google Maps Overlays Renderer
+  const renderGoogleOverlays = () => {
+    const google = (window as any).google;
+    const map = googleMapRef.current;
+    if (!google?.maps || !map) return;
 
-      // 2. Draw High Traffic Zone Heatmaps
-      if (layers.heatmap || showHeatmap || statusStr === 'HIGH' || statusStr === 'SEVERE' || statusStr === 'CRITICAL') {
-        let radius = 200;
+    clearGoogleOverlays();
+
+    // 1. VIGITRA AI Traffic Density Spatial Overlays (Section 4 & 9)
+    if (layers.vigitraTraffic) {
+      intersections.forEach((inter) => {
+        if (inter.latitude === undefined || inter.longitude === undefined) return;
+        const status = (inter.current_status || 'LOW').toUpperCase();
+
+        let color = '#10B981'; // LOW (Emerald)
+        let radius = 220;
         let opacity = 0.22;
-        if (statusStr === 'HIGH') radius = 300;
-        if (statusStr === 'SEVERE' || statusStr === 'CRITICAL') radius = 420;
 
-        const circle = L.circle([inter.latitude, inter.longitude], {
-          radius: radius,
+        if (status === 'SEVERE' || status === 'CRITICAL') {
+          color = '#EF4444';
+          radius = 420;
+          opacity = 0.35;
+        } else if (status === 'HIGH') {
+          color = '#F97316';
+          radius = 320;
+          opacity = 0.30;
+        } else if (status === 'MODERATE') {
+          color = '#F59E0B';
+          radius = 260;
+          opacity = 0.26;
+        }
+
+        const circle = new google.maps.Circle({
+          strokeWeight: 0,
           fillColor: color,
           fillOpacity: opacity,
-          stroke: false
-        }).addTo(map);
+          map: map,
+          center: { lat: inter.latitude, lng: inter.longitude },
+          radius: radius,
+          clickable: false,
+          zIndex: 5
+        });
+        googleCirclesRef.current.push(circle);
+      });
+    }
 
-        heatmapOverlayCirclesRef.current.push(circle);
-      }
-    });
+    // 2. Junction Markers (Section 7)
+    if (layers.junctions) {
+      intersections.forEach((inter) => {
+        if (inter.latitude === undefined || inter.longitude === undefined) return;
+        const isSelected = selectedIntersectionId === inter.id;
+        const status = inter.current_status || 'LOW';
 
-    // 3. Draw Road Network Segments
+        const marker = new google.maps.Marker({
+          position: { lat: inter.latitude, lng: inter.longitude },
+          map: map,
+          title: `Junction: ${inter.name}`,
+          icon: createSvgIcon(getJunctionSvg(status, isSelected), 34, 34),
+          zIndex: isSelected ? 30 : 20
+        });
+
+        marker.addListener('click', () => {
+          setSelectedIntersectionPopup(inter);
+          setSelectedCameraPopup(null);
+          setSelectedDevicePopup(null);
+          setSelectedAlertPopup(null);
+          if (onSelectIntersection) onSelectIntersection(inter.id);
+        });
+
+        googleMarkersRef.current.push(marker);
+      });
+    }
+
+    // 3. Fixed CCTV Camera Markers (Section 6)
+    if (layers.fixedCameras) {
+      cameras.forEach((cam) => {
+        const inter = intersections.find((i) => i.id === cam.intersection_id);
+        const lat = cam.latitude !== undefined ? cam.latitude : inter?.latitude;
+        const lng = cam.longitude !== undefined ? cam.longitude : inter?.longitude;
+        if (lat === undefined || lng === undefined) return;
+
+        // Offset slightly if at exact junction center to avoid complete collision
+        const offsetLat = lat + 0.00045;
+        const offsetLng = lng - 0.00045;
+        const isOnline = cam.status === 'ONLINE';
+
+        const marker = new google.maps.Marker({
+          position: { lat: offsetLat, lng: offsetLng },
+          map: map,
+          title: `Camera: ${cam.name}`,
+          icon: createSvgIcon(getCameraSvg(isOnline, false), 30, 30),
+          zIndex: 25
+        });
+
+        marker.addListener('click', () => {
+          setSelectedCameraPopup(cam);
+          setSelectedIntersectionPopup(null);
+          setSelectedDevicePopup(null);
+          setSelectedAlertPopup(null);
+        });
+
+        googleMarkersRef.current.push(marker);
+      });
+    }
+
+    // 4. Traffic Signal Status Indicators (Section 8)
+    if (layers.signals) {
+      signals.forEach((sig) => {
+        const inter = intersections.find((i) => i.id === sig.intersection_id);
+        if (!inter || inter.latitude === undefined || inter.longitude === undefined) return;
+
+        const offsetLat = inter.latitude - 0.00045;
+        const offsetLng = inter.longitude + 0.00045;
+
+        const marker = new google.maps.Marker({
+          position: { lat: offsetLat, lng: offsetLng },
+          map: map,
+          title: `Signal: ${inter.name} (${sig.current_phase || 'AUTO'})`,
+          icon: createSvgIcon(getSignalSvg(sig.current_phase || 'GREEN'), 24, 24),
+          zIndex: 22
+        });
+
+        marker.addListener('click', () => {
+          setSelectedIntersectionPopup(inter);
+        });
+
+        googleMarkersRef.current.push(marker);
+      });
+    }
+
+    // 5. Mobile Device Locations (Section 10)
+    if (layers.mobileDevices) {
+      devices.forEach((dev) => {
+        if (!dev.latitude || !dev.longitude) return;
+        const lastSeenMs = dev.last_seen ? new Date(dev.last_seen).getTime() : 0;
+        const isStale = Date.now() - lastSeenMs > 120000;
+
+        const marker = new google.maps.Marker({
+          position: { lat: dev.latitude, lng: dev.longitude },
+          map: map,
+          title: `Mobile Device: ${dev.name || dev.device_id}`,
+          icon: createSvgIcon(getMobileDeviceSvg(isStale), 28, 28),
+          zIndex: 35
+        });
+
+        marker.addListener('click', () => {
+          setSelectedDevicePopup(dev);
+          setSelectedCameraPopup(null);
+          setSelectedIntersectionPopup(null);
+          setSelectedAlertPopup(null);
+        });
+
+        googleMarkersRef.current.push(marker);
+      });
+    }
+
+    // 6. Active Incident & Security Alerts (Section 12)
+    if (layers.alerts) {
+      alerts.slice(0, 10).forEach((alert) => {
+        // Try to associate alert with known intersection or camera coordinates
+        let lat: number | undefined;
+        let lng: number | undefined;
+
+        if (alert.camera_id) {
+          const cam = cameras.find((c) => c.id === alert.camera_id);
+          const inter = intersections.find((i) => i.id === cam?.intersection_id);
+          lat = inter?.latitude;
+          lng = inter?.longitude;
+        }
+        if (lat === undefined && alert.location) {
+          const inter = intersections.find((i) => i.name.toLowerCase().includes(alert.location.toLowerCase()));
+          lat = inter?.latitude;
+          lng = inter?.longitude;
+        }
+
+        if (lat === undefined || lng === undefined) return;
+
+        const marker = new google.maps.Marker({
+          position: { lat: lat + 0.0007, lng: lng },
+          map: map,
+          title: `Alert: ${alert.type} (${alert.severity})`,
+          icon: createSvgIcon(getAlertSvg(alert.severity), 32, 32),
+          zIndex: 40
+        });
+
+        marker.addListener('click', () => {
+          setSelectedAlertPopup(alert);
+          setSelectedCameraPopup(null);
+          setSelectedIntersectionPopup(null);
+          setSelectedDevicePopup(null);
+        });
+
+        googleMarkersRef.current.push(marker);
+      });
+    }
+
+    // 7. Road Network Segments (Section 9)
     if (layers.roadDensity) {
       roads.forEach((road) => {
-        const srcCam = cameras.find(c => c.id === road.source_camera_id);
-        const tgtCam = cameras.find(c => c.id === road.target_camera_id);
+        const srcCam = cameras.find((c) => c.id === road.source_camera_id);
+        const tgtCam = cameras.find((c) => c.id === road.target_camera_id);
+        if (!srcCam || !tgtCam) return;
 
-        if (srcCam && tgtCam) {
-          const srcInter = intersections.find(i => i.id === srcCam.intersection_id);
-          const tgtInter = intersections.find(i => i.id === tgtCam.intersection_id);
+        const srcInter = intersections.find((i) => i.id === srcCam.intersection_id);
+        const tgtInter = intersections.find((i) => i.id === tgtCam.intersection_id);
 
-          if (srcInter?.latitude && srcInter?.longitude && tgtInter?.latitude && tgtInter?.longitude) {
-            const srcStatus = srcInter.current_status as string;
-            let color = '#76A98A'; // LOW
-            let weight = 4;
-            if (srcStatus === 'MODERATE') {
-              color = '#D4A84F';
-              weight = 5;
-            } else if (srcStatus === 'HIGH') {
-              color = '#D98855';
-              weight = 6;
-            } else if (srcStatus === 'SEVERE' || srcStatus === 'CRITICAL') {
-              color = '#C95B5B';
-              weight = 7;
-            }
+        if (srcInter?.latitude && srcInter?.longitude && tgtInter?.latitude && tgtInter?.longitude) {
+          const status = srcInter.current_status || 'LOW';
+          let color = '#10B981';
+          if (status === 'MODERATE') color = '#F59E0B';
+          if (status === 'HIGH') color = '#F97316';
+          if (status === 'SEVERE' || status === 'CRITICAL') color = '#EF4444';
 
-            const polyline = L.polyline(
-              [[srcInter.latitude, srcInter.longitude], [tgtInter.latitude, tgtInter.longitude]],
-              {
-                color: color,
-                weight: weight,
-                opacity: 0.8,
-                lineCap: 'round',
-                lineJoin: 'round'
-              }
-            ).addTo(map);
+          const polyline = new google.maps.Polyline({
+            path: [
+              { lat: srcInter.latitude, lng: srcInter.longitude },
+              { lat: tgtInter.latitude, lng: tgtInter.longitude }
+            ],
+            strokeColor: color,
+            strokeOpacity: 0.85,
+            strokeWeight: 5,
+            map: map,
+            zIndex: 10
+          });
 
-            polyline.on('click', () => {
-              setSelectedRoad({
-                name: road.name,
-                distance: road.distance_km,
-                expectedTime: road.expected_travel_time_sec,
-                status: srcInter.current_status,
-                source: srcInter.name,
-                target: tgtInter.name,
-                volume: Math.floor(Math.random() * 40) + 45,
-                avgSpeed: Math.floor(Math.random() * 25) + 20,
-                queue: Math.floor(Math.random() * 15) + 10,
-                waitingTime: Math.floor(Math.random() * 45) + 25
-              });
+          polyline.addListener('click', () => {
+            const meas = measurements[srcCam.id];
+            setSelectedRoadPopup({
+              name: road.name,
+              source: srcInter.name,
+              target: tgtInter.name,
+              distance: road.distance_km,
+              expectedTime: road.expected_travel_time_sec,
+              status: status,
+              volume: meas?.vehicle_count ?? 'N/A',
+              avgSpeed: meas?.average_speed_kmh ?? 'N/A',
+              queue: meas?.queue_length ?? 'N/A'
             });
+          });
 
-            polyline.bindTooltip(`
-              <div style="font-family: monospace; font-size: 11px; padding: 4px; color: #1E293B;">
-                <b>${road.name}</b> (${road.distance_km} km)<br/>
-                Status: <span style="color: ${color}; font-weight: bold;">${srcInter.current_status}</span>
-              </div>
-            `, { direction: 'center' });
-
-            roadLinesRef.current.push(polyline);
-          }
+          googlePolylinesRef.current.push(polyline);
         }
       });
     }
 
-  }, [intersections, cameras, roads, selectedIntersectionId, layers, showHeatmap]);
+    // 8. Vehicle Trajectories (Section 11)
+    if (layers.trajectories && activeTrajectoryPath && activeTrajectoryPath.length > 0) {
+      const coords = activeTrajectoryPath.map((p) => ({ lat: p.lat, lng: p.lng }));
 
-  // 4. Draw Cross-Camera Vehicle Trajectory Route
-  useEffect(() => {
-    const L = (window as any).L;
-    if (!L || !mapRef.current) return;
+      const polyline = new google.maps.Polyline({
+        path: coords,
+        strokeColor: '#245B84',
+        strokeOpacity: 0.95,
+        strokeWeight: 6,
+        map: map,
+        zIndex: 50
+      });
+      googlePolylinesRef.current.push(polyline);
 
-    const map = mapRef.current;
-
-    if (trajectoryLineRef.current) {
-      map.removeLayer(trajectoryLineRef.current);
-      trajectoryLineRef.current = null;
-    }
-    trajectoryMarkersRef.current.forEach(m => map.removeLayer(m));
-    trajectoryMarkersRef.current = [];
-
-    if (activeTrajectoryPath && activeTrajectoryPath.length > 0) {
-      const coords = activeTrajectoryPath.map(p => [p.lat, p.lng] as [number, number]);
-
-      const polyline = L.polyline(coords, {
-        color: '#245B84',
-        weight: 6,
-        opacity: 0.95,
-        dashArray: '4, 8',
-        lineCap: 'round'
-      }).addTo(map);
-
-      trajectoryLineRef.current = polyline;
-
-      activeTrajectoryPath.forEach((pt, index) => {
-        const marker = L.circleMarker([pt.lat, pt.lng], {
-          radius: 8,
-          fillColor: '#FFFFFF',
-          fillOpacity: 1.0,
-          color: '#245B84',
-          weight: 3
-        }).addTo(map);
-
-        marker.bindTooltip(`
-          <div style="font-family: monospace; font-size: 11px; padding: 6px; color: #1E293B;">
-            <b>Node #${index + 1}: ${pt.cameraName}</b><br/>
-            Sighted: ${new Date(pt.timestamp).toLocaleTimeString()}<br/>
-            Match Confidence: <b style="color: #2E7D5B;">${pt.confidence || 'HIGH CONFIDENCE MATCH'}</b><br/>
-            ${pt.speed ? `Transition Speed: ${pt.speed} km/h` : 'Initial Sighting'}
-          </div>
-        `, { direction: 'top', offset: [0, -5] });
-
-        trajectoryMarkersRef.current.push(marker);
+      activeTrajectoryPath.forEach((pt, idx) => {
+        const marker = new google.maps.Marker({
+          position: { lat: pt.lat, lng: pt.lng },
+          map: map,
+          title: `Stop #${idx + 1}: ${pt.cameraName}`,
+          icon: createSvgIcon(getTrajectorySvg(idx), 28, 28),
+          zIndex: 55
+        });
+        googleMarkersRef.current.push(marker);
       });
 
-      map.fitBounds(polyline.getBounds(), { padding: [60, 60] });
+      // Fit bounds to trajectory
+      const bounds = new google.maps.LatLngBounds();
+      coords.forEach((c) => bounds.extend(c));
+      map.fitBounds(bounds, 50);
     }
-  }, [activeTrajectoryPath]);
+  };
+
+  // Leaflet Fallback Overlays Renderer (Section 18)
+  const renderLeafletOverlays = () => {
+    const L = (window as any).L;
+    const map = leafletMapRef.current;
+    if (!L || !map) return;
+
+    clearLeafletOverlays();
+
+    // 1. VIGITRA Spatial Heatmap Circles
+    if (layers.vigitraTraffic) {
+      intersections.forEach((inter) => {
+        if (inter.latitude === undefined || inter.longitude === undefined) return;
+        const status = (inter.current_status || 'LOW').toUpperCase();
+        let color = '#10B981';
+        let radius = 220;
+        let opacity = 0.24;
+
+        if (status === 'SEVERE' || status === 'CRITICAL') {
+          color = '#EF4444';
+          radius = 420;
+          opacity = 0.35;
+        } else if (status === 'HIGH') {
+          color = '#F97316';
+          radius = 320;
+          opacity = 0.30;
+        } else if (status === 'MODERATE') {
+          color = '#F59E0B';
+          radius = 260;
+          opacity = 0.26;
+        }
+
+        const circle = L.circle([inter.latitude, inter.longitude], {
+          color: color,
+          fillColor: color,
+          fillOpacity: opacity,
+          radius: radius,
+          stroke: false
+        }).addTo(map);
+
+        leafletCirclesRef.current.push(circle);
+      });
+    }
+
+    // 2. Intersections / Junctions
+    if (layers.junctions) {
+      intersections.forEach((inter) => {
+        if (inter.latitude === undefined || inter.longitude === undefined) return;
+        const status = inter.current_status || 'LOW';
+        let color = '#10B981';
+        if (status === 'MODERATE') color = '#F59E0B';
+        if (status === 'HIGH') color = '#F97316';
+        if (status === 'SEVERE' || status === 'CRITICAL') color = '#EF4444';
+
+        const marker = L.circleMarker([inter.latitude, inter.longitude], {
+          radius: 9,
+          fillColor: color,
+          fillOpacity: 1.0,
+          color: '#0F172A',
+          weight: 2
+        }).addTo(map);
+
+        marker.on('click', () => {
+          setSelectedIntersectionPopup(inter);
+          if (onSelectIntersection) onSelectIntersection(inter.id);
+        });
+
+        leafletMarkersRef.current.push(marker);
+      });
+    }
+
+    // 3. Cameras
+    if (layers.fixedCameras) {
+      cameras.forEach((cam) => {
+        const inter = intersections.find((i) => i.id === cam.intersection_id);
+        const lat = cam.latitude !== undefined ? cam.latitude : inter?.latitude;
+        const lng = cam.longitude !== undefined ? cam.longitude : inter?.longitude;
+        if (lat === undefined || lng === undefined) return;
+
+        const isOnline = cam.status === 'ONLINE';
+        const marker = L.circleMarker([lat + 0.0004, lng - 0.0004], {
+          radius: 7,
+          fillColor: isOnline ? '#10B981' : '#EF4444',
+          fillOpacity: 1.0,
+          color: '#FFFFFF',
+          weight: 2
+        }).addTo(map);
+
+        marker.on('click', () => setSelectedCameraPopup(cam));
+        leafletMarkersRef.current.push(marker);
+      });
+    }
+
+    // 4. Mobile Devices
+    if (layers.mobileDevices) {
+      devices.forEach((dev) => {
+        if (!dev.latitude || !dev.longitude) return;
+        const marker = L.circleMarker([dev.latitude, dev.longitude], {
+          radius: 8,
+          fillColor: '#2563EB',
+          fillOpacity: 1.0,
+          color: '#FFFFFF',
+          weight: 2
+        }).addTo(map);
+
+        marker.on('click', () => setSelectedDevicePopup(dev));
+        leafletMarkersRef.current.push(marker);
+      });
+    }
+
+    // 5. Trajectory
+    if (layers.trajectories && activeTrajectoryPath && activeTrajectoryPath.length > 0) {
+      const coords = activeTrajectoryPath.map((p) => [p.lat, p.lng] as [number, number]);
+      const polyline = L.polyline(coords, {
+        color: '#245B84',
+        weight: 5,
+        opacity: 0.95
+      }).addTo(map);
+      leafletPolylinesRef.current.push(polyline);
+      map.fitBounds(polyline.getBounds(), { padding: [40, 40] });
+    }
+  };
+
+  // Helper to format date safely
+  const formatTime = (ts?: string | Date) => {
+    if (!ts) return 'N/A';
+    try {
+      const d = typeof ts === 'string' ? new Date(ts) : ts;
+      return d.toLocaleTimeString();
+    } catch {
+      return 'N/A';
+    }
+  };
+
+  // Get active measurement for a camera or junction
+  const getCameraMeasurement = (cameraId: number) => {
+    return measurements[cameraId] || null;
+  };
 
   return (
-    <div className="relative w-full h-full min-h-[400px] rounded-lg overflow-hidden border border-[#DCE4EA] bg-[#F6F8FA]">
-      {/* Map Container */}
-      <div ref={mapContainerRef} className="w-full h-full min-h-[400px] z-10" />
+    <div className={`relative w-full ${fullScreenPage ? 'h-full min-h-[550px]' : 'h-[500px] min-h-[420px]'} rounded-xl overflow-hidden border border-[#DCE4EA] bg-[#F8FAFC] shadow-sm select-none`}>
+      {/* Map Canvas Container */}
+      <div ref={mapContainerRef} className="w-full h-full z-10" />
 
-      {/* Map Header Telemetry Bar */}
-      <div className="absolute top-3 left-3 z-20 bg-white/90 backdrop-blur-md px-3 py-1.5 rounded border border-[#DCE4EA] shadow-xs flex items-center gap-3 text-[10px] font-mono select-none">
-        <div className="flex items-center gap-1.5 font-bold text-slate-700">
-          <Zap className="w-3.5 h-3.5 text-[#245B84]" /> GIS MAP ENGINE
-        </div>
-        <span className="text-slate-300">|</span>
-        <div className="flex items-center gap-1 text-slate-600">
-          Data Age: <b className="text-[#245B84]">{dataAgeSec}s</b>
-        </div>
-        <span className="text-slate-300">|</span>
-        <div className="flex items-center gap-1 text-[#2E7D5B] font-bold">
-          <span className="w-2 h-2 rounded-full bg-[#2E7D5B] animate-pulse"></span>
-          REALTIME SYNC
-        </div>
-      </div>
-
-      {/* Map Style Selector (Google Maps / Satellite / Traffic / Dark) */}
-      <div className="absolute top-3 right-14 z-20">
-        <MapStyleSelector currentStyle={mapStyle} onStyleChange={setMapStyle} />
-      </div>
-
-      {/* Layer Control Button */}
-      <button
-        onClick={() => setShowLayerPanel(!showLayerPanel)}
-        className="absolute top-3 right-3 z-20 p-2 bg-white rounded border border-[#DCE4EA] shadow-xs text-slate-700 hover:text-[#245B84] transition-colors select-none"
-        title="Map Layers"
-      >
-        <Layers className="w-4 h-4" />
-      </button>
-
-      {/* Layer Toggle Panel */}
-      {showLayerPanel && (
-        <div className="absolute top-12 right-3 z-30 bg-white p-3 rounded-lg border border-[#DCE4EA] shadow-md text-xs font-mono space-y-2 select-none w-48">
-          <h4 className="font-bold text-slate-800 border-b pb-1 flex items-center justify-between">
-            <span>MAP LAYERS</span>
-            <button onClick={() => setShowLayerPanel(false)} className="text-slate-400 hover:text-slate-600">×</button>
-          </h4>
-          <label className="flex items-center gap-2 cursor-pointer text-slate-700 hover:text-slate-900">
-            <input
-              type="checkbox"
-              checked={layers.fixedCameras}
-              onChange={e => setLayers({ ...layers, fixedCameras: e.target.checked })}
-            />
-            <span>Fixed Cameras</span>
-          </label>
-          <label className="flex items-center gap-2 cursor-pointer text-slate-700 hover:text-slate-900">
-            <input
-              type="checkbox"
-              checked={layers.mobileCameras}
-              onChange={e => setLayers({ ...layers, mobileCameras: e.target.checked })}
-            />
-            <span>Mobile Cameras</span>
-          </label>
-          <label className="flex items-center gap-2 cursor-pointer text-slate-700 hover:text-slate-900">
-            <input
-              type="checkbox"
-              checked={layers.roadDensity}
-              onChange={e => setLayers({ ...layers, roadDensity: e.target.checked })}
-            />
-            <span>Traffic Segments</span>
-          </label>
-          <label className="flex items-center gap-2 cursor-pointer text-slate-700 hover:text-slate-900">
-            <input
-              type="checkbox"
-              checked={layers.heatmap}
-              onChange={e => setLayers({ ...layers, heatmap: e.target.checked })}
-            />
-            <span>Congestion Heatmap</span>
-          </label>
+      {/* Non-Blocking Banner: Google Traffic Layer Status (Section 18) */}
+      {googleTrafficUnavailable && (
+        <div className="absolute top-3 left-1/2 -translate-x-1/2 z-30 bg-amber-50/95 border border-amber-300 text-amber-900 px-3.5 py-1.5 rounded-lg shadow-sm text-xs font-mono flex items-center gap-2 max-w-md backdrop-blur-xs">
+          <AlertCircle className="w-4 h-4 text-amber-600 shrink-0" />
+          <span>Google Traffic Layer unavailable. Operating in Resilient VIGITRA GIS Mode.</span>
         </div>
       )}
 
-      {/* Selected Camera Telemetry Modal */}
-      {selectedCameraPopup && (
-        <div className="absolute bottom-4 right-4 z-20 bg-white p-4 rounded-lg shadow-lg border border-[#DCE4EA] text-xs max-w-xs space-y-3 select-none">
+      {/* Top Left: Telemetry & Demo Mode Bar (Section 17) */}
+      <div className="absolute top-3 left-3 z-20 flex flex-wrap items-center gap-2 font-mono text-[11px]">
+        <div className="bg-white/95 backdrop-blur-md px-3 py-1.5 rounded-lg border border-[#DCE4EA] shadow-xs flex items-center gap-2.5 text-slate-700">
+          <div className="flex items-center gap-1.5 font-bold text-[#245B84]">
+            <Zap className="w-3.5 h-3.5 text-[#245B84]" />
+            <span>TRAFFIC INTELLIGENCE MAP</span>
+          </div>
+          <span className="text-slate-300">|</span>
+          <div className="flex items-center gap-1 text-slate-600">
+            <span>Age:</span>
+            <b className="text-[#245B84]">{dataAgeSec}s</b>
+          </div>
+          <span className="text-slate-300">|</span>
+          <div className="flex items-center gap-1.5 text-emerald-700 font-bold">
+            <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
+            <span>REALTIME</span>
+          </div>
+        </div>
+
+        {/* Demo Mode Transparency Badge (Section 17) */}
+        <div className="hidden sm:flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-blue-50/95 border border-blue-200 text-blue-900 shadow-xs font-bold text-[10px]">
+          <Video className="w-3.5 h-3.5 text-blue-600" />
+          <span>DEMO MODE — Camera Source: Demo Video Feeds</span>
+        </div>
+      </div>
+
+      {/* Top Right: Map Style Selector & Layer Control Button (Section 3) */}
+      <div className="absolute top-3 right-3 z-20 flex items-center gap-2">
+        <MapStyleSelector currentStyle={mapStyle} onStyleChange={setMapStyle} />
+
+        <button
+          type="button"
+          onClick={() => setShowLayerPanel(!showLayerPanel)}
+          className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg border text-xs font-semibold font-mono shadow-xs backdrop-blur-md transition-all cursor-pointer ${
+            showLayerPanel
+              ? 'bg-[#245B84] text-white border-[#245B84]'
+              : 'bg-white/95 hover:bg-white text-slate-700 border-[#DCE4EA]'
+          }`}
+          title="Toggle Map Layers"
+        >
+          <Layers className="w-4 h-4" />
+          <span className="hidden sm:inline">LAYERS</span>
+        </button>
+      </div>
+
+      {/* Map Layer Control Panel (Section 3 & 4) */}
+      {showLayerPanel && (
+        <div className="absolute top-14 right-3 z-30 w-72 bg-white/98 backdrop-blur-md rounded-xl border border-slate-200 shadow-xl p-4 text-xs font-mono space-y-3 animate-in fade-in zoom-in-95 duration-100 max-h-[85vh] overflow-y-auto">
           <div className="flex items-center justify-between border-b pb-2">
-            <div className="flex items-center gap-2 font-mono font-bold text-[#245B84]">
-              <Video className="w-4 h-4" />
-              <span>{selectedCameraPopup.name}</span>
+            <div className="flex items-center gap-1.5 font-bold text-slate-800">
+              <Layers className="w-4 h-4 text-[#245B84]" />
+              <span>MAP LAYERS</span>
             </div>
-            <button onClick={() => setSelectedCameraPopup(null)} className="text-slate-400 hover:text-slate-700 font-bold">×</button>
+            <button
+              type="button"
+              onClick={() => setShowLayerPanel(false)}
+              className="text-slate-400 hover:text-slate-700 p-1 rounded-md"
+            >
+              <X className="w-4 h-4" />
+            </button>
           </div>
-          <div className="space-y-1 font-mono text-[11px] text-slate-600">
-            <p><span className="text-slate-400">Node ID:</span> #{selectedCameraPopup.id}</p>
-            <p><span className="text-slate-400">Source Type:</span> <b className="text-slate-800">{selectedCameraPopup.source_type}</b></p>
-            <p><span className="text-slate-400">Stream Status:</span> <span className="font-bold text-[#2E7D5B]">{selectedCameraPopup.status}</span></p>
-            <p><span className="text-slate-400">Frame Rate:</span> {selectedCameraPopup.fps || 30.0} FPS</p>
+
+          <div className="space-y-2.5">
+            {/* Google Live Traffic Toggle (Section 1 & 4) */}
+            <label className="flex items-start gap-2.5 p-2 rounded-lg hover:bg-slate-50 cursor-pointer border border-transparent hover:border-slate-200 transition-colors">
+              <input
+                type="checkbox"
+                checked={layers.googleTraffic}
+                onChange={(e) => setLayers({ ...layers, googleTraffic: e.target.checked })}
+                className="mt-0.5 rounded text-blue-600 focus:ring-blue-500 cursor-pointer"
+              />
+              <div className="flex-1">
+                <div className="font-bold text-slate-800 flex items-center justify-between">
+                  <span>Google Live Traffic</span>
+                  <span className="text-[10px] px-1.5 py-0.2 bg-emerald-100 text-emerald-800 rounded font-semibold">Live</span>
+                </div>
+                <p className="text-[10px] text-slate-500 mt-0.5">Google Maps official real-time street speeds</p>
+              </div>
+            </label>
+
+            {/* VIGITRA AI Traffic Toggle (Section 4 & 9) */}
+            <label className="flex items-start gap-2.5 p-2 rounded-lg hover:bg-slate-50 cursor-pointer border border-transparent hover:border-slate-200 transition-colors">
+              <input
+                type="checkbox"
+                checked={layers.vigitraTraffic}
+                onChange={(e) => setLayers({ ...layers, vigitraTraffic: e.target.checked })}
+                className="mt-0.5 rounded text-emerald-600 focus:ring-emerald-500 cursor-pointer"
+              />
+              <div className="flex-1">
+                <div className="font-bold text-slate-800 flex items-center justify-between">
+                  <span>VIGITRA AI Traffic</span>
+                  <span className="text-[10px] px-1.5 py-0.2 bg-blue-100 text-blue-800 rounded font-semibold">AI Vision</span>
+                </div>
+                <p className="text-[10px] text-slate-500 mt-0.5">Spatial density heatmaps from YOLOv8 tracking</p>
+              </div>
+            </label>
+
+            <div className="border-t border-slate-100 pt-2 space-y-2">
+              {/* Cameras Layer */}
+              <label className="flex items-center justify-between px-2 py-1.5 rounded-lg hover:bg-slate-50 cursor-pointer">
+                <div className="flex items-center gap-2 text-slate-700">
+                  <input
+                    type="checkbox"
+                    checked={layers.fixedCameras}
+                    onChange={(e) => setLayers({ ...layers, fixedCameras: e.target.checked })}
+                    className="rounded text-blue-600 cursor-pointer"
+                  />
+                  <span>Fixed Cameras</span>
+                </div>
+                <span className="text-[10px] text-slate-500 font-bold">{cameras.length} nodes</span>
+              </label>
+
+              {/* Junctions Layer */}
+              <label className="flex items-center justify-between px-2 py-1.5 rounded-lg hover:bg-slate-50 cursor-pointer">
+                <div className="flex items-center gap-2 text-slate-700">
+                  <input
+                    type="checkbox"
+                    checked={layers.junctions}
+                    onChange={(e) => setLayers({ ...layers, junctions: e.target.checked })}
+                    className="rounded text-blue-600 cursor-pointer"
+                  />
+                  <span>Junctions</span>
+                </div>
+                <span className="text-[10px] text-slate-500 font-bold">{intersections.length}</span>
+              </label>
+
+              {/* Signals Layer */}
+              <label className="flex items-center justify-between px-2 py-1.5 rounded-lg hover:bg-slate-50 cursor-pointer">
+                <div className="flex items-center gap-2 text-slate-700">
+                  <input
+                    type="checkbox"
+                    checked={layers.signals}
+                    onChange={(e) => setLayers({ ...layers, signals: e.target.checked })}
+                    className="rounded text-blue-600 cursor-pointer"
+                  />
+                  <span>Signals & Phases</span>
+                </div>
+                <span className="text-[10px] text-slate-500 font-bold">{signals.length}</span>
+              </label>
+
+              {/* Mobile Devices Layer */}
+              <label className="flex items-center justify-between px-2 py-1.5 rounded-lg hover:bg-slate-50 cursor-pointer">
+                <div className="flex items-center gap-2 text-slate-700">
+                  <input
+                    type="checkbox"
+                    checked={layers.mobileDevices}
+                    onChange={(e) => setLayers({ ...layers, mobileDevices: e.target.checked })}
+                    className="rounded text-blue-600 cursor-pointer"
+                  />
+                  <span>Mobile Devices</span>
+                </div>
+                <span className="text-[10px] text-slate-500 font-bold">{devices.filter((d) => d.latitude).length} GPS</span>
+              </label>
+
+              {/* Trajectories Layer */}
+              <label className="flex items-center justify-between px-2 py-1.5 rounded-lg hover:bg-slate-50 cursor-pointer">
+                <div className="flex items-center gap-2 text-slate-700">
+                  <input
+                    type="checkbox"
+                    checked={layers.trajectories}
+                    onChange={(e) => setLayers({ ...layers, trajectories: e.target.checked })}
+                    className="rounded text-blue-600 cursor-pointer"
+                  />
+                  <span>Trajectories</span>
+                </div>
+                <span className="text-[10px] text-slate-500 font-bold">{activeTrajectoryPath?.length ? 'Active' : 'Standby'}</span>
+              </label>
+
+              {/* Alerts Layer */}
+              <label className="flex items-center justify-between px-2 py-1.5 rounded-lg hover:bg-slate-50 cursor-pointer">
+                <div className="flex items-center gap-2 text-slate-700">
+                  <input
+                    type="checkbox"
+                    checked={layers.alerts}
+                    onChange={(e) => setLayers({ ...layers, alerts: e.target.checked })}
+                    className="rounded text-blue-600 cursor-pointer"
+                  />
+                  <span>Alerts & Events</span>
+                </div>
+                <span className="text-[10px] text-red-600 font-bold">{alerts.length}</span>
+              </label>
+            </div>
           </div>
+        </div>
+      )}
+
+      {/* Map Legend (Section 15) */}
+      <div className="absolute bottom-4 left-3 z-20">
+        <div className="bg-white/95 backdrop-blur-md rounded-xl border border-slate-200 shadow-md p-3 text-[11px] font-mono select-none">
+          <div className="flex items-center justify-between gap-3 font-bold text-slate-800 pb-1.5 border-b border-slate-100">
+            <span className="flex items-center gap-1.5">
+              <Info className="w-3.5 h-3.5 text-[#245B84]" /> MAP LEGEND
+            </span>
+            <button
+              type="button"
+              onClick={() => setShowLegend(!showLegend)}
+              className="text-slate-400 hover:text-slate-600 text-[10px]"
+            >
+              {showLegend ? 'Hide' : 'Show'}
+            </button>
+          </div>
+
+          {showLegend && (
+            <div className="pt-2 space-y-2.5 max-w-[260px]">
+              {/* Google Traffic Legend */}
+              <div>
+                <div className="text-[9px] font-bold text-slate-400 uppercase tracking-wider mb-1">
+                  Google Live Traffic
+                </div>
+                <div className="grid grid-cols-2 gap-1 text-[10px] text-slate-600">
+                  <div className="flex items-center gap-1.5">
+                    <span className="w-2.5 h-2.5 rounded-full bg-[#10B981]" /> Normal flow
+                  </div>
+                  <div className="flex items-center gap-1.5">
+                    <span className="w-2.5 h-2.5 rounded-full bg-[#F59E0B]" /> Medium traffic
+                  </div>
+                  <div className="flex items-center gap-1.5">
+                    <span className="w-2.5 h-2.5 rounded-full bg-[#F97316]" /> Heavy congestion
+                  </div>
+                  <div className="flex items-center gap-1.5">
+                    <span className="w-2.5 h-2.5 rounded-full bg-[#DC2626]" /> Severe delay
+                  </div>
+                </div>
+              </div>
+
+              {/* VIGITRA AI Legend */}
+              <div className="border-t border-slate-100 pt-1.5">
+                <div className="text-[9px] font-bold text-[#245B84] uppercase tracking-wider mb-1">
+                  VIGITRA AI Intelligence
+                </div>
+                <div className="grid grid-cols-2 gap-1 text-[10px] text-slate-600">
+                  <div className="flex items-center gap-1.5">
+                    <Camera className="w-3 h-3 text-slate-700" /> Fixed CCTV
+                  </div>
+                  <div className="flex items-center gap-1.5">
+                    <MapPin className="w-3 h-3 text-[#245B84]" /> Junction Node
+                  </div>
+                  <div className="flex items-center gap-1.5">
+                    <Smartphone className="w-3 h-3 text-blue-600" /> Mobile Unit
+                  </div>
+                  <div className="flex items-center gap-1.5">
+                    <AlertTriangle className="w-3 h-3 text-red-600" /> Active Alert
+                  </div>
+                </div>
+              </div>
+            </div>
+          )}
+        </div>
+      </div>
+
+      {/* Camera Telemetry Card Modal (Section 6 & 16) */}
+      {selectedCameraPopup && (
+        <div className="absolute bottom-4 right-4 z-30 bg-white rounded-xl shadow-2xl border border-slate-200 text-xs w-80 font-mono p-4 space-y-3 animate-in fade-in slide-in-from-bottom-3 duration-150">
+          <div className="flex items-center justify-between border-b pb-2">
+            <div className="flex items-center gap-2 font-bold text-[#245B84]">
+              <Video className="w-4 h-4" />
+              <span className="truncate max-w-[200px]">{selectedCameraPopup.name}</span>
+            </div>
+            <button
+              type="button"
+              onClick={() => setSelectedCameraPopup(null)}
+              className="text-slate-400 hover:text-slate-700 font-bold text-sm"
+            >
+              ×
+            </button>
+          </div>
+
+          <div className="space-y-1.5 text-slate-600">
+            <div className="flex justify-between">
+              <span className="text-slate-400">Node ID:</span>
+              <b className="text-slate-800">#{selectedCameraPopup.id}</b>
+            </div>
+            <div className="flex justify-between">
+              <span className="text-slate-400">Stream Status:</span>
+              <span className={`font-bold px-1.5 py-0.2 rounded text-[10px] ${
+                selectedCameraPopup.status === 'ONLINE' ? 'bg-emerald-100 text-emerald-800' : 'bg-red-100 text-red-800'
+              }`}>
+                {selectedCameraPopup.status}
+              </span>
+            </div>
+            <div className="flex justify-between">
+              <span className="text-slate-400">Source:</span>
+              <span className="text-slate-800">{selectedCameraPopup.source_type} (Demo Video)</span>
+            </div>
+            <div className="flex justify-between">
+              <span className="text-slate-400">Frame Rate:</span>
+              <span className="text-slate-800">{selectedCameraPopup.fps || 30.0} FPS</span>
+            </div>
+
+            {/* Live Measurements (Section 5 & 6: Real data only, no Math.random) */}
+            {selectedCameraPopup.status === 'ONLINE' ? (
+              (() => {
+                const meas = getCameraMeasurement(selectedCameraPopup.id);
+                return (
+                  <div className="mt-2 pt-2 border-t border-slate-100 space-y-1 bg-slate-50 p-2 rounded-lg">
+                    <div className="text-[10px] font-bold text-[#245B84] uppercase">Live AI Telemetry</div>
+                    <div className="flex justify-between">
+                      <span className="text-slate-500">Vehicles:</span>
+                      <b className="text-slate-800">{meas?.vehicle_count ?? 'Waiting for detection...'}</b>
+                    </div>
+                    <div className="flex justify-between">
+                      <span className="text-slate-500">Traffic Density:</span>
+                      <b className="text-slate-800">{meas?.density_state || meas?.congestion_level || 'ANALYZING'}</b>
+                    </div>
+                    <div className="flex justify-between">
+                      <span className="text-slate-500">Queue Length:</span>
+                      <b className="text-slate-800">{meas?.queue_length !== undefined ? `${meas.queue_length} vehicles` : 'N/A'}</b>
+                    </div>
+                    <div className="flex justify-between">
+                      <span className="text-slate-500">Avg Speed:</span>
+                      <b className="text-slate-800">{meas?.average_speed_kmh ? `${meas.average_speed_kmh} km/h` : 'N/A'}</b>
+                    </div>
+                    <div className="flex justify-between text-[10px] text-slate-400 pt-0.5">
+                      <span>Updated:</span>
+                      <span>{formatTime(meas?.timestamp)}</span>
+                    </div>
+                  </div>
+                );
+              })()
+            ) : (
+              <div className="mt-2 p-2 bg-red-50 text-red-700 rounded text-[11px]">
+                Camera is currently OFFLINE. Live measurements paused.
+              </div>
+            )}
+          </div>
+
           {onSelectCameraForVideo && (
             <button
+              type="button"
               onClick={() => onSelectCameraForVideo(selectedCameraPopup.id)}
-              className="w-full py-1.5 bg-[#245B84] hover:bg-[#1E4A6F] text-white font-mono font-bold text-xs rounded transition-colors"
+              className="w-full py-2 bg-[#245B84] hover:bg-[#1B4564] text-white font-bold text-xs rounded-lg transition-colors cursor-pointer"
             >
-              VIEW LIVE VIDEO
+              VIEW LIVE STREAM & DETECTIONS
             </button>
           )}
         </div>
       )}
 
-      {/* Selected Road Telemetry Modal */}
-      {selectedRoad && (
-        <div className="absolute bottom-4 left-4 z-20 bg-white p-4 rounded-lg shadow-lg border border-[#DCE4EA] text-xs max-w-xs space-y-2 select-none font-mono">
+      {/* Junction Telemetry Card Modal (Section 7, 8 & 16) */}
+      {selectedIntersectionPopup && (
+        <div className="absolute bottom-4 right-4 z-30 bg-white rounded-xl shadow-2xl border border-slate-200 text-xs w-80 font-mono p-4 space-y-3 animate-in fade-in slide-in-from-bottom-3 duration-150">
           <div className="flex items-center justify-between border-b pb-2">
-            <h4 className="font-bold text-[#245B84]">{selectedRoad.name}</h4>
-            <button onClick={() => setSelectedRoad(null)} className="text-slate-400 hover:text-slate-700 font-bold">×</button>
+            <div className="flex items-center gap-2 font-bold text-[#245B84]">
+              <MapPin className="w-4 h-4" />
+              <span className="truncate max-w-[200px]">{selectedIntersectionPopup.name}</span>
+            </div>
+            <button
+              type="button"
+              onClick={() => setSelectedIntersectionPopup(null)}
+              className="text-slate-400 hover:text-slate-700 font-bold text-sm"
+            >
+              ×
+            </button>
           </div>
-          <p><span className="text-slate-500">Route Segment:</span> {selectedRoad.source} → {selectedRoad.target}</p>
-          <p><span className="text-slate-500">Distance:</span> {selectedRoad.distance} km</p>
-          <p><span className="text-slate-500">Active Vehicles:</span> {selectedRoad.volume} vehicles</p>
-          <p><span className="text-slate-500">Average Speed:</span> {selectedRoad.avgSpeed} km/h</p>
-          <p><span className="text-slate-500">Queue Length:</span> {selectedRoad.queue} vehicles</p>
-          <p><span className="text-slate-500">Waiting Time:</span> {selectedRoad.waitingTime} sec</p>
-          <p><span className="text-slate-500">Congestion Level:</span> <span className="font-bold text-[#245B84]">{selectedRoad.status}</span></p>
+
+          <div className="space-y-1.5 text-slate-600">
+            <div className="flex justify-between">
+              <span className="text-slate-400">Junction ID:</span>
+              <b className="text-slate-800">#{selectedIntersectionPopup.id}</b>
+            </div>
+            <div className="flex justify-between">
+              <span className="text-slate-400">Approaches:</span>
+              <span className="text-slate-800">{selectedIntersectionPopup.num_approaches || 4}-Side Dynamic</span>
+            </div>
+            <div className="flex justify-between">
+              <span className="text-slate-400">Traffic Density:</span>
+              <span className={`font-bold px-1.5 py-0.2 rounded text-[10px] ${
+                selectedIntersectionPopup.current_status === 'HIGH' || selectedIntersectionPopup.current_status === 'SEVERE'
+                  ? 'bg-amber-100 text-amber-800'
+                  : 'bg-emerald-100 text-emerald-800'
+              }`}>
+                {selectedIntersectionPopup.current_status || 'LOW'}
+              </span>
+            </div>
+
+            {/* Signal Optimization Status (Section 8) */}
+            {(() => {
+              const sig = signals.find((s) => s.intersection_id === selectedIntersectionPopup.id);
+              if (sig) {
+                return (
+                  <div className="mt-2 pt-2 border-t border-slate-100 bg-slate-50 p-2 rounded-lg space-y-1">
+                    <div className="text-[10px] font-bold text-emerald-700 uppercase">Adaptive Signal Engine</div>
+                    <div className="flex justify-between">
+                      <span className="text-slate-500">Current Phase:</span>
+                      <b className="text-slate-800">{sig.current_phase || 'AUTO DYNAMIC'}</b>
+                    </div>
+                    <div className="flex justify-between">
+                      <span className="text-slate-500">Recommended Green:</span>
+                      <b className="text-slate-800">{sig.green_duration ? `${sig.green_duration} sec` : 'N/A'}</b>
+                    </div>
+                    <div className="flex justify-between">
+                      <span className="text-slate-500">Cycle State:</span>
+                      <span className="text-emerald-700 font-bold">
+                        {sig.is_adaptive ? 'ADAPTIVE OPTIMIZED' : 'FIXED CYCLE'}
+                      </span>
+                    </div>
+                  </div>
+                );
+              }
+              return (
+                <div className="text-[10px] text-slate-400 italic">Signal status unavailable for this node</div>
+              );
+            })()}
+          </div>
         </div>
       )}
 
-      <style>{`
-        @keyframes pulse {
-          0% { transform: scale(0.95); opacity: 0.6; }
-          70% { transform: scale(1.15); opacity: 0.0; }
-          100% { transform: scale(0.95); opacity: 0.0; }
-        }
-      `}</style>
+      {/* Mobile Device Telemetry Card Modal (Section 10) */}
+      {selectedDevicePopup && (
+        <div className="absolute bottom-4 right-4 z-30 bg-white rounded-xl shadow-2xl border border-slate-200 text-xs w-80 font-mono p-4 space-y-3 animate-in fade-in slide-in-from-bottom-3 duration-150">
+          <div className="flex items-center justify-between border-b pb-2">
+            <div className="flex items-center gap-2 font-bold text-blue-700">
+              <Smartphone className="w-4 h-4" />
+              <span className="truncate max-w-[200px]">{selectedDevicePopup.name || selectedDevicePopup.device_id}</span>
+            </div>
+            <button
+              type="button"
+              onClick={() => setSelectedDevicePopup(null)}
+              className="text-slate-400 hover:text-slate-700 font-bold text-sm"
+            >
+              ×
+            </button>
+          </div>
+
+          <div className="space-y-1.5 text-slate-600">
+            <div className="flex justify-between">
+              <span className="text-slate-400">Device ID:</span>
+              <b className="text-slate-800">#{selectedDevicePopup.id}</b>
+            </div>
+            <div className="flex justify-between">
+              <span className="text-slate-400">Platform:</span>
+              <span className="text-slate-800">{selectedDevicePopup.platform || 'Android Mobile'}</span>
+            </div>
+            <div className="flex justify-between">
+              <span className="text-slate-400">Connection:</span>
+              <span className="text-emerald-700 font-bold">{selectedDevicePopup.connection_status || 'ONLINE'}</span>
+            </div>
+            <div className="flex justify-between">
+              <span className="text-slate-400">Location Status:</span>
+              {(() => {
+                const lastSeenMs = selectedDevicePopup.last_seen ? new Date(selectedDevicePopup.last_seen).getTime() : 0;
+                const isStale = Date.now() - lastSeenMs > 120000;
+                return (
+                  <span className={`font-bold px-1.5 py-0.2 rounded text-[10px] ${
+                    isStale ? 'bg-amber-100 text-amber-800' : 'bg-blue-100 text-blue-800'
+                  }`}>
+                    {isStale ? 'LOCATION STALE' : 'LOCATION AVAILABLE'}
+                  </span>
+                );
+              })()}
+            </div>
+            <div className="flex justify-between">
+              <span className="text-slate-400">Coordinates:</span>
+              <span className="text-slate-800">
+                {selectedDevicePopup.latitude?.toFixed(4)}, {selectedDevicePopup.longitude?.toFixed(4)}
+              </span>
+            </div>
+            <div className="flex justify-between">
+              <span className="text-slate-400">Accuracy:</span>
+              <span className="text-slate-800">±{selectedDevicePopup.accuracy_meters || 12}m</span>
+            </div>
+            <div className="flex justify-between">
+              <span className="text-slate-400">Battery:</span>
+              <span className="text-slate-800">{selectedDevicePopup.battery_pct || 85}%</span>
+            </div>
+            <div className="flex justify-between text-[10px] text-slate-400 pt-1 border-t border-slate-100">
+              <span>Last Reported:</span>
+              <span>{formatTime(selectedDevicePopup.last_seen)}</span>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Alert Card Modal (Section 12) */}
+      {selectedAlertPopup && (
+        <div className="absolute bottom-4 right-4 z-30 bg-white rounded-xl shadow-2xl border border-red-200 text-xs w-80 font-mono p-4 space-y-3 animate-in fade-in slide-in-from-bottom-3 duration-150">
+          <div className="flex items-center justify-between border-b border-red-100 pb-2">
+            <div className="flex items-center gap-2 font-bold text-red-700">
+              <AlertTriangle className="w-4 h-4" />
+              <span>ALERT #{selectedAlertPopup.id}</span>
+            </div>
+            <button
+              type="button"
+              onClick={() => setSelectedAlertPopup(null)}
+              className="text-slate-400 hover:text-slate-700 font-bold text-sm"
+            >
+              ×
+            </button>
+          </div>
+
+          <div className="space-y-1.5 text-slate-600">
+            <div className="flex justify-between">
+              <span className="text-slate-400">Type:</span>
+              <b className="text-slate-800">{selectedAlertPopup.type}</b>
+            </div>
+            <div className="flex justify-between">
+              <span className="text-slate-400">Severity:</span>
+              <span className={`font-bold px-1.5 py-0.2 rounded text-[10px] ${
+                selectedAlertPopup.severity === 'CRITICAL' ? 'bg-red-100 text-red-800' : 'bg-amber-100 text-amber-800'
+              }`}>
+                {selectedAlertPopup.severity}
+              </span>
+            </div>
+            <div className="flex justify-between">
+              <span className="text-slate-400">Location:</span>
+              <span className="text-slate-800">{selectedAlertPopup.location || 'Monitored Corridor'}</span>
+            </div>
+            <div className="flex justify-between">
+              <span className="text-slate-400">Vehicle Plate:</span>
+              <b className="text-blue-700 font-mono">{selectedAlertPopup.vehicle_plate || 'N/A'}</b>
+            </div>
+            <div className="p-2 bg-red-50 text-red-900 rounded text-[11px] leading-relaxed mt-1">
+              {selectedAlertPopup.message || 'Automated traffic incident alert triggered by monitoring rules.'}
+            </div>
+            <div className="flex justify-between text-[10px] text-slate-400 pt-1">
+              <span>Time:</span>
+              <span>{formatTime(selectedAlertPopup.timestamp)}</span>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Road Segment Telemetry Card Modal (Section 5 & 16: No fake Math.random) */}
+      {selectedRoadPopup && (
+        <div className="absolute bottom-4 left-4 z-30 bg-white rounded-xl shadow-2xl border border-slate-200 text-xs w-80 font-mono p-4 space-y-2 animate-in fade-in slide-in-from-bottom-3 duration-150">
+          <div className="flex items-center justify-between border-b pb-2">
+            <h4 className="font-bold text-[#245B84] truncate">{selectedRoadPopup.name}</h4>
+            <button
+              type="button"
+              onClick={() => setSelectedRoadPopup(null)}
+              className="text-slate-400 hover:text-slate-700 font-bold text-sm"
+            >
+              ×
+            </button>
+          </div>
+          <div className="space-y-1 text-slate-600">
+            <p><span className="text-slate-400">Segment:</span> {selectedRoadPopup.source} → {selectedRoadPopup.target}</p>
+            <p><span className="text-slate-400">Length:</span> {selectedRoadPopup.distance} km</p>
+            <p><span className="text-slate-400">Expected Travel Time:</span> {selectedRoadPopup.expectedTime} sec</p>
+            <p><span className="text-slate-400">Traffic Status:</span> <b className="text-[#245B84]">{selectedRoadPopup.status}</b></p>
+            <p><span className="text-slate-400">Vehicles:</span> {selectedRoadPopup.volume}</p>
+            <p><span className="text-slate-400">Avg Speed:</span> {selectedRoadPopup.avgSpeed !== 'N/A' ? `${selectedRoadPopup.avgSpeed} km/h` : 'N/A'}</p>
+          </div>
+        </div>
+      )}
     </div>
   );
 };
+
+export const GISMap = React.memo(GISMapComponent);
