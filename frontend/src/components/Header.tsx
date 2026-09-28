@@ -1,11 +1,28 @@
 import React, { useState, useEffect } from 'react';
+import { useLocation } from 'react-router-dom';
 import { Siren, Wifi, WifiOff, Bell, ShieldCheck, Activity, Cpu, MapPin, Navigation, Compass, CheckCircle2, AlertCircle, RefreshCw } from 'lucide-react';
 import { useStore } from '../store/useStore';
 import { apiClient } from '../api/client';
 import { NotificationDropdown } from './NotificationDropdown';
 import { useWebLocation } from '../hooks/useWebLocation';
 
+const ROUTE_LABELS: Record<string, string> = {
+  '/': 'Dashboard',
+  '/cameras': 'Live Cameras',
+  '/heatmap': 'Traffic Map',
+  '/trajectories': 'Vehicle Tracking',
+  '/anpr': 'ANPR & Watchlist',
+  '/signals': 'Signal Control',
+  '/alerts': 'Alerts',
+  '/forecast': 'Traffic Forecast',
+  '/predictions': 'Traffic Forecast',
+  '/recordings': 'Records Archive',
+  '/devices': 'Mobile Devices',
+  '/settings': 'Settings'
+};
+
 export const Header: React.FC = () => {
+  const location = useLocation();
   const { isConnected, emergencyEvents, alerts, unreadAlertsCount, setAlerts, addAlert, activeLiveUpdate } = useStore();
   const [timeStr, setTimeStr] = useState<string>('');
   const [healthIndex, setHealthIndex] = useState<{ score: number; status: string }>({ score: 84.5, status: 'GOOD' });
@@ -29,10 +46,14 @@ export const Header: React.FC = () => {
   const [isEditingLocation, setIsEditingLocation] = useState<boolean>(false);
   const [editedLocationText, setEditedLocationText] = useState<string>('');
 
+  const currentSectionName = ROUTE_LABELS[location.pathname] || (
+    location.pathname.startsWith('/cameras/') ? 'Camera Details' : 'Traffic Operations'
+  );
+
   useEffect(() => {
     const timer = setInterval(() => {
       const now = new Date();
-      setTimeStr(now.toLocaleTimeString() + ' | ' + now.toLocaleDateString());
+      setTimeStr(now.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' }));
     }, 1000);
     return () => clearInterval(timer);
   }, []);
@@ -81,17 +102,16 @@ export const Header: React.FC = () => {
   const criticalCount = alerts.filter(a => a.severity === 'CRITICAL' && !a.is_read).length;
 
   return (
-    <header className="h-14 sm:h-16 border-b border-[#DCE4EA] bg-white px-3 sm:px-6 flex items-center justify-between sticky top-0 z-30 select-none shadow-xs">
-      {/* Left Title & System Status */}
-      <div className="flex flex-col overflow-hidden">
-        <div className="flex items-center gap-1.5 sm:gap-2">
-          <span className="text-xs sm:text-sm font-mono font-extrabold text-[#245B84] uppercase tracking-wide truncate">
-            VIGITRA AI
-          </span>
-        </div>
-        <span className="hidden md:inline-block text-[10px] text-slate-500 font-mono mt-0.5 truncate">
-          City Traffic Control Center
+    <header className="h-13 sm:h-14 border-b border-[#DCE4EA] bg-white px-3 sm:px-5 flex items-center justify-between sticky top-0 z-30 select-none shadow-2xs">
+      {/* Left Minimal Breadcrumb */}
+      <div className="flex items-center gap-2 overflow-hidden">
+        <span className="text-[11px] font-mono font-bold text-slate-400 uppercase tracking-wider hidden sm:inline">
+          VIGITRA
         </span>
+        <span className="text-slate-300 text-xs hidden sm:inline">/</span>
+        <h2 className="text-xs sm:text-sm font-bold text-slate-800 tracking-tight font-sans truncate">
+          {currentSectionName}
+        </h2>
       </div>
 
       {/* Right Metrics, Connection Status & Controls */}

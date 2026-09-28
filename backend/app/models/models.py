@@ -61,6 +61,9 @@ class Intersection(Base):
     total_lanes: Mapped[int] = Column(Integer, default=4) # type: ignore
     num_approaches: Mapped[int] = Column(Integer, default=4) # type: ignore # 2, 3, or 4
     approaches_config: Mapped[Optional[Any]] = Column(JSON, nullable=True) # type: ignore # List of dicts: [{id, name, direction, camera_id}]
+    pedestrian_crossing_enabled: Mapped[bool] = Column(Boolean, default=True) # type: ignore
+    pedestrian_interval: Mapped[int] = Column(Integer, default=600) # type: ignore # 10 minutes default in seconds
+    pedestrian_duration: Mapped[int] = Column(Integer, default=30) # type: ignore # 30 seconds default in seconds
     created_at: Mapped[datetime] = Column(DateTime, default=datetime.utcnow) # type: ignore
 
     cameras = relationship("Camera", back_populates="intersection")

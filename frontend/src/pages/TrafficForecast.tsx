@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { TrendingUp, MapPin, AlertCircle, Clock, Navigation, CheckCircle2, RefreshCw, BarChart2, Shield } from 'lucide-react';
 import { apiClient } from '../api/client';
+import { PageHeader } from '../components/PageHeader';
 
 interface ForecastZone {
   id: string;
@@ -67,34 +68,33 @@ export const TrafficForecast: React.FC = () => {
   };
 
   return (
-    <div className="p-4 sm:p-6 space-y-6 select-none max-w-7xl mx-auto font-sans">
-      {/* Header Banner */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 bg-slate-900/90 p-5 rounded-xl border border-slate-800 shadow-xl">
-        <div className="space-y-1">
+    <div className="p-3 sm:p-5 space-y-4 select-none max-w-7xl mx-auto font-sans">
+      {/* Page Header */}
+      <PageHeader
+        title="Traffic Forecast"
+        subtitle="Congestion predictions and peak-window deployment advisory"
+        badge={
+          <span className="px-2 py-0.5 rounded text-[10px] font-mono font-bold bg-[#EAF7EF] text-[#2E7D5B] border border-[#D2EADA]">
+            {zones.length} ZONES MONITORED
+          </span>
+        }
+        actions={
           <div className="flex items-center gap-2">
-            <TrendingUp className="w-6 h-6 text-blue-400" />
-            <h1 className="text-xl font-bold tracking-tight text-white">Region-Based Traffic Forecasting</h1>
+            <div className="bg-white px-3 py-1 rounded-lg border border-[#DCE4EA] text-right shadow-2xs">
+              <span className="text-[9px] text-slate-400 font-mono uppercase block">Congestion Index</span>
+              <span className="text-xs font-bold text-amber-700 font-mono">{overallScore} / 100</span>
+            </div>
+            <button
+              onClick={fetchForecastData}
+              disabled={loading}
+              className="p-2 bg-white hover:bg-slate-50 border border-[#DCE4EA] text-slate-700 rounded-lg transition-colors shadow-2xs"
+              title="Refresh Forecast Data"
+            >
+              <RefreshCw className={`w-3.5 h-3.5 ${loading ? 'animate-spin' : ''}`} />
+            </button>
           </div>
-          <p className="text-xs text-slate-400">
-            Predictive congestion indices, vehicle volume modeling, and peak-hour deployment advisories categorized by city zones.
-          </p>
-        </div>
-
-        <div className="flex items-center gap-3">
-          <div className="bg-slate-800 px-4 py-2 rounded-lg border border-slate-700 text-right">
-            <div className="text-[10px] text-slate-400 font-mono uppercase">City Congestion Index</div>
-            <div className="text-lg font-black text-amber-400 font-mono">{overallScore} / 100</div>
-          </div>
-          <button
-            onClick={fetchForecastData}
-            disabled={loading}
-            className="p-2.5 bg-slate-800 hover:bg-slate-700 border border-slate-700 text-slate-200 rounded-lg transition-colors"
-            title="Refresh Forecast Data"
-          >
-            <RefreshCw className={`w-4 h-4 ${loading ? 'animate-spin' : ''}`} />
-          </button>
-        </div>
-      </div>
+        }
+      />
 
       {/* Main Grid: Left Zone Selector Cards, Right Detailed Zone Analysis */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">

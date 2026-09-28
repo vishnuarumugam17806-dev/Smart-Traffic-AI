@@ -23,13 +23,18 @@ import {
   Monitor,
   Eye,
   Sparkles,
-  Zap
+  Zap,
+  Footprints,
+  Timer,
+  AlertOctagon,
+  ShieldCheck
 } from 'lucide-react';
 import { apiClient, resolveVideoUrl } from '../api/client';
 import { Intersection } from '../types';
 import { useStore } from '../store/useStore';
 import { FALLBACK_INTERSECTIONS, FALLBACK_SIGNAL_DATA } from '../api/mockFallback';
 import { IntersectionRadiusRadar } from '../components/IntersectionRadiusRadar';
+import { PageHeader } from '../components/PageHeader';
 
 interface ApproachData {
   key: string;
@@ -98,6 +103,22 @@ export const Signals: React.FC = () => {
   const [decisionHistory, setDecisionHistory] = useState<DecisionRecord[]>([]);
   const [showHistoryModal, setShowHistoryModal] = useState<boolean>(false);
 
+  // Pedestrian Safety Phase State (Sections 1-13)
+  const [pedestrianTelemetry, setPedestrianTelemetry] = useState<any>(null);
+  const [showPedestrianConfigModal, setShowPedestrianConfigModal] = useState<boolean>(false);
+  const [showEmergencyOverrideModal, setShowEmergencyOverrideModal] = useState<boolean>(false);
+  const [showPedestrianEventsModal, setShowPedestrianEventsModal] = useState<boolean>(false);
+  const [pedestrianEvents, setPedestrianEvents] = useState<any[]>([]);
+  const [emergencyReason, setEmergencyReason] = useState<string>('Emergency 108 Ambulance priority clearance');
+  const [emergencyTargetApproach, setEmergencyTargetApproach] = useState<string>('');
+  const [emergencyConfirmed, setEmergencyConfirmed] = useState<boolean>(false);
+
+  // Pedestrian Configuration Form State
+  const [pedConfigEnabled, setPedConfigEnabled] = useState<boolean>(true);
+  const [pedConfigInterval, setPedConfigInterval] = useState<number>(600);
+  const [pedConfigDuration, setPedConfigDuration] = useState<number>(30);
+  const [pedConfigDemoMode, setPedConfigDemoMode] = useState<boolean>(false);
+
   // Demo Camera State (Sections 3 & 4: Dynamic Camera Display Selection)
   const [junctionCameras, setJunctionCameras] = useState<DemoCamera[]>([]);
   const [numCamerasToDisplay, setNumCamerasToDisplay] = useState<number>(2);
@@ -136,15 +157,25 @@ export const Signals: React.FC = () => {
   const fetchJunctionData = useCallback(async () => {
     if (!selectedJunctionId) return;
     try {
-      const [sigRes, trafRes, optRes, histRes] = await Promise.all([
+      const [sigRes, trafRes, optRes, histRes, pedRes] = await Promise.all([
         apiClient.get(`/intersections/${selectedJunctionId}/signal`),
         apiClient.get(`/intersections/${selectedJunctionId}/traffic`),
         apiClient.get(`/intersections/${selectedJunctionId}/optimization`),
-        apiClient.get(`/intersections/${selectedJunctionId}/decision-history?limit=15`).catch(() => ({ data: [] }))
+        apiClient.get(`/intersections/${selectedJunctionId}/decision-history?limit=15`).catch(() => ({ data: [] })),
+        apiClient.get(`/intersections/${selectedJunctionId}/pedestrian/status`).catch(() => null)
       ]);
       setSignalData(sigRes.data);
       setTrafficData(trafRes.data);
       setOptimizationData(optRes.data);
+      if (pedRes?.data) {
+        setPedestrianTelemetry(pedRes.data);
+        setPedConfigEnabled(pedRes.data.pedestrian_phase_enabled ?? pedRes.data.pedestrianPhaseEnabled ?? true);
+        setPedConfigInterval(pedRes.data.pedestrian_interval_seconds ?? pedRes.data.pedestrianIntervalSeconds ?? 600);
+        setPedConfigDuration(pedRes.data.pedestrian_phase_duration ?? pedRes.data.pedestrianPhaseDuration ?? 30);
+        setPedConfigDemoMode(pedRes.data.is_demo_mode ?? pedRes.data.isDemoMode ?? false);
+      } else if (sigRes.data?.pedestrian_crossing) {
+        setPedestrianTelemetry(sigRes.data.pedestrian_crossing);
+      }
       if (Array.isArray(histRes.data)) {
         setDecisionHistory(histRes.data);
       }
@@ -245,17 +276,24 @@ export const Signals: React.FC = () => {
       activeLiveUpdate.event === 'SIGNAL_STATE_CHANGED' &&
       Number(activeLiveUpdate.intersection_id) === Number(selectedJunctionId)
     ) {
+      if (activeLiveUpdate.pedestrian_crossing) {
+        setPedestrianTelemetry(activeLiveUpdate.pedestrian_crossing);
+        if (activeLiveUpdate.pedestrian_crossing.isDemoMode !== undefined) {
+          setPedConfigDemoMode(activeLiveUpdate.pedestrian_crossing.isDemoMode);
+        }
+      }
       setSignalData((prev: any) => ({
         ...prev,
-        active_approach: activeLiveUpdate.active_approach,
-        active_phase: activeLiveUpdate.active_phase,
-        state: activeLiveUpdate.state,
-        countdown: activeLiveUpdate.countdown,
-        mode: activeLiveUpdate.mode,
-        reasoning: activeLiveUpdate.reasoning,
-        elapsed_green_time: activeLiveUpdate.elapsed_green_time,
-        current_metrics: activeLiveUpdate.current_metrics,
-        approaches: activeLiveUpdate.approaches
+        active_approach: activeLiveUpdate.active_approach ?? prev?.active_approach,
+        active_phase: activeLiveUpdate.active_phase ?? prev?.active_phase,
+        state: activeLiveUpdate.state ?? prev?.state,
+        countdown: activeLiveUpdate.countdown ?? prev?.countdown,
+        mode: activeLiveUpdate.mode ?? prev?.mode,
+        reasoning: activeLiveUpdate.reasoning ?? prev?.reasoning,
+        elapsed_green_time: activeLiveUpdate.elapsed_green_time ?? prev?.elapsed_green_time,
+        current_metrics: activeLiveUpdate.current_metrics ?? prev?.current_metrics,
+        approaches: activeLiveUpdate.approaches ?? prev?.approaches,
+        pedestrian_crossing: activeLiveUpdate.pedestrian_crossing ?? prev?.pedestrian_crossing
       }));
     }
   }, [activeLiveUpdate, selectedJunctionId]);
@@ -352,7 +390,7 @@ export const Signals: React.FC = () => {
       green_duration: trafInfo.green_duration || sigInfo.green_duration || 30,
       emergency_detected: trafInfo.emergency_detected,
       emergency_type: trafInfo.emergency_type,
-      signal: sigInfo.signal || 'RED',
+      signal: (pedestrianTelemetry?.isActive || pedestrianTelemetry?.is_active) ? 'RED' : (sigInfo.signal || 'RED'),
       is_queue_available: trafInfo.is_queue_available ?? true
     };
   });
@@ -452,6 +490,10 @@ export const Signals: React.FC = () => {
 
   // Quick Action: Force green signal priority for an approach
   const handleForceGreen = async (approachKey: string) => {
+    if (pedestrianTelemetry?.isActive || pedestrianTelemetry?.is_active) {
+      setOverrideMessage('⚠️ ACTION BLOCKED: Protected Pedestrian Crossing is ACTIVE. Vehicle green signals are strictly prohibited.');
+      return;
+    }
     // Optimistic UI update so user sees instant signal change execution
     setSignalData((prev: any) => ({
       ...prev,
@@ -485,6 +527,10 @@ export const Signals: React.FC = () => {
 
   // Quick Action: Force red signal for an approach
   const handleForceRed = async (approachKey: string) => {
+    if (pedestrianTelemetry?.isActive || pedestrianTelemetry?.is_active) {
+      setOverrideMessage('All vehicle approaches are already securely held at RED for pedestrian crossing.');
+      return;
+    }
     const otherApproaches = approachesList.filter((a) => a.key !== approachKey);
     const nextKey = otherApproaches.length > 0 ? otherApproaches[0].key : approachKey;
 
@@ -523,6 +569,101 @@ export const Signals: React.FC = () => {
     }
   };
 
+  // Format seconds to MM:SS
+  const formatTimerSeconds = (sec: number) => {
+    const s = Math.max(0, Math.floor(sec));
+    const m = Math.floor(s / 60);
+    const rem = s % 60;
+    return `${m.toString().padStart(2, '0')}:${rem.toString().padStart(2, '0')}`;
+  };
+
+  // Pedestrian Phase Actions (Sections 1, 2, 6, 7, 9, 10, 13)
+  const handleTriggerPedestrian = async () => {
+    try {
+      await apiClient.post(`/intersections/${selectedJunctionId}/pedestrian/trigger`, {
+        trigger_type: 'MANUAL_DEMO'
+      });
+      setOverrideMessage('🚶 Protected Pedestrian Crossing Phase triggered! Safely clearing active approach to RED.');
+      fetchJunctionData();
+    } catch (err: any) {
+      console.error('Error triggering pedestrian phase:', err);
+      setOverrideMessage('Failed to trigger pedestrian phase: ' + (err.response?.data?.detail || err.message));
+    }
+  };
+
+  const handleToggleDemoMode = async (enableDemo: boolean) => {
+    try {
+      const res = await apiClient.post(`/intersections/${selectedJunctionId}/pedestrian/configure`, {
+        demo_mode: enableDemo,
+        interval_seconds: enableDemo ? 10 : 600
+      });
+      setPedConfigDemoMode(enableDemo);
+      if (res.data?.telemetry) {
+        setPedestrianTelemetry(res.data.telemetry);
+      }
+      setOverrideMessage(
+        enableDemo
+          ? '⚡ DEMO/TEST MODE ACTIVE: Pedestrian interval shortened to 10 seconds for rapid judging evaluation.'
+          : '🛡️ PRODUCTION MODE RESTORED: Standard 10-minute interval with 30-second crossing active.'
+      );
+      fetchJunctionData();
+    } catch (err: any) {
+      console.error('Error configuring demo mode:', err);
+    }
+  };
+
+  const handleSavePedestrianConfig = async () => {
+    try {
+      const res = await apiClient.post(`/intersections/${selectedJunctionId}/pedestrian/configure`, {
+        enabled: pedConfigEnabled,
+        interval_seconds: Number(pedConfigInterval),
+        duration_seconds: Number(pedConfigDuration),
+        demo_mode: pedConfigDemoMode
+      });
+      if (res.data?.telemetry) {
+        setPedestrianTelemetry(res.data.telemetry);
+      }
+      setShowPedestrianConfigModal(false);
+      setOverrideMessage(`Pedestrian crossing configuration saved for Junction #${selectedJunctionId}.`);
+      fetchJunctionData();
+    } catch (err: any) {
+      console.error('Error saving pedestrian config:', err);
+    }
+  };
+
+  const handleEmergencyOverridePedestrian = async () => {
+    if (!emergencyConfirmed) {
+      alert('Please check the confirmation box to confirm emergency override of pedestrian safety.');
+      return;
+    }
+    try {
+      const res = await apiClient.post(`/intersections/${selectedJunctionId}/pedestrian/emergency-override`, {
+        confirmed: true,
+        reason: emergencyReason,
+        target_approach: emergencyTargetApproach || activeApproachKey
+      });
+      setShowEmergencyOverrideModal(false);
+      setEmergencyConfirmed(false);
+      setOverrideMessage(
+        `🚨 EMERGENCY OVERRIDE EXECUTED: Pedestrian phase terminated. Emergency corridor granted to ${res.data.active_approach} approach.`
+      );
+      fetchJunctionData();
+    } catch (err: any) {
+      console.error('Error executing emergency override:', err);
+      alert(err.response?.data?.detail || 'Failed to execute emergency override.');
+    }
+  };
+
+  const handleFetchPedestrianEvents = async () => {
+    try {
+      const res = await apiClient.get(`/intersections/${selectedJunctionId}/pedestrian/events?limit=25`);
+      setPedestrianEvents(Array.isArray(res.data) ? res.data : []);
+      setShowPedestrianEventsModal(true);
+    } catch (err) {
+      console.error('Error fetching pedestrian events:', err);
+    }
+  };
+
   // Demo playback controls (Section 12)
   const handleResetDemo = () => {
     handleReturnToAuto();
@@ -530,24 +671,21 @@ export const Signals: React.FC = () => {
 
   return (
     <div className="p-4 sm:p-6 space-y-6 bg-[#F6F8FA] min-h-screen select-none">
-      {/* Header & Page Title */}
-      <div className="flex flex-col md:flex-row items-start md:items-center justify-between gap-4 border-b border-[#DCE4EA] pb-4">
-        <div>
-          <div className="flex items-center gap-2">
-            <Radio className="w-5 h-5 text-emerald-600 animate-pulse" />
-            <h1 className="text-lg font-bold text-slate-800 tracking-tight uppercase font-mono">
-              DYNAMIC SIGNAL CONTROL ROOM & SIMULATION
-            </h1>
-          </div>
-          <p className="text-xs text-slate-500 font-mono mt-0.5">
-            Production Adaptive Engine supporting 2-Side, 3-Side, 4-Side & Configurable N-Way Junctions with Live Video Ingestion
-          </p>
-        </div>
-
-        <div className="flex flex-wrap items-center gap-2 w-full md:w-auto">
+      {/* Standardized Page Header */}
+      <PageHeader
+        title="Signal Control"
+        subtitle="Adaptive junction phase management and safety controls"
+        badge={
+          <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs font-semibold bg-emerald-100 text-emerald-800">
+            <Radio className="w-3.5 h-3.5 text-emerald-600 animate-pulse" />
+            {intersections.find((i) => i.id === selectedJunctionId)?.name || 'Junction'} Active
+          </span>
+        }
+      >
+        <div className="flex flex-wrap items-center gap-2">
           <button
             onClick={() => setShowHistoryModal(true)}
-            className="flex-1 md:flex-initial px-3 py-2 bg-slate-600 hover:bg-slate-700 text-white rounded text-xs font-mono font-bold flex items-center justify-center gap-1.5 transition-colors shadow-xs"
+            className="px-3 py-2 bg-slate-600 hover:bg-slate-700 text-white rounded text-xs font-mono font-bold flex items-center justify-center gap-1.5 transition-colors shadow-xs"
           >
             <History className="w-4 h-4" /> DECISION AUDIT
           </button>
@@ -556,28 +694,28 @@ export const Signals: React.FC = () => {
               if (approachesList.length > 0) setManualApproach(approachesList[0].key);
               setShowOverrideModal(true);
             }}
-            className="flex-1 md:flex-initial px-3 py-2 bg-[#B7791F] hover:bg-[#9B6416] text-white rounded text-xs font-mono font-bold flex items-center justify-center gap-1.5 transition-colors shadow-xs"
+            className="px-3 py-2 bg-[#B7791F] hover:bg-[#9B6416] text-white rounded text-xs font-mono font-bold flex items-center justify-center gap-1.5 transition-colors shadow-xs"
           >
             <ShieldAlert className="w-4 h-4" /> MANUAL OVERRIDE
           </button>
           <button
             onClick={handleReturnToAuto}
-            className="flex-1 md:flex-initial px-3 py-2 bg-[#2E7D5B] hover:bg-[#236347] text-white rounded text-xs font-mono font-bold flex items-center justify-center gap-1.5 transition-colors shadow-xs"
+            className="px-3 py-2 bg-[#2E7D5B] hover:bg-[#236347] text-white rounded text-xs font-mono font-bold flex items-center justify-center gap-1.5 transition-colors shadow-xs"
           >
             <RotateCcw className="w-4 h-4" /> RETURN TO AUTO
           </button>
         </div>
-      </div>
+      </PageHeader>
 
-      {/* Section 25: Test Junctions Switcher Bar */}
+      {/* Pre-configured Test Junctions Switcher Bar */}
       {testJunctions.length > 0 && (
         <div className="bg-emerald-50/80 border border-emerald-300 p-3.5 rounded-lg flex flex-col md:flex-row items-start md:items-center justify-between gap-3 shadow-xs">
           <div className="flex items-center gap-2">
             <span className="px-2 py-0.5 bg-emerald-600 text-white text-[10px] font-mono font-extrabold rounded uppercase">
-              DEMO LAB JUNCTIONS
+              TEST JUNCTIONS
             </span>
             <span className="text-xs font-mono font-bold text-emerald-950">
-              Judge Demonstration Scenarios (Pre-configured with Multi-Camera Test Streams):
+              Multi-approach evaluation junctions with test streams:
             </span>
           </div>
 
@@ -602,13 +740,13 @@ export const Signals: React.FC = () => {
         </div>
       )}
 
-      {/* Section 3 & 12: DEMO MODE CONTROLS & CAMERA DISPLAY SELECTION */}
+      {/* Camera Display & Scenario Controls */}
       <div className="bg-white p-4 rounded-lg border border-[#DCE4EA] shadow-xs space-y-4">
         <div className="flex flex-col lg:flex-row items-start lg:items-center justify-between gap-4 border-b border-[#DCE4EA] pb-3">
           <div className="flex items-center gap-2">
             <Sliders className="w-5 h-5 text-[#245B84]" />
             <h2 className="text-xs font-mono font-extrabold text-slate-800 uppercase tracking-wide">
-              SECTION 3 & 12 – CAMERA DISPLAY SELECTION & DEMO CONTROLS
+              CAMERA DISPLAY & SCENARIO CONTROLS
             </h2>
           </div>
 
@@ -729,6 +867,246 @@ export const Signals: React.FC = () => {
           </button>
         </div>
       )}
+
+      {/* SECTION 1, 2, 3, 5, 9, 10 & 13: PEDESTRIAN CROSSING SAFETY PHASE STATUS CARD */}
+      {(() => {
+        const isPedActive = pedestrianTelemetry?.isActive || pedestrianTelemetry?.is_active || false;
+        const pedState = pedestrianTelemetry?.pedestrianPhaseState || pedestrianTelemetry?.pedestrian_phase_state || 'NORMAL';
+        const pedStatus = pedestrianTelemetry?.pedestrianPhaseStatus || pedestrianTelemetry?.pedestrian_phase_status || 'SCHEDULED';
+        const remainingSec = pedestrianTelemetry?.remainingPedestrianSeconds ?? pedestrianTelemetry?.remaining_seconds ?? 0;
+        const timeToNextSec = pedestrianTelemetry?.timeToNextSeconds ?? pedestrianTelemetry?.time_to_next_seconds ?? 600;
+        const isDemo = pedestrianTelemetry?.isDemoMode ?? pedestrianTelemetry?.is_demo_mode ?? pedConfigDemoMode;
+        const isEnabled = pedestrianTelemetry?.pedestrianPhaseEnabled ?? pedestrianTelemetry?.pedestrian_phase_enabled ?? true;
+
+        return (
+          <div
+            className={`rounded-lg border p-4 sm:p-5 transition-all shadow-xs ${
+              isPedActive
+                ? 'bg-rose-50/80 border-rose-400 ring-2 ring-rose-500/20 shadow-md'
+                : pedState === 'TRANSITION' || pedState === 'ALL_RED'
+                ? 'bg-amber-50/80 border-amber-400 ring-1 ring-amber-400/20'
+                : 'bg-white border-[#DCE4EA]'
+            }`}
+          >
+            {/* Header row */}
+            <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 border-b border-slate-200/80 pb-3">
+              <div className="flex items-center gap-2.5">
+                <div
+                  className={`p-2 rounded-lg ${
+                    isPedActive
+                      ? 'bg-rose-600 text-white animate-bounce'
+                      : 'bg-[#EEF6FC] text-[#245B84]'
+                  }`}
+                >
+                  <Footprints className="w-5 h-5" />
+                </div>
+                <div>
+                  <div className="flex items-center gap-2">
+                    <h2 className="text-xs sm:text-sm font-mono font-extrabold text-slate-800 uppercase tracking-tight">
+                      PEDESTRIAN CROSSING SAFETY PHASE
+                    </h2>
+                    {isDemo && (
+                      <span className="px-2 py-0.5 bg-amber-500 text-white text-[9px] font-mono font-extrabold rounded uppercase tracking-wider animate-pulse">
+                        DEMO / TEST MODE
+                      </span>
+                    )}
+                  </div>
+                  <p className="text-[11px] text-slate-500 font-mono">
+                    Protected Pedestrian Window (10-min scheduled interval / 30s All-Red hold)
+                  </p>
+                </div>
+              </div>
+
+              {/* Status Badges & Quick Action Buttons */}
+              <div className="flex flex-wrap items-center gap-2 w-full sm:w-auto justify-end">
+                {/* Active Status Badge */}
+                {isPedActive ? (
+                  <span className="px-3 py-1 bg-rose-600 text-white rounded font-mono font-extrabold text-xs flex items-center gap-1.5 shadow-sm animate-pulse">
+                    <span className="w-2 h-2 rounded-full bg-white" />
+                    PEDESTRIAN CROSSING ACTIVE
+                  </span>
+                ) : pedState === 'TRANSITION' || pedState === 'ALL_RED' ? (
+                  <span className="px-3 py-1 bg-amber-500 text-white rounded font-mono font-bold text-xs flex items-center gap-1.5">
+                    <AlertTriangle className="w-3.5 h-3.5" />
+                    CLEARING VEHICLES (ALL-RED PENDING)
+                  </span>
+                ) : pedState === 'PEDESTRIAN_COMPLETE' || pedState === 'TRANSITION_BACK' ? (
+                  <span className="px-3 py-1 bg-emerald-600 text-white rounded font-mono font-bold text-xs flex items-center gap-1.5">
+                    <CheckCircle2 className="w-3.5 h-3.5" />
+                    RETURNING TO ADAPTIVE CONTROL
+                  </span>
+                ) : (
+                  <span className="px-3 py-1 bg-slate-100 text-slate-700 border border-slate-300 rounded font-mono font-bold text-xs flex items-center gap-1.5">
+                    <Timer className="w-3.5 h-3.5 text-[#245B84]" />
+                    STATUS: SCHEDULED
+                  </span>
+                )}
+
+                {/* Demo Mode Toggle */}
+                <button
+                  type="button"
+                  onClick={() => handleToggleDemoMode(!isDemo)}
+                  className={`px-2.5 py-1 rounded text-xs font-mono font-bold border transition-colors ${
+                    isDemo
+                      ? 'bg-amber-100 text-amber-900 border-amber-300 hover:bg-amber-200'
+                      : 'bg-slate-100 hover:bg-slate-200 text-slate-700 border-slate-300'
+                  }`}
+                  title={isDemo ? 'Switch to Production 10-Minute interval' : 'Switch to Demo 10-Second interval'}
+                >
+                  {isDemo ? 'DEMO: 10s (ACTIVE)' : 'PROD: 10m'}
+                </button>
+
+                {/* Instant Trigger */}
+                <button
+                  type="button"
+                  onClick={handleTriggerPedestrian}
+                  className="px-3 py-1 bg-emerald-700 hover:bg-emerald-800 text-white rounded font-mono font-bold text-xs flex items-center gap-1 transition-all shadow-xs active:scale-95 cursor-pointer"
+                  title="Manually trigger pedestrian crossing phase now"
+                >
+                  <Footprints className="w-3.5 h-3.5" /> TRIGGER NOW
+                </button>
+
+                {/* Configure */}
+                <button
+                  type="button"
+                  onClick={() => setShowPedestrianConfigModal(true)}
+                  className="px-2.5 py-1 bg-slate-100 hover:bg-slate-200 text-slate-700 border border-slate-300 rounded font-mono font-bold text-xs flex items-center gap-1 transition-colors"
+                >
+                  <Settings className="w-3.5 h-3.5" /> CONFIG
+                </button>
+
+                {/* Audit Events */}
+                <button
+                  type="button"
+                  onClick={handleFetchPedestrianEvents}
+                  className="px-2.5 py-1 bg-slate-100 hover:bg-slate-200 text-slate-700 border border-slate-300 rounded font-mono font-bold text-xs flex items-center gap-1 transition-colors"
+                >
+                  <History className="w-3.5 h-3.5" /> EVENTS
+                </button>
+
+                {/* Emergency Override Button */}
+                {isPedActive && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setEmergencyConfirmed(false);
+                      setEmergencyTargetApproach(activeApproachKey);
+                      setShowEmergencyOverrideModal(true);
+                    }}
+                    className="px-3 py-1 bg-red-700 hover:bg-red-800 text-white rounded font-mono font-bold text-xs flex items-center gap-1 shadow-md animate-pulse active:scale-95 cursor-pointer"
+                  >
+                    <AlertOctagon className="w-3.5 h-3.5" /> EMERGENCY OVERRIDE
+                  </button>
+                )}
+              </div>
+            </div>
+
+            {/* Active Pedestrian Phase Display (Section 9) */}
+            {isPedActive ? (
+              <div className="pt-4 space-y-3 font-mono">
+                <div className="grid grid-cols-1 md:grid-cols-12 gap-3 items-center">
+                  {/* Digital Countdown Box */}
+                  <div className="md:col-span-4 bg-rose-600 text-white p-4 rounded-lg flex flex-col items-center justify-center shadow-inner text-center">
+                    <span className="text-[10px] uppercase font-bold tracking-widest text-rose-200">
+                      CROSSING COUNTDOWN
+                    </span>
+                    <div className="text-4xl sm:text-5xl font-extrabold tracking-tighter my-0.5">
+                      {remainingSec}
+                      <span className="text-xs font-normal text-rose-200 ml-1">sec remaining</span>
+                    </div>
+                    {/* Linear Countdown Progress Bar */}
+                    <div className="w-full bg-rose-800/80 rounded-full h-2 mt-1 overflow-hidden">
+                      <div
+                        className="bg-white h-2 rounded-full transition-all duration-1000 ease-linear"
+                        style={{
+                          width: `${Math.min(100, Math.max(0, (remainingSec / (pedestrianTelemetry?.pedestrianPhaseDuration || 30)) * 100))}%`
+                        }}
+                      />
+                    </div>
+                  </div>
+
+                  {/* All Vehicle Signals Status Banner */}
+                  <div className="md:col-span-8 bg-white border border-rose-300 rounded-lg p-4 space-y-2">
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-2">
+                        <span className="w-3 h-3 rounded-full bg-red-600 animate-ping" />
+                        <span className="text-xs font-extrabold text-rose-950 uppercase tracking-wide">
+                          ALL VEHICLE SIGNALS: 🔴 RED
+                        </span>
+                      </div>
+                      <span className="text-[10px] text-rose-700 font-bold bg-rose-100 px-2 py-0.5 rounded">
+                        PROTECTED CROSSWALK WINDOW
+                      </span>
+                    </div>
+
+                    {/* Approaches Grid Showing All RED */}
+                    <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 pt-1">
+                      {approachesList.map((app) => (
+                        <div
+                          key={app.key}
+                          className="p-2 bg-red-50 border border-red-200 rounded flex items-center justify-between"
+                        >
+                          <span className="text-[11px] font-bold text-slate-800">{app.direction}</span>
+                          <span className="px-1.5 py-0.5 bg-red-600 text-white text-[9px] font-extrabold rounded">
+                            🔴 RED
+                          </span>
+                        </div>
+                      ))}
+                    </div>
+
+                    <div className="flex items-center justify-between text-[10px] text-slate-500 pt-1 border-t border-slate-100">
+                      <span>Adaptive Optimization: <strong className="text-rose-700">PAUSED</strong></span>
+                      <span>Manual Green Changes: <strong className="text-rose-700">BLOCKED</strong></span>
+                      <span>Next Phase: <strong className="text-emerald-700">ADAPTIVE AUTO</strong></span>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            ) : (
+              /* Scheduled / Inactive Phase Display */
+              <div className="pt-3 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 font-mono text-xs">
+                <div className="p-3 bg-[#F6F8FA] rounded border border-[#DCE4EA]">
+                  <span className="text-[10px] text-slate-500 font-bold uppercase block">NEXT PEDESTRIAN CROSSING</span>
+                  <div className="text-base font-extrabold text-[#245B84] mt-0.5 flex items-center gap-1.5">
+                    <Clock className="w-4 h-4 text-[#245B84]" />
+                    <span>In {formatTimerSeconds(timeToNextSec)}</span>
+                  </div>
+                  <span className="text-[9px] text-slate-400 block mt-0.5">Authoritative Server Timer</span>
+                </div>
+
+                <div className="p-3 bg-[#F6F8FA] rounded border border-[#DCE4EA]">
+                  <span className="text-[10px] text-slate-500 font-bold uppercase block">INTERVAL SCHEDULE</span>
+                  <div className="text-base font-extrabold text-slate-800 mt-0.5">
+                    {isDemo ? '10 Seconds' : '10 Minutes (600s)'}
+                  </div>
+                  <span className="text-[9px] text-slate-400 block mt-0.5">
+                    {isDemo ? 'Simulation Testing Mode' : 'Default Production Setting'}
+                  </span>
+                </div>
+
+                <div className="p-3 bg-[#F6F8FA] rounded border border-[#DCE4EA]">
+                  <span className="text-[10px] text-slate-500 font-bold uppercase block">CROSSING DURATION</span>
+                  <div className="text-base font-extrabold text-emerald-700 mt-0.5">
+                    {pedestrianTelemetry?.pedestrianPhaseDuration ?? pedConfigDuration} Seconds
+                  </div>
+                  <span className="text-[9px] text-slate-400 block mt-0.5">All-Red Protected Hold</span>
+                </div>
+
+                <div className="p-3 bg-[#F6F8FA] rounded border border-[#DCE4EA]">
+                  <span className="text-[10px] text-slate-500 font-bold uppercase block">SAFETY STATUS</span>
+                  <div className="text-base font-extrabold text-emerald-700 mt-0.5 flex items-center gap-1.5">
+                    <ShieldCheck className="w-4 h-4 text-emerald-600" />
+                    <span>{isEnabled ? 'SYSTEM ARMED' : 'DISABLED'}</span>
+                  </div>
+                  <span className="text-[9px] text-slate-400 block mt-0.5">
+                    Applies to all {approachesList.length} Approaches
+                  </span>
+                </div>
+              </div>
+            )}
+          </div>
+        );
+      })()}
 
       {/* SECTION 20 & 7: ACTIVE ADAPTIVE OPTIMIZER INTELLIGENCE CARD */}
       <div className="bg-white rounded-lg border border-[#DCE4EA] shadow-xs p-5 space-y-4">
@@ -1339,6 +1717,318 @@ export const Signals: React.FC = () => {
                 className="px-4 py-1.5 bg-slate-700 hover:bg-slate-800 text-white rounded font-mono text-xs font-bold"
               >
                 Close Audit Log
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Pedestrian Configuration Modal (Section 10 & 13) */}
+      {showPedestrianConfigModal && (
+        <div className="fixed inset-0 bg-slate-900/40 backdrop-blur-xs z-50 flex items-center justify-center p-4">
+          <div className="bg-white rounded-lg border border-[#DCE4EA] max-w-lg w-full p-6 space-y-4 shadow-xl">
+            <div className="flex items-center justify-between border-b pb-3">
+              <div className="flex items-center gap-2 text-slate-800">
+                <Footprints className="w-5 h-5 text-[#245B84]" />
+                <h3 className="font-bold font-mono text-sm uppercase">
+                  Junction Pedestrian Safety Configuration
+                </h3>
+              </div>
+              <button
+                onClick={() => setShowPedestrianConfigModal(false)}
+                className="text-slate-400 hover:text-slate-700 font-mono"
+              >
+                ✕
+              </button>
+            </div>
+
+            <p className="text-xs text-slate-600 font-mono">
+              Centralized configuration per junction. Configured settings determine scheduled interval, protected crossing duration, and evaluation demo timers.
+            </p>
+
+            <div className="space-y-4 font-mono text-xs">
+              {/* Enabled Toggle */}
+              <div className="flex items-center justify-between p-3 bg-slate-50 rounded border border-slate-200">
+                <div>
+                  <span className="font-bold text-slate-800 block">Pedestrian Phase Enabled</span>
+                  <span className="text-[10px] text-slate-500">Automatically trigger protected crossing cycles</span>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setPedConfigEnabled(!pedConfigEnabled)}
+                  className={`px-3 py-1 rounded text-xs font-bold border transition-colors ${
+                    pedConfigEnabled
+                      ? 'bg-emerald-600 text-white border-emerald-700'
+                      : 'bg-slate-200 text-slate-700 border-slate-300'
+                  }`}
+                >
+                  {pedConfigEnabled ? 'ENABLED' : 'DISABLED'}
+                </button>
+              </div>
+
+              {/* Demo Mode Toggle */}
+              <div className="flex items-center justify-between p-3 bg-amber-50/80 rounded border border-amber-200">
+                <div>
+                  <span className="font-bold text-amber-950 block">Demo / Judging Mode (10s Interval)</span>
+                  <span className="text-[10px] text-amber-700">Shortens 10-minute timer to 10 seconds for rapid SIH demonstration</span>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => {
+                    const nextVal = !pedConfigDemoMode;
+                    setPedConfigDemoMode(nextVal);
+                    if (nextVal) setPedConfigInterval(10);
+                    else setPedConfigInterval(600);
+                  }}
+                  className={`px-3 py-1 rounded text-xs font-bold border transition-colors ${
+                    pedConfigDemoMode
+                      ? 'bg-amber-600 text-white border-amber-700 shadow-xs'
+                      : 'bg-white text-slate-700 border-slate-300'
+                  }`}
+                >
+                  {pedConfigDemoMode ? 'DEMO (10s)' : 'PROD (10m)'}
+                </button>
+              </div>
+
+              {/* Interval & Duration Inputs */}
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-[10px] font-bold text-slate-500 uppercase mb-1">
+                    Scheduled Interval (seconds)
+                  </label>
+                  <input
+                    type="number"
+                    min="5"
+                    max="3600"
+                    value={pedConfigInterval}
+                    onChange={(e) => setPedConfigInterval(Number(e.target.value))}
+                    className="w-full bg-white border border-[#DCE4EA] rounded p-2 text-xs font-mono text-slate-800"
+                  />
+                  <span className="text-[9px] text-slate-400 mt-0.5 block">Default: 600s (10 min)</span>
+                </div>
+
+                <div>
+                  <label className="block text-[10px] font-bold text-slate-500 uppercase mb-1">
+                    Crossing Duration (seconds)
+                  </label>
+                  <input
+                    type="number"
+                    min="5"
+                    max="180"
+                    value={pedConfigDuration}
+                    onChange={(e) => setPedConfigDuration(Number(e.target.value))}
+                    className="w-full bg-white border border-[#DCE4EA] rounded p-2 text-xs font-mono text-slate-800"
+                  />
+                  <span className="text-[9px] text-slate-400 mt-0.5 block">Default: 30s All-Red hold</span>
+                </div>
+              </div>
+
+              <div className="p-2.5 bg-blue-50 border border-blue-200 rounded text-[10px] text-blue-900 leading-relaxed">
+                ℹ️ Applies dynamically to all {approachesList.length} configured approaches of Junction #{selectedJunctionId} without hardcoded directional limits.
+              </div>
+            </div>
+
+            <div className="flex items-center justify-end gap-3 pt-3 border-t border-[#DCE4EA]">
+              <button
+                type="button"
+                onClick={() => setShowPedestrianConfigModal(false)}
+                className="px-3 py-1.5 text-xs font-mono text-slate-600 hover:bg-slate-100 rounded"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={handleSavePedestrianConfig}
+                className="px-4 py-1.5 bg-[#245B84] hover:bg-[#1C4767] text-white text-xs font-mono font-bold rounded shadow-xs"
+              >
+                Save Configuration
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Emergency Override Modal (Section 7) */}
+      {showEmergencyOverrideModal && (
+        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-xs z-50 flex items-center justify-center p-4">
+          <div className="bg-white rounded-lg border-2 border-red-500 max-w-lg w-full p-6 space-y-4 shadow-2xl animate-in fade-in zoom-in duration-150">
+            <div className="flex items-center gap-2.5 text-red-600 border-b pb-3">
+              <AlertOctagon className="w-6 h-6 animate-pulse shrink-0" />
+              <div>
+                <h3 className="font-extrabold font-mono text-sm uppercase text-slate-900">
+                  CRITICAL EMERGENCY OVERRIDE OF PEDESTRIAN SAFETY
+                </h3>
+                <span className="text-[10px] text-red-600 font-mono font-bold block">
+                  EXPLICIT OPERATOR CONFIRMATION & AUDIT LOG REQUIRED
+                </span>
+              </div>
+            </div>
+
+            <div className="p-3 bg-red-50 border border-red-200 rounded text-xs font-mono text-red-900 space-y-1.5">
+              <div className="flex items-center gap-1.5 font-bold">
+                <AlertTriangle className="w-4 h-4 text-red-600 shrink-0" />
+                <span>LIFE-SAFETY WARNING:</span>
+              </div>
+              <p className="text-[11px] leading-relaxed">
+                Pedestrian crossing is currently <strong>ACTIVE</strong>. Pedestrians may be physically inside the crosswalk. Overriding will force vehicle signals to <strong>GREEN</strong> immediately. Do NOT override unless there is an urgent emergency vehicle approaching!
+              </p>
+            </div>
+
+            <div className="space-y-3 font-mono text-xs">
+              <div>
+                <label className="block text-[10px] font-bold text-slate-600 uppercase mb-1">
+                  Target Approach for Emergency Green Corridor
+                </label>
+                <select
+                  value={emergencyTargetApproach}
+                  onChange={(e) => setEmergencyTargetApproach(e.target.value)}
+                  className="w-full bg-white border border-[#DCE4EA] rounded p-2 text-xs font-mono text-slate-800"
+                >
+                  {approachesList.map((app) => (
+                    <option key={app.key} value={app.key}>
+                      {app.name} ({app.direction})
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              <div>
+                <label className="block text-[10px] font-bold text-slate-600 uppercase mb-1">
+                  Emergency Justification (Recorded in Immutable Audit Log)
+                </label>
+                <input
+                  type="text"
+                  required
+                  value={emergencyReason}
+                  onChange={(e) => setEmergencyReason(e.target.value)}
+                  className="w-full bg-white border border-[#DCE4EA] rounded p-2 text-xs font-mono text-slate-800"
+                  placeholder="e.g. 108 Ambulance en route to emergency ward"
+                />
+              </div>
+
+              {/* Explicit Confirmation Checkbox */}
+              <label className="flex items-start gap-2.5 p-3 bg-slate-50 border border-slate-300 rounded cursor-pointer select-none">
+                <input
+                  type="checkbox"
+                  checked={emergencyConfirmed}
+                  onChange={(e) => setEmergencyConfirmed(e.target.checked)}
+                  className="mt-0.5 w-4 h-4 text-red-600 rounded focus:ring-red-500 cursor-pointer"
+                />
+                <span className="text-[11px] text-slate-800 font-bold leading-tight">
+                  I explicitly confirm that I am overriding pedestrian safety for a verified emergency vehicle corridor.
+                </span>
+              </label>
+            </div>
+
+            <div className="flex items-center justify-end gap-3 pt-3 border-t border-[#DCE4EA]">
+              <button
+                type="button"
+                onClick={() => {
+                  setShowEmergencyOverrideModal(false);
+                  setEmergencyConfirmed(false);
+                }}
+                className="px-3 py-1.5 text-xs font-mono text-slate-600 hover:bg-slate-100 rounded"
+              >
+                Cancel & Maintain Pedestrian Safety
+              </button>
+              <button
+                type="button"
+                disabled={!emergencyConfirmed}
+                onClick={handleEmergencyOverridePedestrian}
+                className={`px-4 py-2 rounded text-xs font-mono font-bold transition-all shadow-md ${
+                  emergencyConfirmed
+                    ? 'bg-red-700 hover:bg-red-800 text-white cursor-pointer active:scale-95'
+                    : 'bg-slate-300 text-slate-500 cursor-not-allowed'
+                }`}
+              >
+                CONFIRM EMERGENCY OVERRIDE
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Pedestrian Phase Audit Event Log Modal (Section 11) */}
+      {showPedestrianEventsModal && (
+        <div className="fixed inset-0 bg-slate-900/40 backdrop-blur-xs z-50 flex items-center justify-center p-4">
+          <div className="bg-white rounded-lg border border-[#DCE4EA] max-w-4xl w-full p-6 space-y-4 shadow-xl max-h-[90vh] overflow-y-auto">
+            <div className="flex items-center justify-between border-b pb-3">
+              <div className="flex items-center gap-2 text-slate-800">
+                <Footprints className="w-5 h-5 text-[#245B84]" />
+                <h3 className="font-bold font-mono text-sm uppercase">
+                  Pedestrian Phase Safety Audit Trail (MongoDB Atlas & SQL)
+                </h3>
+              </div>
+              <button
+                onClick={() => setShowPedestrianEventsModal(false)}
+                className="text-slate-400 hover:text-slate-700 font-mono"
+              >
+                ✕
+              </button>
+            </div>
+
+            {pedestrianEvents.length === 0 ? (
+              <p className="text-xs font-mono text-slate-500 py-6 text-center">
+                No pedestrian safety phase events recorded for Junction #{selectedJunctionId} yet. Events are stored upon each phase completion or emergency override.
+              </p>
+            ) : (
+              <div className="overflow-x-auto">
+                <table className="w-full text-left font-mono text-xs border border-slate-200">
+                  <thead className="bg-slate-100 text-slate-700 text-[10px] uppercase font-extrabold">
+                    <tr>
+                      <th className="p-2 border-b">Time</th>
+                      <th className="p-2 border-b">Event Type</th>
+                      <th className="p-2 border-b">Status</th>
+                      <th className="p-2 border-b">Duration</th>
+                      <th className="p-2 border-b">Trigger</th>
+                      <th className="p-2 border-b">Approaches Held</th>
+                      <th className="p-2 border-b">Operator / Justification</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-100">
+                    {pedestrianEvents.map((evt, idx) => (
+                      <tr key={evt._id || idx} className="hover:bg-slate-50">
+                        <td className="p-2 text-[10px] text-slate-500 whitespace-nowrap">
+                          {new Date(evt.timestamp || evt.startedAt).toLocaleTimeString()}
+                        </td>
+                        <td className="p-2 font-bold text-[#245B84]">{evt.eventType}</td>
+                        <td className="p-2">
+                          <span
+                            className={`px-1.5 py-0.5 text-[8px] rounded font-bold ${
+                              evt.status === 'COMPLETED'
+                                ? 'bg-emerald-100 text-emerald-800'
+                                : evt.status === 'ACTIVE'
+                                ? 'bg-rose-100 text-rose-800'
+                                : 'bg-red-100 text-red-800'
+                            }`}
+                          >
+                            {evt.status}
+                          </span>
+                        </td>
+                        <td className="p-2 font-bold">{evt.duration}s</td>
+                        <td className="p-2 text-slate-600">{evt.triggerType}</td>
+                        <td className="p-2 text-slate-700">
+                          {Array.isArray(evt.affectedApproaches)
+                            ? evt.affectedApproaches.join(', ')
+                            : 'All Configured'}
+                        </td>
+                        <td className="p-2 text-[10px] text-slate-600 max-w-xs truncate" title={evt.reason}>
+                          {evt.reason || `Operator: ${evt.operator}`}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+
+            <div className="flex justify-end pt-3 border-t">
+              <button
+                type="button"
+                onClick={() => setShowPedestrianEventsModal(false)}
+                className="px-4 py-1.5 bg-slate-700 hover:bg-slate-800 text-white rounded font-mono text-xs font-bold"
+              >
+                Close Event Log
               </button>
             </div>
           </div>

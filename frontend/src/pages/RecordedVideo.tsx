@@ -32,6 +32,7 @@ import { apiClient, resolveVideoUrl, resolveImageUrl } from '../api/client';
 import { Link } from 'react-router-dom';
 import { useWebLocation } from '../hooks/useWebLocation';
 import { createGoogleMapsEmbedUrl } from '../utils/mapProviders';
+import { PageHeader } from '../components/PageHeader';
 
 interface RecordItem {
   id: number;
@@ -423,40 +424,40 @@ export const RecordedVideo: React.FC = () => {
   const totalPhotos = records.filter((r) => r.type === 'PHOTO').length;
 
   return (
-    <div className="p-4 sm:p-6 space-y-6 bg-[#F6F8FA] min-h-screen select-none">
-      {/* Header */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between border-b border-[#DCE4EA] pb-4 gap-3">
-        <div>
-          <h1 className="text-lg font-bold text-slate-800 tracking-tight uppercase flex items-center gap-2 font-mono">
-            <Film className="w-5 h-5 text-[#245B84]" /> RECORDS – VIDEO & PHOTO EVIDENCE ARCHIVE
-          </h1>
-          <p className="text-xs text-slate-500 font-mono mt-0.5">
-            Verified CCTV Video Ingestion, Mobile Patrol Streams & Photo Evidence Vault (Sections 26-28)
-          </p>
-        </div>
-
-        <div className="flex items-center gap-2">
-          <button
-            onClick={openCameraModal}
-            className="px-3.5 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded text-xs font-mono font-bold flex items-center gap-1.5 transition-colors shadow-xs"
-          >
-            <Camera className="w-4 h-4" /> 📸 CAPTURE PHOTO
-          </button>
-          <Link
-            to="/devices"
-            className="px-3.5 py-2 bg-slate-700 hover:bg-slate-800 text-white rounded text-xs font-mono font-bold flex items-center gap-1.5 transition-colors shadow-xs"
-          >
-            <Smartphone className="w-4 h-4" /> MOBILE PATROL
-          </Link>
-          <button
-            onClick={fetchRecords}
-            disabled={loading}
-            className="px-3.5 py-2 bg-[#245B84] hover:bg-[#1E4A6F] text-white rounded text-xs font-mono font-bold flex items-center gap-1.5 transition-colors shadow-xs"
-          >
-            <RefreshCw className={`w-3.5 h-3.5 ${loading ? 'animate-spin' : ''}`} /> REFRESH
-          </button>
-        </div>
-      </div>
+    <div className="p-3 sm:p-5 space-y-4 bg-[#F6F8FA] min-h-screen select-none font-sans">
+      {/* Page Header */}
+      <PageHeader
+        title="Records Archive"
+        subtitle="Verified CCTV video recordings, patrol streams & photo evidence vault"
+        badge={
+          <span className="px-2 py-0.5 rounded text-[10px] font-mono font-bold bg-[#EAF7EF] text-[#2E7D5B] border border-[#D2EADA]">
+            {records.length} EVIDENCE RECORDS
+          </span>
+        }
+        actions={
+          <div className="flex items-center gap-2">
+            <button
+              onClick={openCameraModal}
+              className="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-md text-xs font-semibold flex items-center gap-1.5 transition-colors shadow-2xs cursor-pointer"
+            >
+              <Camera className="w-3.5 h-3.5" /> Capture Photo
+            </button>
+            <Link
+              to="/devices"
+              className="px-3 py-1.5 bg-slate-700 hover:bg-slate-800 text-white rounded-md text-xs font-semibold flex items-center gap-1.5 transition-colors shadow-2xs"
+            >
+              <Smartphone className="w-3.5 h-3.5" /> Mobile Patrol
+            </Link>
+            <button
+              onClick={fetchRecords}
+              disabled={loading}
+              className="px-3 py-1.5 bg-[#245B84] hover:bg-[#1E4A6F] text-white rounded-md text-xs font-semibold flex items-center gap-1.5 transition-colors shadow-2xs cursor-pointer"
+            >
+              <RefreshCw className={`w-3.5 h-3.5 ${loading ? 'animate-spin' : ''}`} /> Refresh
+            </button>
+          </div>
+        }
+      />
 
       {/* FEEDBACK BANNER (IF PHOTO CAPTURED) */}
       {captureFeedbackMsg && (

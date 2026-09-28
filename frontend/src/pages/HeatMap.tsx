@@ -7,6 +7,7 @@ import {
 import { GISMap, TrajectoryPoint } from '../components/GISMap';
 import { apiClient } from '../api/client';
 import { useStore } from '../store/useStore';
+import { PageHeader } from '../components/PageHeader';
 
 export const HeatMap: React.FC = () => {
   const navigate = useNavigate();
@@ -109,138 +110,64 @@ export const HeatMap: React.FC = () => {
   );
 
   return (
-    <div className="p-6 space-y-6 bg-[#F8FAFC] min-h-screen">
+    <div className="p-3 sm:p-5 space-y-3 bg-[#F8FAFC] min-h-screen font-sans select-none">
       {/* Page Header */}
-      <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 border-b border-[#DCE4EA] pb-5">
-        <div>
+      <PageHeader
+        title="Traffic Map"
+        subtitle="Live congestion layers, camera locations and active incidents"
+        badge={
+          <span className="px-2 py-0.5 rounded text-[10px] font-mono font-bold bg-[#EAF7EF] text-[#2E7D5B] border border-[#D2EADA]">
+            {intersections.length || 34} JUNCTIONS • {cameras.length || 22} CAMERAS • {alerts.length} ALERTS
+          </span>
+        }
+        actions={
           <div className="flex items-center gap-2">
-            <h1 className="text-xl font-bold text-slate-800 tracking-tight font-mono flex items-center gap-2">
-              <Map className="w-5 h-5 text-[#245B84]" />
-              VIGITRA AI — TRAFFIC INTELLIGENCE MAP
-            </h1>
-            <span className="px-2 py-0.5 bg-blue-100 text-[#245B84] text-[10px] font-bold rounded-full font-mono">
-              Live Layer Engine
+            <span className="px-2.5 py-1 rounded bg-blue-50 text-[#245B84] border border-blue-200 text-xs font-mono font-bold flex items-center gap-1.5">
+              <span className="w-1.5 h-1.5 rounded-full bg-[#245B84] animate-pulse" />
+              GOOGLE TRAFFIC LIVE
             </span>
           </div>
-          <p className="text-xs text-slate-500 font-mono mt-1">
-            Official Google Traffic Layer + VIGITRA AI Spatial Density, Junction Signals & Fleet Telemetry
-          </p>
-        </div>
+        }
+      />
 
-        {/* Quick Access Action Shortcuts */}
-        <div className="flex items-center gap-2 font-mono text-xs">
-          <button
-            onClick={() => navigate('/cameras')}
-            className="px-3 py-1.5 bg-white border border-[#DCE4EA] hover:border-[#245B84] text-slate-700 hover:text-[#245B84] rounded-lg transition-colors flex items-center gap-1.5 shadow-2xs font-semibold cursor-pointer"
-          >
-            <Video className="w-3.5 h-3.5" /> Cameras
-          </button>
-          <button
-            onClick={() => navigate('/signals')}
-            className="px-3 py-1.5 bg-white border border-[#DCE4EA] hover:border-[#245B84] text-slate-700 hover:text-[#245B84] rounded-lg transition-colors flex items-center gap-1.5 shadow-2xs font-semibold cursor-pointer"
-          >
-            <Navigation className="w-3.5 h-3.5" /> Signals
-          </button>
-          <button
-            onClick={() => navigate('/trajectories')}
-            className="px-3 py-1.5 bg-white border border-[#DCE4EA] hover:border-[#245B84] text-slate-700 hover:text-[#245B84] rounded-lg transition-colors flex items-center gap-1.5 shadow-2xs font-semibold cursor-pointer"
-          >
-            <Compass className="w-3.5 h-3.5" /> Trajectories
-          </button>
-        </div>
-      </div>
-
-      {/* KPI Overview Telemetry Cards */}
-      <div className="grid grid-cols-2 md:grid-cols-5 gap-3 font-mono text-xs">
-        {/* Google Live Traffic Status */}
-        <div className="bg-white p-3.5 rounded-xl border border-[#DCE4EA] shadow-xs">
-          <p className="text-[10px] text-slate-400 font-bold uppercase">Google Live Traffic</p>
-          <div className="flex items-center justify-between mt-1">
-            <span className="text-sm font-bold text-slate-800">TrafficLayer</span>
-            <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
-          </div>
-          <p className="text-[10px] text-emerald-700 font-semibold mt-0.5">Google Maps Live Sync</p>
-        </div>
-
-        {/* Monitored Junctions */}
-        <div className="bg-white p-3.5 rounded-xl border border-[#DCE4EA] shadow-xs">
-          <p className="text-[10px] text-slate-400 font-bold uppercase">Junction Nodes</p>
-          <div className="flex items-center justify-between mt-1">
-            <span className="text-sm font-bold text-slate-800">{intersections.length || 34} Monitored</span>
-            <Zap className="w-4 h-4 text-[#245B84]" />
-          </div>
-          <p className="text-[10px] text-[#245B84] font-semibold mt-0.5">Active Signal Optimizers</p>
-        </div>
-
-        {/* CCTV Cameras */}
-        <div className="bg-white p-3.5 rounded-xl border border-[#DCE4EA] shadow-xs">
-          <p className="text-[10px] text-slate-400 font-bold uppercase">Fixed CCTV Cameras</p>
-          <div className="flex items-center justify-between mt-1">
-            <span className="text-sm font-bold text-slate-800">{cameras.length || 22} Online</span>
-            <Video className="w-4 h-4 text-emerald-600" />
-          </div>
-          <p className="text-[10px] text-slate-500 mt-0.5">YOLOv8 Detection Stream</p>
-        </div>
-
-        {/* Mobile Devices Connected */}
-        <div className="bg-white p-3.5 rounded-xl border border-[#DCE4EA] shadow-xs">
-          <p className="text-[10px] text-slate-400 font-bold uppercase">Connected Mobile Units</p>
-          <div className="flex items-center justify-between mt-1">
-            <span className="text-sm font-bold text-slate-800">{devices.length} Units</span>
-            <Smartphone className="w-4 h-4 text-blue-600" />
-          </div>
-          <p className="text-[10px] text-blue-700 font-semibold mt-0.5">GPS Field Telemetry</p>
-        </div>
-
-        {/* Active Alerts */}
-        <div className="bg-white p-3.5 rounded-xl border border-[#DCE4EA] shadow-xs">
-          <p className="text-[10px] text-slate-400 font-bold uppercase">Security & Incidents</p>
-          <div className="flex items-center justify-between mt-1">
-            <span className="text-sm font-bold text-red-700">{alerts.length} Active</span>
-            <AlertTriangle className="w-4 h-4 text-red-600" />
-          </div>
-          <p className="text-[10px] text-red-700 font-semibold mt-0.5">Priority Watchlist</p>
-        </div>
-      </div>
-
-      {/* Trajectory Search & Node Finder Toolbar */}
-      <div className="bg-white p-3.5 rounded-xl border border-[#DCE4EA] shadow-xs flex flex-col md:flex-row items-center justify-between gap-3 text-xs font-mono">
+      {/* Unified Search & Trajectory Toolbar */}
+      <div className="bg-white p-2.5 rounded-lg border border-[#DCE4EA] shadow-2xs flex flex-col md:flex-row items-center justify-between gap-2.5 text-xs">
         {/* Node Search Filter */}
-        <div className="relative w-full md:w-72">
-          <Search className="w-3.5 h-3.5 text-slate-400 absolute left-3 top-2.5" />
+        <div className="relative w-full md:w-64">
+          <Search className="w-3.5 h-3.5 text-slate-400 absolute left-2.5 top-2" />
           <input
             type="text"
-            placeholder="Find junction or camera node..."
+            placeholder="Filter junction / node..."
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
-            className="w-full pl-9 pr-3 py-1.5 bg-[#F8FAFC] border border-slate-200 rounded-lg text-slate-700 placeholder-slate-400 text-xs focus:outline-none focus:border-[#245B84]"
+            className="w-full pl-8 pr-2.5 py-1 bg-[#F8FAFC] border border-slate-200 rounded-md text-slate-700 placeholder-slate-400 text-xs focus:outline-none focus:border-[#245B84]"
           />
         </div>
 
-        {/* Vehicle Trajectory Query Bar (Section 11 & 13) */}
-        <form onSubmit={handleSearchPlateTrajectory} className="flex items-center gap-2 w-full md:w-auto">
-          <div className="relative flex-1 md:w-64">
-            <Car className="w-3.5 h-3.5 text-slate-400 absolute left-3 top-2.5" />
+        {/* Vehicle Trajectory Query Bar */}
+        <form onSubmit={handleSearchPlateTrajectory} className="flex items-center gap-1.5 w-full md:w-auto">
+          <div className="relative flex-1 md:w-56">
+            <Car className="w-3.5 h-3.5 text-slate-400 absolute left-2.5 top-2" />
             <input
               type="text"
-              placeholder="Search Plate (e.g. TN01AB1234)..."
+              placeholder="Track Plate (e.g. TN01AB1234)..."
               value={searchPlate}
               onChange={(e) => setSearchPlate(e.target.value)}
-              className="w-full pl-9 pr-3 py-1.5 bg-[#F8FAFC] border border-slate-200 rounded-lg text-slate-700 placeholder-slate-400 text-xs uppercase focus:outline-none focus:border-[#245B84]"
+              className="w-full pl-8 pr-2.5 py-1 bg-[#F8FAFC] border border-slate-200 rounded-md text-slate-700 placeholder-slate-400 text-xs uppercase focus:outline-none focus:border-[#245B84]"
             />
           </div>
           <button
             type="submit"
             disabled={isSearchingPlate}
-            className="px-3 py-1.5 bg-[#245B84] hover:bg-[#1B4564] text-white rounded-lg font-bold text-xs transition-colors shrink-0 cursor-pointer"
+            className="px-2.5 py-1 bg-[#245B84] hover:bg-[#1B4564] text-white rounded-md font-semibold text-xs transition-colors shrink-0 cursor-pointer shadow-2xs"
           >
-            {isSearchingPlate ? 'Searching...' : 'Show Trajectory'}
+            {isSearchingPlate ? 'Searching...' : 'Show Path'}
           </button>
           {activeTrajectory && (
             <button
               type="button"
               onClick={clearTrajectory}
-              className="px-2.5 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-600 rounded-lg font-bold text-xs transition-colors shrink-0 cursor-pointer"
+              className="px-2 py-1 bg-slate-100 hover:bg-slate-200 text-slate-600 rounded-md font-semibold text-xs transition-colors shrink-0 cursor-pointer"
             >
               Clear
             </button>
@@ -250,14 +177,14 @@ export const HeatMap: React.FC = () => {
 
       {/* Trajectory Error Banner if search fails */}
       {plateSearchError && (
-        <div className="p-2.5 bg-amber-50 border border-amber-200 rounded-lg text-amber-900 text-xs font-mono flex items-center justify-between">
+        <div className="p-2 bg-amber-50 border border-amber-200 rounded-md text-amber-900 text-xs font-mono flex items-center justify-between">
           <span>{plateSearchError}</span>
           <button onClick={() => setPlateSearchError(null)} className="text-amber-600 font-bold ml-2">×</button>
         </div>
       )}
 
       {/* Main Interactive Map Canvas */}
-      <div className="h-[620px] rounded-xl overflow-hidden border border-[#DCE4EA] bg-white shadow-md relative">
+      <div className="h-[calc(100vh-190px)] min-h-[580px] rounded-lg overflow-hidden border border-[#DCE4EA] bg-white shadow-2xs relative">
         <GISMap
           fullScreenPage={true}
           selectedIntersectionId={selectedIntersectionId}

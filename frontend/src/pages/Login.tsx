@@ -104,13 +104,13 @@ export const Login: React.FC = () => {
     <div className="min-h-screen bg-slate-900 flex items-center justify-center p-4 select-none">
       <div className="w-full max-w-md bg-slate-800 p-8 rounded-xl border border-slate-700 shadow-2xl relative overflow-hidden text-slate-100">
         
-        {/* Brand Logo & Confidential Banner */}
+        {/* Brand Logo & Command Portal Header */}
         <div className="text-center mb-6 relative z-10">
           <div className="w-14 h-14 mx-auto mb-3 rounded-xl bg-blue-600/20 border border-blue-500/30 flex items-center justify-center shadow-inner">
             <Shield className="w-8 h-8 text-blue-400" />
           </div>
-          <h2 className="text-2xl font-bold tracking-wider text-white">SMART TRAFFIC AI</h2>
-          <p className="text-xs text-blue-400 font-mono mt-1 uppercase tracking-widest">Confidential Police & Admin Command Portal</p>
+          <h2 className="text-2xl font-bold tracking-wider text-white">VIGITRA AI</h2>
+          <p className="text-xs text-blue-400 font-mono mt-1 uppercase tracking-widest">Traffic Operations Command Portal</p>
         </div>
 
         {/* Tab Selection Navigation */}

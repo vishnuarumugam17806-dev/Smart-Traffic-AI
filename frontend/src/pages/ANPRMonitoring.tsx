@@ -10,6 +10,7 @@ import {
 import { apiClient } from '../api/client';
 import { useStore } from '../store/useStore';
 import { useWebLocation } from '../hooks/useWebLocation';
+import { PageHeader } from '../components/PageHeader';
 
 interface PlateObservation {
   id: number;
@@ -1067,48 +1068,48 @@ export const ANPRMonitoring: React.FC = () => {
   return (
     <div className="p-3 sm:p-6 space-y-5 bg-[#F7F9FB] overflow-x-hidden min-h-screen">
       {/* Page Header */}
-      <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 border-b border-[#DCE4EA] pb-4">
-        <div>
-          <h1 className="text-base sm:text-lg font-bold text-slate-800 tracking-tight uppercase flex items-center gap-2">
-            <Car className="w-5 h-5 text-[#245B84]" /> NUMBER PLATE RECOGNITION & DIRECTORY MANAGEMENT
-          </h1>
-          <p className="text-xs text-slate-500 font-mono mt-0.5">
-            Cross-Reference Scanned Plates Against Stolen, Watchlist, Challan Defaulters & RTO Directories with Automatic Real-Time Alerting
-          </p>
-        </div>
+      <PageHeader
+        title="ANPR & Watchlist"
+        subtitle="Live license plate recognition, multi-category directory matching & automated alert dispatch"
+        badge={
+          <span className="px-2 py-0.5 rounded text-[10px] font-mono font-bold bg-[#EAF7EF] text-[#2E7D5B] border border-[#D2EADA]">
+            {observations.length} SIGHTINGS
+          </span>
+        }
+        actions={
+          <div className="flex items-center gap-2 flex-wrap">
+            {/* Audio Chime Toggle */}
+            <button
+              onClick={() => setAudioAlertEnabled(prev => !prev)}
+              className={`px-2.5 py-1.5 rounded-lg border text-xs font-mono font-semibold flex items-center gap-1.5 transition-colors shadow-2xs ${
+                audioAlertEnabled ? 'bg-emerald-50 text-emerald-800 border-emerald-300' : 'bg-slate-100 text-slate-600 border-slate-300'
+              }`}
+              title="Toggle audible siren chimes on directory match alerts"
+            >
+              {audioAlertEnabled ? <Volume2 className="w-3.5 h-3.5 text-emerald-600" /> : <VolumeX className="w-3.5 h-3.5 text-slate-400" />}
+              <span>{audioAlertEnabled ? 'Chimes ON' : 'Muted'}</span>
+            </button>
 
-        <div className="flex items-center gap-2 flex-wrap">
-          {/* Audio Chime Toggle */}
-          <button
-            onClick={() => setAudioAlertEnabled(prev => !prev)}
-            className={`px-3 py-1.5 rounded-lg border text-xs font-mono font-bold flex items-center gap-1.5 transition-colors shadow-2xs ${
-              audioAlertEnabled ? 'bg-emerald-50 text-emerald-800 border-emerald-300' : 'bg-slate-100 text-slate-600 border-slate-300'
-            }`}
-            title="Toggle audible siren chimes on directory match alerts"
-          >
-            {audioAlertEnabled ? <Volume2 className="w-3.5 h-3.5 text-emerald-600" /> : <VolumeX className="w-3.5 h-3.5 text-slate-400" />}
-            <span>{audioAlertEnabled ? 'Chimes ON' : 'Muted'}</span>
-          </button>
+            {/* Add to Directory */}
+            <button
+              onClick={() => setShowAddDirModal(true)}
+              className="px-3 py-1.5 bg-rose-600 hover:bg-rose-700 text-white font-semibold text-xs rounded-lg flex items-center gap-1.5 shadow-2xs font-mono transition-colors"
+            >
+              <Plus className="w-3.5 h-3.5" /> Add Target
+            </button>
 
-          {/* Add to Directory */}
-          <button
-            onClick={() => setShowAddDirModal(true)}
-            className="px-3.5 py-1.5 bg-red-600 hover:bg-red-700 text-white font-bold text-xs rounded-lg flex items-center gap-1.5 shadow-sm font-mono transition-colors"
-          >
-            <Plus className="w-4 h-4" /> Add Vehicle to Directory
-          </button>
-
-          {/* Seed Directories */}
-          <button
-            onClick={handleSeedDirectories}
-            className="px-3 py-1.5 bg-[#245B84] hover:bg-[#1E4A6F] text-white font-bold text-xs rounded-lg flex items-center gap-1.5 shadow-sm font-mono transition-colors"
-            title="Seed police stolen registry, watchlist suspects & RTO defaulters"
-          >
-            <Sparkles className="w-3.5 h-3.5 text-amber-300" />
-            <span>Seed Directories</span>
-          </button>
-        </div>
-      </div>
+            {/* Seed Directories */}
+            <button
+              onClick={handleSeedDirectories}
+              className="px-3 py-1.5 bg-[#245B84] hover:bg-[#1E4A6F] text-white font-semibold text-xs rounded-lg flex items-center gap-1.5 shadow-2xs font-mono transition-colors"
+              title="Seed police stolen registry, watchlist suspects & RTO defaulters"
+            >
+              <Sparkles className="w-3.5 h-3.5 text-amber-300" />
+              <span>Seed Directories</span>
+            </button>
+          </div>
+        }
+      />
 
       {/* Global Notification Banner */}
       {bannerMessage && (
@@ -1245,7 +1246,7 @@ export const ANPRMonitoring: React.FC = () => {
                   <Radio className="w-4 h-4 text-red-500 animate-pulse" /> Live Number Plate Recognition & Directory Cross-Check
                 </h2>
                 <p className="text-xs text-slate-500 font-mono mt-0.5">
-                  Type or click a vehicle plate to instantly check all 5 directories and trigger automated real-time dispatch alerts.
+                  Cross-reference license plates against active enforcement directories.
                 </p>
               </div>
 
@@ -1265,7 +1266,7 @@ export const ANPRMonitoring: React.FC = () => {
             {/* Quick Test Sample Plates */}
             <div className="space-y-1.5">
               <span className="text-[10px] font-mono font-bold text-slate-500 uppercase flex items-center gap-1">
-                <Sparkles className="w-3.5 h-3.5 text-amber-500" /> Quick-Test Preset Vehicles (Click to Scan & Verify):
+                <Sparkles className="w-3.5 h-3.5 text-amber-500" /> Preset Evaluation Plates:
               </span>
               <div className="flex flex-wrap gap-2">
                 {SAMPLE_TEST_PLATES.map((sample) => (
@@ -1288,7 +1289,7 @@ export const ANPRMonitoring: React.FC = () => {
             {directories.length > 0 && (
               <div className="space-y-1.5 pt-1">
                 <span className="text-[10px] font-mono font-bold text-slate-500 uppercase flex items-center gap-1">
-                  <Database className="w-3.5 h-3.5 text-[#245B84]" /> Active Registered Directory Plates (Click to Scan):
+                  <Database className="w-3.5 h-3.5 text-[#245B84]" /> Registered Directory Entries:
                 </span>
                 <div className="flex flex-wrap gap-2 max-h-24 overflow-y-auto">
                   {directories.slice(0, 12).map((dir) => (

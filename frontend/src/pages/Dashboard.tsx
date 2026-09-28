@@ -9,6 +9,7 @@ import { CameraCanvasFeed } from '../components/CameraCanvasFeed';
 import { GISMap } from '../components/GISMap';
 import { apiClient } from '../api/client';
 import { useStore } from '../store/useStore';
+import { PageHeader } from '../components/PageHeader';
 
 import { FALLBACK_CAMERAS, FALLBACK_INTERSECTIONS, FALLBACK_ALERTS } from '../api/mockFallback';
 import type { Camera as CameraType, Intersection } from '../types';
@@ -152,147 +153,103 @@ export const Dashboard: React.FC = () => {
     if (activeFilter === 'HIGH') return liveStreamStats.densityState === 'HIGH' || liveStreamStats.densityState === 'SEVERE';
     return true;
   });
-
   return (
     <div className="p-3 sm:p-5 space-y-4 bg-[#F6F8FA] min-h-screen text-slate-800 font-sans select-none overflow-x-hidden">
       
-      {/* 1. TOP HEADER & OPERATOR CONTROL STATUS */}
-      <div className="bg-white p-3.5 rounded-lg border border-[#DCE4EA] shadow-xs flex flex-col md:flex-row items-start md:items-center justify-between gap-3">
-        <div>
-          <h1 className="text-base sm:text-lg font-extrabold text-slate-800 uppercase tracking-tight font-mono">
-            CITY TRAFFIC CONTROL CENTER
-          </h1>
-          <p className="text-xs text-slate-500 font-mono">Real-Time Operational Monitoring & Signal Optimization</p>
-        </div>
+      {/* 1. STANDARDIZED PAGE HEADER */}
+      <PageHeader
+        title="Traffic Overview"
+        subtitle="Real-time multi-camera CCTV ingestion, adaptive signals & live incidents"
+        actions={
+          <div className="flex items-center gap-2">
+            <div className="px-2.5 py-1 rounded bg-[#EAF7EF] text-[#2E7D5B] border border-[#D2EADA] font-bold font-mono flex items-center gap-1.5 text-xs">
+              <span className="w-1.5 h-1.5 rounded-full bg-[#2E7D5B] animate-pulse" />
+              SYSTEM ONLINE
+            </div>
 
-        <div className="flex flex-wrap items-center gap-2 text-xs">
-          <div className="px-3 py-1 rounded bg-[#EAF7EF] text-[#2E7D5B] border border-[#D2EADA] font-bold font-mono flex items-center gap-1.5 text-xs">
-            <span className="w-2 h-2 rounded-full bg-[#2E7D5B] animate-pulse" />
-            SYSTEM ONLINE
+            <div className="flex items-center gap-1 bg-[#EEF6FC] px-2 py-1 rounded border border-[#DCE4EA] text-xs font-mono font-bold text-[#245B84]">
+              <span>Demo {demoStep}/30</span>
+              <button onClick={toggleAutoDemo} className="p-0.5 hover:text-slate-900" title={isDemoRunning ? "Pause Demo" : "Run Demo"}>
+                <Play className="w-3.5 h-3.5" />
+              </button>
+              <button onClick={handleNextDemoStep} className="p-0.5 hover:text-slate-900" title="Next Step">
+                <SkipForward className="w-3.5 h-3.5" />
+              </button>
+            </div>
           </div>
+        }
+      />
 
-          <div className="flex items-center gap-1.5 bg-[#EEF6FC] px-2.5 py-1 rounded border border-[#DCE4EA] text-xs font-mono font-bold text-[#245B84]">
-            <span>Demo {demoStep}/30</span>
-            <button onClick={toggleAutoDemo} className="p-1 hover:text-slate-900" title={isDemoRunning ? "Pause Demo" : "Run Demo"}>
-              <Play className="w-3.5 h-3.5" />
-            </button>
-            <button onClick={handleNextDemoStep} className="p-1 hover:text-slate-900" title="Next Step">
-              <SkipForward className="w-3.5 h-3.5" />
-            </button>
-          </div>
-        </div>
-      </div>
-
-      {/* 2. OPERATIONAL KPI METRICS & QUICK ACTIONS */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3 sm:gap-4">
+      {/* 2. STANDARDIZED KPI METRIC CARDS */}
+      <div className="grid grid-cols-2 sm:grid-cols-2 lg:grid-cols-4 gap-3">
         {/* Connected Cameras */}
         <div 
           onClick={() => navigate('/cameras')}
-          className="bg-white p-4 rounded-lg border border-[#DCE4EA] flex items-center justify-between shadow-xs cursor-pointer hover:border-[#245B84] transition-colors"
+          className="bg-white p-3.5 rounded-lg border border-[#DCE4EA] flex items-center justify-between shadow-2xs cursor-pointer hover:border-[#245B84] transition-colors"
         >
           <div>
-            <p className="text-[10px] font-bold text-slate-500 uppercase font-mono">CONNECTED CAMERAS</p>
-            <h3 className="text-xl font-bold text-[#245B84] mt-0.5">{cameras.length || 4} Active</h3>
-            <p className="text-[11px] text-[#2E7D5B] font-bold mt-0.5">3 Fixed | 1 Mobile</p>
+            <p className="text-[10px] font-bold text-slate-400 uppercase font-mono tracking-wider">ACTIVE CAMERAS</p>
+            <h3 className="text-xl font-bold text-[#245B84] mt-0.5">{cameras.length || 4}</h3>
+            <p className="text-[11px] text-[#2E7D5B] font-semibold mt-0.5 font-mono">
+              {cameras.filter(c => c.status === 'ONLINE' || c.status === 'LIVE').length || 3} Live Streams
+            </p>
           </div>
-          <div className="p-2.5 rounded bg-[#EEF6FC] text-[#245B84]">
-            <Video className="w-5 h-5" />
+          <div className="p-2 rounded-md bg-[#EEF6FC] text-[#245B84]">
+            <Video className="w-4 h-4" />
           </div>
         </div>
 
-        {/* Vehicles in 20m Detection Range */}
+        {/* Vehicles in 20m Zone */}
         <div 
           onClick={() => navigate('/signals')}
-          className="bg-white p-4 rounded-lg border border-[#DCE4EA] flex items-center justify-between shadow-xs cursor-pointer hover:border-emerald-500 hover:shadow-md transition-all group"
+          className="bg-white p-3.5 rounded-lg border border-[#DCE4EA] flex items-center justify-between shadow-2xs cursor-pointer hover:border-emerald-500 transition-colors group"
           title="Click to view 360° Detection Radius Radar & signal auto-switch"
         >
           <div>
-            <div className="flex items-center gap-1.5">
-              <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
-              <p className="text-[10px] font-bold text-slate-500 uppercase font-mono">VEHICLES IN RANGE</p>
-            </div>
-            <h3 className="text-xl font-bold text-emerald-700 mt-0.5">{vehiclesInRange} in 20m</h3>
-            <p className="text-[11px] text-emerald-600 font-bold mt-0.5 flex items-center gap-1">
-              <span>🎯 20m Geofence Active</span>
+            <p className="text-[10px] font-bold text-slate-400 uppercase font-mono tracking-wider">VEHICLES IN RANGE</p>
+            <h3 className="text-xl font-bold text-emerald-700 mt-0.5">{vehiclesInRange}</h3>
+            <p className="text-[11px] text-emerald-600 font-semibold mt-0.5 font-mono">
+              20m Geofence Active
             </p>
           </div>
-          <div className="p-2.5 rounded-lg bg-[#EAF7EF] text-[#2E7D5B] group-hover:bg-emerald-600 group-hover:text-white transition-colors">
-            <Radar className="w-5 h-5 animate-spin" style={{ animationDuration: '8s' }} />
-          </div>
-        </div>
-
-        {/* Total Vehicles Detected */}
-        <div 
-          onClick={() => navigate('/anpr')}
-          className="bg-white p-4 rounded-lg border border-[#DCE4EA] flex items-center justify-between shadow-xs cursor-pointer hover:border-[#245B84] transition-colors"
-        >
-          <div>
-            <p className="text-[10px] font-bold text-slate-500 uppercase font-mono">TOTAL DETECTED</p>
-            <h3 className="text-xl font-bold text-slate-800 mt-0.5">{activeDetections}</h3>
-            <p className="text-[11px] text-[#245B84] font-bold mt-0.5">Live ANPR & Tracking</p>
-          </div>
-          <div className="p-2.5 rounded bg-[#EEF6FC] text-[#245B84]">
-            <Car className="w-5 h-5" />
+          <div className="p-2 rounded-md bg-[#EAF7EF] text-[#2E7D5B] group-hover:bg-emerald-600 group-hover:text-white transition-colors">
+            <Radar className="w-4 h-4 animate-spin" style={{ animationDuration: '8s' }} />
           </div>
         </div>
 
         {/* Live Traffic Density */}
         <div 
           onClick={() => navigate('/heatmap')}
-          className="bg-white p-4 rounded-lg border border-[#DCE4EA] flex items-center justify-between shadow-xs cursor-pointer hover:border-[#245B84] transition-colors"
+          className="bg-white p-3.5 rounded-lg border border-[#DCE4EA] flex items-center justify-between shadow-2xs cursor-pointer hover:border-[#245B84] transition-colors"
         >
           <div>
-            <p className="text-[10px] font-bold text-slate-500 uppercase font-mono">CURRENT DENSITY</p>
+            <p className="text-[10px] font-bold text-slate-400 uppercase font-mono tracking-wider">CONGESTION</p>
             <h3 className="text-xl font-bold text-amber-700 mt-0.5">{liveStreamStats.densityState}</h3>
-            <p className="text-[11px] text-amber-700 font-bold mt-0.5">Queue: {liveStreamStats.queueLength} Vehicles</p>
+            <p className="text-[11px] text-amber-700 font-semibold mt-0.5 font-mono">
+              Queue: {liveStreamStats.queueLength} Vehicles
+            </p>
           </div>
-          <div className="p-2.5 rounded bg-amber-50 text-amber-700">
-            <Activity className="w-5 h-5" />
+          <div className="p-2 rounded-md bg-amber-50 text-amber-700">
+            <Activity className="w-4 h-4" />
           </div>
         </div>
 
         {/* Active Alerts */}
         <div 
           onClick={() => navigate('/alerts')}
-          className="bg-white p-4 rounded-lg border border-[#DCE4EA] flex items-center justify-between shadow-xs cursor-pointer hover:border-[#245B84] transition-colors"
+          className="bg-white p-3.5 rounded-lg border border-[#DCE4EA] flex items-center justify-between shadow-2xs cursor-pointer hover:border-red-400 transition-colors"
         >
           <div>
-            <p className="text-[10px] font-bold text-slate-500 uppercase font-mono">ACTIVE ALERTS</p>
-            <h3 className="text-xl font-bold text-red-700 mt-0.5">{alertsFeed.length || 2} Active</h3>
-            <p className="text-[11px] text-red-700 font-bold mt-0.5">Priority Watchlist</p>
+            <p className="text-[10px] font-bold text-slate-400 uppercase font-mono tracking-wider">ALERTS</p>
+            <h3 className="text-xl font-bold text-rose-700 mt-0.5">{alertsFeed.length || 2}</h3>
+            <p className="text-[11px] text-rose-600 font-semibold mt-0.5 font-mono">
+              {alertsFeed.filter(a => a.severity === 'CRITICAL').length || 1} Critical Incidents
+            </p>
           </div>
-          <div className="p-2.5 rounded bg-red-50 text-red-700">
-            <Bell className="w-5 h-5" />
+          <div className="p-2 rounded-md bg-rose-50 text-rose-700">
+            <Bell className="w-4 h-4" />
           </div>
         </div>
-      </div>
-
-      {/* QUICK ACCESS ACTION SHORTCUTS */}
-      <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-xs font-bold font-mono">
-        <button
-          onClick={() => navigate('/cameras')}
-          className="p-2.5 rounded-lg bg-white border border-[#DCE4EA] hover:border-[#245B84] text-[#245B84] flex items-center justify-center gap-2 shadow-2xs transition-all"
-        >
-          <Video className="w-4 h-4" /> Live Cameras
-        </button>
-        <button
-          onClick={() => navigate('/heatmap')}
-          className="p-2.5 rounded-lg bg-white border border-[#DCE4EA] hover:border-[#245B84] text-[#245B84] flex items-center justify-center gap-2 shadow-2xs transition-all"
-        >
-          <Map className="w-4 h-4" /> Traffic Map
-        </button>
-        <button
-          onClick={() => navigate('/trajectories')}
-          className="p-2.5 rounded-lg bg-white border border-[#DCE4EA] hover:border-[#245B84] text-[#245B84] flex items-center justify-center gap-2 shadow-2xs transition-all"
-        >
-          <Route className="w-4 h-4" /> Vehicle Tracking
-        </button>
-        <button
-          onClick={() => navigate('/signals')}
-          className="p-2.5 rounded-lg bg-white border border-[#DCE4EA] hover:border-[#245B84] text-[#245B84] flex items-center justify-center gap-2 shadow-2xs transition-all"
-        >
-          <TrafficCone className="w-4 h-4" /> Signal Control
-        </button>
       </div>
 
       {/* 3. MAIN OPERATIONAL DASHBOARD GRID: CAMERA LIST & LIVE VIDEO FEED */}

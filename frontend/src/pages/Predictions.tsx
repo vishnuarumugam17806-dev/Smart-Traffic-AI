@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { TrendingUp, MapPin, Calendar, Clock, AlertCircle } from 'lucide-react';
 import { apiClient } from '../api/client';
 import { useStore } from '../store/useStore';
+import { PageHeader } from '../components/PageHeader';
 
 export const Predictions: React.FC = () => {
   const { intersections } = useStore();
@@ -47,15 +48,12 @@ export const Predictions: React.FC = () => {
 
   return (
     <div className="p-4 sm:p-6 space-y-6 bg-[#F7F9FB] min-h-screen font-sans select-none">
-      {/* Page Header */}
-      <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 border-b border-[#DCE4EA] pb-4">
-        <div>
-          <h1 className="text-base sm:text-lg font-bold text-slate-800 tracking-tight uppercase flex items-center gap-2">
-            <TrendingUp className="w-5 h-5 text-[#245B84]" /> TRAFFIC FORECAST
-          </h1>
-          <p className="text-xs text-slate-500 font-mono mt-0.5">Historical Pattern Analysis & Short-Term Congestion Density Prediction</p>
-        </div>
-      </div>
+      {/* Standardized Page Header */}
+      <PageHeader
+        title="Traffic Forecast"
+        subtitle="Predictive congestion modeling and trend forecasting"
+        icon={TrendingUp}
+      />
 
       {/* Region / Intersection Selection & Horizon Filter */}
       <div className="bg-white p-4 rounded-lg border border-[#DCE4EA] shadow-xs flex flex-col md:flex-row items-start md:items-center justify-between gap-4">

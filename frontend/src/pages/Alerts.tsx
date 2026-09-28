@@ -3,6 +3,7 @@ import { Link } from 'react-router-dom';
 import { ShieldAlert, Plus, Trash2, Bell, Shield, Lock, Radio, MapPin, Navigation } from 'lucide-react';
 import { apiClient } from '../api/client';
 import { useStore } from '../store/useStore';
+import { PageHeader } from '../components/PageHeader';
 
 import { Alert } from '../types';
 
@@ -124,34 +125,37 @@ export const Alerts: React.FC = () => {
   });
 
   return (
-    <div className="p-4 sm:p-6 space-y-5 bg-[#FAF7F6] min-h-screen">
+    <div className="p-3 sm:p-5 space-y-4 bg-[#FAF7F6] min-h-screen font-sans select-none">
       {/* Page Header */}
-      <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 border-b border-[#DCE4EA] pb-4">
-        <div>
-          <h1 className="text-base sm:text-lg font-bold text-slate-800 tracking-tight uppercase">ALERTS & WATCHLIST CENTER</h1>
-          <p className="text-xs text-slate-500 font-mono mt-0.5">Real-Time Threat Watchlist Matches, Speed Events & Route Anomalies</p>
-        </div>
-
-        {/* Tab Switcher */}
-        <div className="flex bg-white p-1 rounded-lg border border-[#DCE4EA] text-xs font-mono font-bold select-none">
-          <button
-            onClick={() => setActiveTab('ALERTS')}
-            className={`px-3 py-1.5 rounded-md flex items-center gap-1.5 transition-colors ${
-              activeTab === 'ALERTS' ? 'bg-[#245B84] text-white shadow-2xs' : 'text-slate-600 hover:bg-slate-100'
-            }`}
-          >
-            <Bell className="w-3.5 h-3.5" /> LIVE ALERTS ({alerts.length})
-          </button>
-          <button
-            onClick={() => setActiveTab('WATCHLIST')}
-            className={`px-3 py-1.5 rounded-md flex items-center gap-1.5 transition-colors ${
-              activeTab === 'WATCHLIST' ? 'bg-[#245B84] text-white shadow-2xs' : 'text-slate-600 hover:bg-slate-100'
-            }`}
-          >
-            <Shield className="w-3.5 h-3.5" /> CONTROLLED WATCHLIST ({watchlist.length})
-          </button>
-        </div>
-      </div>
+      <PageHeader
+        title="Alerts & Security"
+        subtitle="Active security incidents and watchlist alerts"
+        badge={
+          <span className="px-2 py-0.5 rounded text-[10px] font-mono font-bold bg-rose-100 text-rose-700 border border-rose-200">
+            {alerts.filter(a => a.severity === 'CRITICAL').length} CRITICAL
+          </span>
+        }
+        actions={
+          <div className="flex bg-white p-0.5 rounded-lg border border-[#DCE4EA] text-xs font-semibold select-none shadow-2xs">
+            <button
+              onClick={() => setActiveTab('ALERTS')}
+              className={`px-3 py-1.5 rounded-md flex items-center gap-1.5 transition-colors ${
+                activeTab === 'ALERTS' ? 'bg-[#245B84] text-white shadow-2xs font-bold' : 'text-slate-600 hover:bg-slate-100'
+              }`}
+            >
+              <Bell className="w-3.5 h-3.5" /> Live Alerts ({alerts.length})
+            </button>
+            <button
+              onClick={() => setActiveTab('WATCHLIST')}
+              className={`px-3 py-1.5 rounded-md flex items-center gap-1.5 transition-colors ${
+                activeTab === 'WATCHLIST' ? 'bg-[#245B84] text-white shadow-2xs font-bold' : 'text-slate-600 hover:bg-slate-100'
+              }`}
+            >
+              <Shield className="w-3.5 h-3.5" /> Watchlist ({watchlist.length})
+            </button>
+          </div>
+        }
+      />
 
       {/* TAB 1: LIVE ALERTS */}
       {activeTab === 'ALERTS' && (

@@ -1,10 +1,12 @@
 import logging
 import time
+import json
 from typing import Dict, Any, List, Optional
 from datetime import datetime, timezone
 from sqlalchemy.orm import Session
 from app.core.config import settings
 from app.models.models import Signal, SignalDecision, AuditLog, Intersection, CongestionLevelEnum
+from app.database.mongodb import mongo_manager
 
 logger = logging.getLogger(__name__)
 
@@ -251,6 +253,20 @@ class SignalController:
         self.active_approach = list(self.approaches.keys())[0] if self.approaches else "NORTH"
         self.active_phase = self.active_approach
 
+        # Pedestrian Crossing Safety State Machine (Sections 1, 2, 3, 5 & 10)
+        self.pedestrian_enabled: bool = True
+        self.pedestrian_interval: float = 600.0  # 10 minutes default in seconds
+        self.pedestrian_duration: float = 30.0   # 30 seconds protected crossing duration
+        self.is_demo_mode: bool = False          # False = 10 minutes interval, True = 10s demo interval
+        self.pedestrian_state: str = "NORMAL"    # NORMAL, TRANSITION, ALL_RED, PEDESTRIAN_CROSSING, PEDESTRIAN_COMPLETE, TRANSITION_BACK
+        self.pedestrian_status: str = "SCHEDULED" # SCHEDULED, TRANSITIONING, ACTIVE, COMPLETED
+        self.last_pedestrian_start: Optional[float] = None
+        self.next_pedestrian_time: float = time.time() + self.pedestrian_interval
+        self.remaining_pedestrian_seconds: int = 0
+        self.pre_pedestrian_mode: str = "AUTOMATIC"
+        self.pedestrian_trigger_type: str = "SCHEDULED"
+        self.pedestrian_event_start_iso: Optional[str] = None
+
     @property
     def manual_target_phase(self):
         return getattr(self, '_manual_raw_phase', None) or self.manual_target_approach
@@ -482,6 +498,14 @@ class SignalController:
 
     def get_approach_signal(self, approach_key: str) -> str:
         """Authoritative backend signal state for approach."""
+        # During pedestrian crossing, all-red clearance, or complete, ALL approaches are unconditionally RED
+        if self.pedestrian_state in ["ALL_RED", "PEDESTRIAN_CROSSING", "PEDESTRIAN_COMPLETE", "TRANSITION_BACK"]:
+            return "RED"
+        if self.pedestrian_state == "TRANSITION":
+            if approach_key == self.active_approach and self.state == "YELLOW":
+                return "YELLOW"
+            return "RED"
+
         allowed = self.get_allowed_directions(self.active_phase)
         if approach_key in allowed:
             if self.state == "GREEN":
@@ -494,7 +518,76 @@ class SignalController:
         """
         State machine tick executed every cycle.
         Maintains waiting times, accumulates green duration, triggers reassessment, and advances states.
+        Strictly enforces pedestrian safety phase precedence (Section 1, 2, 3, 5, 8).
         """
+        now = time.time()
+        # Scheduled Pedestrian Trigger Check (Section 1 & 3)
+        if self.pedestrian_enabled and self.pedestrian_state == "NORMAL":
+            if now >= self.next_pedestrian_time:
+                logger.info(f"Intersection #{self.intersection_id}: Scheduled pedestrian interval elapsed. Triggering pedestrian crossing.")
+                self.trigger_pedestrian_phase(db, trigger_type="SCHEDULED")
+
+        # Pedestrian State Machine Execution (Section 2 & 5)
+        if self.pedestrian_state == "TRANSITION":
+            self.countdown = max(0, self.countdown - int(dt))
+            if self.countdown <= 0:
+                self.pedestrian_state = "ALL_RED"
+                self.countdown = getattr(settings, "ALL_RED_TIME", 2)
+                self.state = "RED_CLEARANCE"
+                self.last_reasoning = f"Pedestrian transition: Approach {self.active_approach} cleared. Verifying ALL RED before pedestrian walk."
+            return
+
+        elif self.pedestrian_state == "ALL_RED":
+            self.countdown = max(0, self.countdown - int(dt))
+            if self.countdown <= 0:
+                self.pedestrian_state = "PEDESTRIAN_CROSSING"
+                self.pedestrian_status = "ACTIVE"
+                self.remaining_pedestrian_seconds = int(self.pedestrian_duration)
+                self.countdown = self.remaining_pedestrian_seconds
+                self.state = "ALL_RED"
+                self.last_reasoning = f"PEDESTRIAN CROSSING ACTIVE: All {self.num_approaches} vehicle approaches held RED for {int(self.pedestrian_duration)}s protected crossing window."
+                self._record_pedestrian_event(db, event_type="PEDESTRIAN_CROSSING", status="ACTIVE")
+            return
+
+        elif self.pedestrian_state == "PEDESTRIAN_CROSSING":
+            self.remaining_pedestrian_seconds = max(0, self.remaining_pedestrian_seconds - int(dt))
+            self.countdown = self.remaining_pedestrian_seconds
+            self.state = "ALL_RED"
+
+            # Anti-starvation & waiting times on vehicle approaches continue accumulating while waiting at RED
+            for name, app in self.approaches.items():
+                app["time_since_last_green"] += dt
+                if app["queue_length"] > 0:
+                    app["waiting_time"] += dt
+
+            if self.remaining_pedestrian_seconds <= 0:
+                self.pedestrian_state = "PEDESTRIAN_COMPLETE"
+                self.pedestrian_status = "COMPLETED"
+                self.last_reasoning = "PEDESTRIAN CROSSING COMPLETED: Safely returning control to adaptive signal optimizer."
+                self._record_pedestrian_event(db, event_type="PEDESTRIAN_CROSSING", status="COMPLETED")
+            return
+
+        elif self.pedestrian_state == "PEDESTRIAN_COMPLETE":
+            self.pedestrian_state = "TRANSITION_BACK"
+            self.countdown = 1
+            return
+
+        elif self.pedestrian_state == "TRANSITION_BACK":
+            self.pedestrian_state = "NORMAL"
+            self.pedestrian_status = "SCHEDULED"
+            effective_interval = 10.0 if self.is_demo_mode else self.pedestrian_interval
+            self.next_pedestrian_time = time.time() + effective_interval
+            self.mode = self.pre_pedestrian_mode or "AUTOMATIC"
+            self.state = "GREEN"
+            self.elapsed_green_time = 0.0
+            # Resume adaptive optimization or previous manual mode
+            if self.mode == "AUTOMATIC":
+                self._run_optimization(db)
+            else:
+                self.countdown = 30
+            return
+
+        # NORMAL OPERATION: Run existing adaptive signal optimization flow
         allowed_dirs = self.get_allowed_directions(self.active_phase) if self.state == "GREEN" else []
 
         for name, app in self.approaches.items():
@@ -639,7 +732,15 @@ class SignalController:
         """
         Dynamic Priority Optimization across ALL active approaches (2, 3, 4, or N sides).
         Operates generically without hard-coded directional sequences (Section 11-15).
+        Strictly obeys pedestrian safety priority (Section 5 & 8).
         """
+        if self.pedestrian_state in ["TRANSITION", "ALL_RED", "PEDESTRIAN_CROSSING"]:
+            logger.warning(
+                f"Optimization cycle rejected on Intersection #{self.intersection_id}: "
+                f"Pedestrian safety phase active ({self.pedestrian_state}). Vehicle green allocation is blocked."
+            )
+            return
+
         if not self.approaches:
             return
 
@@ -785,16 +886,27 @@ class SignalController:
         reason: str = "",
         username: str = "OPERATOR",
         phase: Optional[str] = None,
-        color: str = "GREEN"
+        color: str = "GREEN",
+        is_emergency_override: bool = False
     ) -> bool:
         """
         Validates manual operator control and enforces color changes (Section 19).
         Supports explicitly forcing GREEN, RED, or YELLOW on any approach.
+        Strictly blocks conflicting green/yellow commands during pedestrian crossing unless emergency override.
         """
         raw_key = phase or target or "NORTH"
         target_key = raw_key.upper()
         self._manual_raw_phase = raw_key
         req_color = (color or "GREEN").upper()
+
+        # Pedestrian Crossing Safety Priority (Section 5, 6 & 8)
+        if self.pedestrian_state in ["TRANSITION", "ALL_RED", "PEDESTRIAN_CROSSING"]:
+            if req_color != "RED" and not is_emergency_override:
+                logger.warning(
+                    f"Manual signal command ({req_color}) rejected: PEDESTRIAN CROSSING ACTIVE on Intersection #{self.intersection_id}. "
+                    f"Conflicting manual vehicle commands are strictly blocked for pedestrian safety."
+                )
+                return False
 
         if target_key not in self.approaches:
             if target_key == "NORTH_SOUTH":
@@ -878,6 +990,230 @@ class SignalController:
 
         return True
 
+    def trigger_pedestrian_phase(self, db: Session, trigger_type: str = "SCHEDULED") -> Dict[str, Any]:
+        """
+        Triggers protected pedestrian crossing phase (Sections 1, 2, 5 & 13).
+        Safely transitions currently active green approach through YELLOW -> ALL_RED -> PEDESTRIAN_CROSSING.
+        """
+        if self.pedestrian_state == "PEDESTRIAN_CROSSING":
+            return {
+                "status": "ALREADY_ACTIVE",
+                "message": "Pedestrian phase is already active.",
+                "countdown": self.countdown,
+                "state": self.pedestrian_state
+            }
+
+        self.pedestrian_trigger_type = trigger_type
+        self.pre_pedestrian_mode = self.mode
+        now_ts = time.time()
+        self.last_pedestrian_start = now_ts
+        self.pedestrian_event_start_iso = datetime.now(timezone.utc).isoformat()
+
+        if self.state == "GREEN":
+            # Safely transition through yellow according to rules (Section 2 & 18)
+            self.pedestrian_state = "TRANSITION"
+            self.pedestrian_status = "TRANSITIONING"
+            self.state = "YELLOW"
+            self.countdown = getattr(settings, "YELLOW_TIME", 3)
+            self.last_reasoning = (
+                f"Pedestrian Crossing Triggered ({trigger_type}): Active {self.active_approach} approach "
+                f"transitioning safely via YELLOW clearance ({self.countdown}s) before protected pedestrian phase."
+            )
+        else:
+            self.pedestrian_state = "ALL_RED"
+            self.pedestrian_status = "TRANSITIONING"
+            self.state = "RED_CLEARANCE"
+            self.countdown = getattr(settings, "ALL_RED_TIME", 2)
+            self.last_reasoning = (
+                f"Pedestrian Crossing Triggered ({trigger_type}): Confirming ALL approaches RED "
+                f"before opening protected pedestrian crossing."
+            )
+
+        logger.info(f"Intersection #{self.intersection_id}: {self.last_reasoning}")
+        return {
+            "status": "INITIATED",
+            "trigger_type": trigger_type,
+            "state": self.pedestrian_state,
+            "countdown": self.countdown,
+            "reasoning": self.last_reasoning
+        }
+
+    def configure_pedestrian(
+        self,
+        enabled: Optional[bool] = None,
+        interval: Optional[float] = None,
+        duration: Optional[float] = None,
+        demo_mode: Optional[bool] = None
+    ) -> Dict[str, Any]:
+        """
+        Configures centralized pedestrian parameters per junction (Section 10 & 13).
+        Supports toggling DEMO/TEST MODE (10s interval) vs Production (600s interval).
+        """
+        if enabled is not None:
+            self.pedestrian_enabled = bool(enabled)
+        if interval is not None:
+            self.pedestrian_interval = max(5.0, float(interval))
+        if duration is not None:
+            self.pedestrian_duration = max(5.0, float(duration))
+        if demo_mode is not None:
+            self.is_demo_mode = bool(demo_mode)
+
+        effective_interval = 10.0 if self.is_demo_mode else self.pedestrian_interval
+        if self.pedestrian_state == "NORMAL":
+            self.next_pedestrian_time = time.time() + effective_interval
+
+        return self.get_pedestrian_telemetry()
+
+    def emergency_override_pedestrian(
+        self,
+        db: Session,
+        username: str = "OPERATOR",
+        reason: str = "Emergency vehicle approach",
+        target_approach: Optional[str] = None
+    ) -> Dict[str, Any]:
+        """
+        Emergency override of active pedestrian safety phase with explicit operator confirmation and audit trail (Section 7).
+        """
+        if self.pedestrian_state not in ["PEDESTRIAN_CROSSING", "TRANSITION", "ALL_RED"]:
+            return {
+                "status": "NOT_ACTIVE",
+                "message": "Pedestrian crossing is not currently active.",
+                "state": self.pedestrian_state
+            }
+
+        chosen_approach = (target_approach or self.active_approach or list(self.approaches.keys())[0]).upper()
+        if chosen_approach not in self.approaches:
+            chosen_approach = list(self.approaches.keys())[0]
+
+        # Record explicit audit trail and MongoDB event
+        self._record_pedestrian_event(
+            db,
+            event_type="EMERGENCY_OVERRIDE",
+            status="OVERRIDDEN",
+            reason=f"Emergency override by {username}: {reason}. Target approach: {chosen_approach}.",
+            username=username,
+            interrupted=True
+        )
+
+        # Immediate safe termination of pedestrian phase and emergency green grant
+        self.pedestrian_state = "NORMAL"
+        self.pedestrian_status = "SCHEDULED"
+        effective_interval = 10.0 if self.is_demo_mode else self.pedestrian_interval
+        self.next_pedestrian_time = time.time() + effective_interval
+
+        self.mode = "EMERGENCY"
+        self.active_approach = chosen_approach
+        self.active_phase = chosen_approach
+        self.state = "GREEN"
+        self.countdown = 60
+        self.elapsed_green_time = 0.0
+        self.last_reasoning = (
+            f"EMERGENCY OVERRIDE CONFIRMED: Operator {username} overrode pedestrian phase. "
+            f"Emergency corridor granted to {chosen_approach} Approach. Justification: {reason}."
+        )
+
+        logger.warning(f"[Pedestrian Emergency Override] {self.last_reasoning}")
+        return {
+            "status": "OVERRIDDEN",
+            "active_approach": chosen_approach,
+            "state": self.state,
+            "countdown": self.countdown,
+            "reasoning": self.last_reasoning
+        }
+
+    def get_pedestrian_telemetry(self) -> Dict[str, Any]:
+        """
+        Returns authoritative server-side pedestrian crossing telemetry (Section 3).
+        Synchronizes timestamps so browser refresh or multiple clients never lose state.
+        """
+        now = time.time()
+        time_to_next = max(0, int(self.next_pedestrian_time - now)) if self.pedestrian_enabled else 0
+        return {
+            "junctionId": self.intersection_id,
+            "junction_id": self.intersection_id,
+            "pedestrianPhaseEnabled": self.pedestrian_enabled,
+            "pedestrian_phase_enabled": self.pedestrian_enabled,
+            "pedestrianPhaseStatus": self.pedestrian_status,
+            "pedestrian_phase_status": self.pedestrian_status,
+            "pedestrianPhaseState": self.pedestrian_state,
+            "pedestrian_phase_state": self.pedestrian_state,
+            "pedestrianPhaseDuration": int(self.pedestrian_duration),
+            "pedestrian_phase_duration": int(self.pedestrian_duration),
+            "pedestrianIntervalSeconds": int(10 if self.is_demo_mode else self.pedestrian_interval),
+            "pedestrian_interval_seconds": int(10 if self.is_demo_mode else self.pedestrian_interval),
+            "remainingPedestrianSeconds": self.remaining_pedestrian_seconds,
+            "remaining_pedestrian_seconds": self.remaining_pedestrian_seconds,
+            "timeToNextSeconds": time_to_next,
+            "time_to_next_seconds": time_to_next,
+            "isActive": self.pedestrian_state == "PEDESTRIAN_CROSSING",
+            "is_active": self.pedestrian_state == "PEDESTRIAN_CROSSING",
+            "isDemoMode": self.is_demo_mode,
+            "is_demo_mode": self.is_demo_mode,
+            "lastPedestrianPhaseStart": datetime.fromtimestamp(self.last_pedestrian_start, tz=timezone.utc).isoformat() if self.last_pedestrian_start else None,
+            "last_pedestrian_phase_start": datetime.fromtimestamp(self.last_pedestrian_start, tz=timezone.utc).isoformat() if self.last_pedestrian_start else None,
+            "nextPedestrianPhaseTime": datetime.fromtimestamp(self.next_pedestrian_time, tz=timezone.utc).isoformat() if self.next_pedestrian_time else None,
+            "next_pedestrian_phase_time": datetime.fromtimestamp(self.next_pedestrian_time, tz=timezone.utc).isoformat() if self.next_pedestrian_time else None,
+            "affectedApproaches": list(self.approaches.keys()),
+            "affected_approaches": list(self.approaches.keys()),
+            "triggerType": self.pedestrian_trigger_type,
+            "trigger_type": self.pedestrian_trigger_type,
+            "prePedestrianMode": self.pre_pedestrian_mode,
+            "pre_pedestrian_mode": self.pre_pedestrian_mode
+        }
+
+    def _record_pedestrian_event(
+        self,
+        db: Session,
+        event_type: str = "PEDESTRIAN_CROSSING",
+        status: str = "COMPLETED",
+        reason: str = "",
+        username: str = "SYSTEM",
+        interrupted: bool = False
+    ):
+        """
+        Stores pedestrian phase events in MongoDB Atlas collection 'pedestrian_events'
+        and SQL AuditLog for complete dual-engine persistence (Section 11).
+        """
+        now_iso = datetime.now(timezone.utc).isoformat()
+        duration = getattr(self, "pedestrian_duration", 30.0)
+        event_doc = {
+            "junctionId": self.intersection_id,
+            "eventType": event_type,
+            "status": status,
+            "startedAt": self.pedestrian_event_start_iso or now_iso,
+            "endedAt": now_iso if status in ["COMPLETED", "INTERRUPTED", "OVERRIDDEN"] else None,
+            "duration": duration,
+            "triggerType": getattr(self, "pedestrian_trigger_type", "SCHEDULED"),
+            "operatingMode": getattr(self, "pre_pedestrian_mode", self.mode),
+            "affectedApproaches": list(self.approaches.keys()),
+            "reason": reason or self.last_reasoning,
+            "interrupted": interrupted,
+            "operator": username,
+            "timestamp": now_iso
+        }
+
+        # 1. MongoDB Atlas Storage
+        try:
+            mongo_db = mongo_manager.get_sync_db()
+            if mongo_db is not None:
+                mongo_db["pedestrian_events"].insert_one(dict(event_doc))
+                logger.info(f"Recorded pedestrian event in MongoDB Atlas: {event_type} ({status})")
+        except Exception as e:
+            logger.warning(f"Could not write pedestrian event to MongoDB Atlas: {e}")
+
+        # 2. SQL AuditLog Storage for full local resilience and audit history
+        try:
+            audit = AuditLog(
+                username=username,
+                action=f"PEDESTRIAN_{status}",
+                details=json.dumps(event_doc)
+            )
+            db.add(audit)
+            db.commit()
+        except Exception as e:
+            logger.warning(f"Could not record pedestrian audit log in SQL: {e}")
+            db.rollback()
+
 
 class IntersectionsRegistry:
     def __init__(self):
@@ -887,17 +1223,28 @@ class IntersectionsRegistry:
         if intersection_id not in self.controllers:
             num_approaches = 4
             approaches_config = None
+            inter = None
             if db:
                 inter = db.query(Intersection).filter(Intersection.id == intersection_id).first()
                 if inter:
                     num_approaches = inter.num_approaches or 4
                     approaches_config = inter.approaches_config
 
-            self.controllers[intersection_id] = SignalController(
+            controller = SignalController(
                 intersection_id=intersection_id,
                 num_approaches=num_approaches,
                 approaches_config=approaches_config
             )
+            if db and inter:
+                if getattr(inter, "pedestrian_crossing_enabled", None) is not None:
+                    controller.pedestrian_enabled = bool(inter.pedestrian_crossing_enabled)
+                if getattr(inter, "pedestrian_interval", None):
+                    controller.pedestrian_interval = float(inter.pedestrian_interval)
+                if getattr(inter, "pedestrian_duration", None):
+                    controller.pedestrian_duration = float(inter.pedestrian_duration)
+                controller.next_pedestrian_time = time.time() + controller.pedestrian_interval
+
+            self.controllers[intersection_id] = controller
         return self.controllers[intersection_id]
 
     def update_junction_config(

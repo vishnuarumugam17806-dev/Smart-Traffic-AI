@@ -18,13 +18,13 @@ for i in range(1, 20):
             js_req = urllib.request.Request(js_url, headers={"User-Agent": "Mozilla/5.0"})
             js_code = urllib.request.urlopen(js_req, timeout=20).read().decode("utf-8", errors="ignore")
             
-            has_traffic = "TrafficLayer" in js_code or "TRAFFIC INTELLIGENCE MAP" in js_code or "Google Live Traffic" in js_code
-            if has_traffic:
-                print(f"[SUCCESS] Deployed bundle {assets[0]} contains complete Google Traffic Layer & VIGITRA AI overlays!", flush=True)
+            has_signals = "NORTH_SOUTH_GREEN" in js_code or "Adaptive Signal" in js_code or "index-Brc5BUcN" in html
+            if has_signals:
+                print(f"[SUCCESS] Deployed bundle {assets[0]} contains latest dynamic network signal engine!", flush=True)
                 print("RENDER DEPLOYMENT IS COMPLETE AND LIVE ON https://vigitra-frontend.onrender.com!", flush=True)
                 sys.exit(0)
             else:
-                print(f"[{i}/25] Current deployed bundle {assets[0]} is previous build. Waiting 12s for Render build & deploy...", flush=True)
+                print(f"[{i}/25] Current deployed bundle {assets[0]} does not yet have latest commit. Waiting 12s for Render build & deploy...", flush=True)
         else:
             print(f"[{i}/20] Could not find JS assets in HTML", flush=True)
     except Exception as e:

@@ -40,6 +40,9 @@ try:
         for col_def in [
             "ALTER TABLE intersections ADD COLUMN num_approaches INTEGER DEFAULT 4;",
             "ALTER TABLE intersections ADD COLUMN approaches_config JSON;",
+            "ALTER TABLE intersections ADD COLUMN pedestrian_crossing_enabled BOOLEAN DEFAULT 1;",
+            "ALTER TABLE intersections ADD COLUMN pedestrian_interval INTEGER DEFAULT 600;",
+            "ALTER TABLE intersections ADD COLUMN pedestrian_duration INTEGER DEFAULT 30;",
             "ALTER TABLE users ADD COLUMN area_jurisdiction VARCHAR(100);",
             "ALTER TABLE users ADD COLUMN police_id VARCHAR(50);",
             "ALTER TABLE users ADD COLUMN mobile_number VARCHAR(20);",
@@ -405,6 +408,7 @@ async def dedicated_signal_controller_loop():
                         "mode": controller.mode,
                         "reasoning": controller.last_reasoning,
                         "elapsed_green_time": round(controller.elapsed_green_time, 1),
+                        "pedestrian_crossing": controller.get_pedestrian_telemetry(),
                         "current_metrics": {
                             "approach": controller.active_approach,
                             "vehicle_count": round(active_app_data.get("vehicle_count", 0.0), 1),

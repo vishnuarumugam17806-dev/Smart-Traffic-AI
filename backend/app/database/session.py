@@ -38,6 +38,9 @@ try:
         for col_stmt in [
             "ALTER TABLE intersections ADD COLUMN num_approaches INTEGER DEFAULT 4;",
             "ALTER TABLE intersections ADD COLUMN approaches_config JSON;",
+            "ALTER TABLE intersections ADD COLUMN pedestrian_crossing_enabled BOOLEAN DEFAULT 1;",
+            "ALTER TABLE intersections ADD COLUMN pedestrian_interval INTEGER DEFAULT 600;",
+            "ALTER TABLE intersections ADD COLUMN pedestrian_duration INTEGER DEFAULT 30;",
             "ALTER TABLE blacklist ADD COLUMN directory_type VARCHAR(50) DEFAULT 'SECURITY_WATCHLIST';",
             "ALTER TABLE blacklist ADD COLUMN severity VARCHAR(50) DEFAULT 'CRITICAL';",
             "ALTER TABLE blacklist ADD COLUMN vehicle_model VARCHAR(100);",

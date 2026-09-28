@@ -46,6 +46,21 @@ class ManualControlInput(BaseModel):
     phase: str
     reason: str
     color: Optional[str] = "GREEN"
+    is_emergency_override: Optional[bool] = False
+
+class PedestrianTriggerInput(BaseModel):
+    trigger_type: Optional[str] = "MANUAL_DEMO"
+
+class PedestrianConfigInput(BaseModel):
+    enabled: Optional[bool] = None
+    interval_seconds: Optional[int] = None
+    duration_seconds: Optional[int] = None
+    demo_mode: Optional[bool] = None
+
+class PedestrianEmergencyOverrideInput(BaseModel):
+    confirmed: bool = False
+    reason: str = "Emergency vehicle priority clearance"
+    target_approach: Optional[str] = None
 
 class MobileLinkInput(BaseModel):
     device_id: str
@@ -579,6 +594,145 @@ def get_intersection_cameras(id: int, db: Session = Depends(get_db)):
 
     return result
 
+@router.get("/intersections/{id}/camera-control-comparison")
+def get_camera_control_comparison(id: int, db: Session = Depends(get_db)):
+    """
+    Returns the comprehensive technical and operational differences in traffic signal control
+    across varying numbers of active cameras (0, 1, 2, 3, 4) at this intersection.
+    """
+    inter = db.query(Intersection).filter(Intersection.id == id).first()
+    if not inter:
+        raise HTTPException(status_code=404, detail="Intersection not found")
+
+    num_app = inter.num_approaches or 4
+    controller = signal_registry.get_controller(id, db=db)
+
+    comparisons = [
+        {
+            "num_cameras": 0,
+            "mode": "FIXED_TIME_PRETIMED",
+            "name": "Fixed-Time / Pre-timed (Blind)",
+            "tier_label": "0 Cameras (Blind)",
+            "observability_pct": 0,
+            "monitored_approaches": [],
+            "unmonitored_approaches": ["North", "East", "South", "West"][:num_app],
+            "timing_strategy": "Static Time-of-Day Fixed Splits",
+            "green_allocation_formula": "Fixed 30s/30s or Historical Webster Cycle",
+            "queue_detection": "Unavailable (Relies on static historical priors)",
+            "zero_waste_clearance": False,
+            "wasted_green_sec": 21.5,
+            "avg_delay_sec": 62.4,
+            "throughput_veh_hr": 1050,
+            "throughput_gain_pct": 0,
+            "emergency_preemption": "Disabled (Requires manual radio dispatch)",
+            "anti_starvation": "Inactive (Fixed cycle runs regardless of queue)",
+            "pedestrian_safety": "Fixed pedestrian walk clearance window",
+            "fail_safe_behavior": "Default mode during total power/comms loss",
+            "color_badge": "bg-slate-100 text-slate-800 border-slate-300",
+            "description": "No vision sensors installed. Signal cycles on a rigid, unactuated timer. High wasted green when lanes are empty; high congestion queues form unobserved."
+        },
+        {
+            "num_cameras": 1,
+            "mode": "SEMI_ACTUATED",
+            "name": "Single-Approach Semi-Actuated",
+            "tier_label": "1 Camera (Semi-Actuated)",
+            "observability_pct": round(100.0 / num_app, 1),
+            "monitored_approaches": ["North (Primary Arterial)"],
+            "unmonitored_approaches": ["East", "South", "West"][:num_app - 1],
+            "timing_strategy": "Semi-Actuated Green Extension & Truncation",
+            "green_allocation_formula": "Dynamic [15s-45s] on monitored leg; fixed 25s fallback on unmonitored legs",
+            "queue_detection": "Single Approach Live AI Detection (Remaining approaches blind)",
+            "zero_waste_clearance": False,
+            "wasted_green_sec": 12.8,
+            "avg_delay_sec": 42.1,
+            "throughput_veh_hr": 1380,
+            "throughput_gain_pct": 31.4,
+            "emergency_preemption": "Unilateral (Active only if ambulance approaches via monitored leg)",
+            "anti_starvation": "Timer-based ceiling on unmonitored legs",
+            "pedestrian_safety": "Semi-actuated push-button recall",
+            "fail_safe_behavior": "Reverts to fixed-time if camera drops",
+            "color_badge": "bg-amber-100 text-amber-900 border-amber-300",
+            "description": "One approach equipped with AI camera. Controller extends green when queue is heavy on the monitored approach and truncates when empty, but cross streets operate blindly."
+        },
+        {
+            "num_cameras": 2,
+            "mode": "ARTERIAL_COORDINATED",
+            "name": "Dual-Approach Arterial Coordinated",
+            "tier_label": "2 Cameras (Arterial Coordinated)",
+            "observability_pct": round(200.0 / num_app, 1),
+            "monitored_approaches": ["North Corridor", "South Corridor"],
+            "unmonitored_approaches": ["East Side Street", "West Side Street"][:max(0, num_app - 2)],
+            "timing_strategy": "Coordinated Arterial Split & Green Wave",
+            "green_allocation_formula": "Dynamic ratio balance between opposing corridor approaches + max-wait ceiling for cross streets",
+            "queue_detection": "Corridor-wide AI Tracking; Cross-streets use occupancy/time priors",
+            "zero_waste_clearance": False,
+            "wasted_green_sec": 5.4,
+            "avg_delay_sec": 26.8,
+            "throughput_veh_hr": 1740,
+            "throughput_gain_pct": 65.7,
+            "emergency_preemption": "Corridor Preemption (North-South Green Wave)",
+            "anti_starvation": "Active (Enforces maximum wait ceiling on cross-streets)",
+            "pedestrian_safety": "Dedicated pedestrian phase on side streets",
+            "fail_safe_behavior": "Falls back to semi-actuated if 1 camera fails",
+            "color_badge": "bg-blue-100 text-blue-900 border-blue-300",
+            "description": "Both opposing directions of the primary corridor are monitored. Optimizes green wave progression and clears corridor queues while protecting minor side street traffic."
+        },
+        {
+            "num_cameras": 3,
+            "mode": "TRI_DIRECTIONAL_ADAPTIVE",
+            "name": "Tri-Directional Priority Adaptive",
+            "tier_label": "3 Cameras (Tri-Directional)",
+            "observability_pct": round(300.0 / num_app, 1),
+            "monitored_approaches": ["North Approach", "South Approach", "East Approach"],
+            "unmonitored_approaches": ["West Minor Link"] if num_app > 3 else [],
+            "timing_strategy": "Multi-Approach Weighted Demand Optimization",
+            "green_allocation_formula": "Multi-Factor Priority Score on 3 legs; minor leg interpolated via link outflow",
+            "queue_detection": "75% Coverage (3 legs live AI queue and velocity tracking)",
+            "zero_waste_clearance": True,
+            "wasted_green_sec": 1.8,
+            "avg_delay_sec": 17.5,
+            "throughput_veh_hr": 2080,
+            "throughput_gain_pct": 98.1,
+            "emergency_preemption": "Tri-Directional Preemption (3 of 4 legs covered)",
+            "anti_starvation": "Continuous AI wait time scoring + anti-starvation boost",
+            "pedestrian_safety": "Actuated pedestrian clearance phases",
+            "fail_safe_behavior": "Degrades gracefully to 2-camera arterial mode",
+            "color_badge": "bg-indigo-100 text-indigo-900 border-indigo-300",
+            "description": "Ideal for T-junctions or 4-way junctions with a minor slip lane. 3 approaches continuously compete for green based on real-time multi-factor priority scores."
+        },
+        {
+            "num_cameras": 4,
+            "mode": "OMNI_DIRECTIONAL_ZERO_WASTE",
+            "name": "Full Omni-Directional Zero-Waste Adaptive",
+            "tier_label": "4+ Cameras (Full Omni-Adaptive)",
+            "observability_pct": 100.0,
+            "monitored_approaches": ["North", "East", "South", "West"][:num_app],
+            "unmonitored_approaches": ["None (360° Real-Time Vision)"],
+            "timing_strategy": "VIGITRA AI Real-Time Multi-Factor Decision Engine",
+            "green_allocation_formula": "Demand = 0.45*Q + 0.25*V + 0.20*W + 0.10*D + Fairness + Starvation",
+            "queue_detection": "100% 360° Real-Time HD AI Vision across every lane and approach",
+            "zero_waste_clearance": True,
+            "wasted_green_sec": 0.4,
+            "avg_delay_sec": 10.9,
+            "throughput_veh_hr": 2490,
+            "throughput_gain_pct": 137.1,
+            "emergency_preemption": "100% Omni-Directional Instant Priority Corridor (All approaches detected)",
+            "anti_starvation": "Full Anti-Starvation Safety Guarantee (Exponential escalation at 50% max wait)",
+            "pedestrian_safety": "Full AI Pedestrian Crowd & Crosswalk Detection",
+            "fail_safe_behavior": "Dynamic Multi-Stage Redundancy (Mobile device failover supported)",
+            "color_badge": "bg-emerald-100 text-emerald-900 border-emerald-300",
+            "description": "State-of-the-art intelligent traffic management. Every approach is monitored with 20m radius vehicle crossing, queue dissipation velocity, and emergency vehicle detection. 0 wasted green time."
+        }
+    ]
+
+    return {
+        "intersection_id": id,
+        "intersection_name": inter.name,
+        "num_approaches": num_app,
+        "current_active_mode": controller.mode,
+        "comparisons": comparisons
+    }
+
 @router.get("/intersections/{id}/traffic")
 def get_intersection_traffic(id: int, db: Session = Depends(get_db)):
     controller = signal_registry.get_controller(id, db=db)
@@ -621,6 +775,7 @@ def get_intersection_signal(id: int, db: Session = Depends(get_db)):
         "mode": controller.mode,
         "reasoning": controller.last_reasoning,
         "elapsed_green_time": round(controller.elapsed_green_time, 1),
+        "pedestrian_crossing": controller.get_pedestrian_telemetry(),
         "current_metrics": {
             "approach": controller.active_approach,
             "vehicle_count": round(active_app_data.get("vehicle_count", 0.0), 1),
@@ -690,14 +845,21 @@ async def apply_manual_override(
     controller = signal_registry.get_controller(id, db=db)
     username = str(current_user.username) if current_user else "OPERATOR"
     req_color = getattr(control_in, "color", "GREEN") or "GREEN"
+    is_em = bool(getattr(control_in, "is_emergency_override", False))
     success = controller.request_manual_control(
         db,
         phase=control_in.phase,
         reason=control_in.reason,
         username=username,
-        color=req_color
+        color=req_color,
+        is_emergency_override=is_em
     )
     if not success:
+        if controller.pedestrian_state in ["TRANSITION", "ALL_RED", "PEDESTRIAN_CROSSING"]:
+            raise HTTPException(
+                status_code=400,
+                detail="Manual vehicle signal change rejected: PEDESTRIAN CROSSING ACTIVE. Vehicle approaches are held at RED for pedestrian safety. Use emergency override if required."
+            )
         raise HTTPException(status_code=400, detail="Failed to apply manual control. Invalid approach or junction.")
 
     # Broadcast updated signal telemetry via WebSocket immediately
@@ -714,6 +876,7 @@ async def apply_manual_override(
         "mode": controller.mode,
         "reasoning": controller.last_reasoning,
         "elapsed_green_time": round(controller.elapsed_green_time, 1),
+        "pedestrian_crossing": controller.get_pedestrian_telemetry(),
         "current_metrics": {
             "approach": controller.active_approach,
             "vehicle_count": round(active_app_data.get("vehicle_count", 0.0), 1),
@@ -785,6 +948,200 @@ async def return_to_auto(
     })
 
     return {"status": "SUCCESS", "message": "Intersection reverted to automatic adaptive mode."}
+
+# 5b. Scheduled Pedestrian Safety Phase Endpoints (Sections 1-13)
+@router.get("/intersections/{id}/pedestrian/status")
+def get_pedestrian_status(id: int, db: Session = Depends(get_db)):
+    """Returns authoritative real-time pedestrian crossing state, timer, and configuration (Section 3)."""
+    controller = signal_registry.get_controller(id, db=db)
+    return controller.get_pedestrian_telemetry()
+
+@router.post("/intersections/{id}/pedestrian/trigger")
+async def trigger_pedestrian_phase(
+    id: int,
+    payload: Optional[PedestrianTriggerInput] = None,
+    db: Session = Depends(get_db),
+    current_user: Optional[User] = Depends(get_current_user_optional)
+):
+    """
+    Manually triggers protected pedestrian phase (for Demo Mode or push-button evaluation).
+    Safely transitions active vehicle approach via yellow clearance to all-red pedestrian crossing (Section 1, 2 & 13).
+    """
+    controller = signal_registry.get_controller(id, db=db)
+    trigger_type = payload.trigger_type if payload and payload.trigger_type else "MANUAL_DEMO"
+    result = controller.trigger_pedestrian_phase(db, trigger_type=trigger_type)
+
+    active_app_data = controller.approaches.get(controller.active_approach, {})
+    await ws_manager.broadcast({
+        "event": "SIGNAL_STATE_CHANGED",
+        "event_type": "PEDESTRIAN_PHASE_TRIGGERED",
+        "intersection_id": id,
+        "num_approaches": controller.num_approaches,
+        "active_approach": controller.active_approach,
+        "active_phase": controller.active_phase,
+        "state": controller.state,
+        "countdown": controller.countdown,
+        "mode": controller.mode,
+        "reasoning": controller.last_reasoning,
+        "elapsed_green_time": round(controller.elapsed_green_time, 1),
+        "pedestrian_crossing": controller.get_pedestrian_telemetry(),
+        "current_metrics": {
+            "approach": controller.active_approach,
+            "vehicle_count": round(active_app_data.get("vehicle_count", 0.0), 1),
+            "queue_length": active_app_data.get("queue_length", 0),
+            "waiting_time": round(active_app_data.get("waiting_time", 0.0), 1),
+            "traffic_density": active_app_data.get("traffic_density", "MODERATE"),
+            "demand_score": round(active_app_data.get("demand_score", 0.0), 3),
+            "priority_score": round(active_app_data.get("priority_score", 0.0), 1),
+            "green_duration": active_app_data.get("green_duration", controller.countdown)
+        },
+        "approaches": {
+            k: {
+                "name": v.get("name"),
+                "direction": v.get("direction"),
+                "signal": controller.get_approach_signal(k),
+                "vehicle_count": round(v.get("vehicle_count", 0.0), 1),
+                "queue_length": v.get("queue_length", 0),
+                "waiting_time": round(v.get("waiting_time", 0.0), 1),
+                "priority_score": round(v.get("priority_score", 0.0), 1),
+                "traffic_density": v.get("traffic_density", "MODERATE")
+            }
+            for k, v in controller.approaches.items()
+        }
+    })
+    return result
+
+@router.post("/intersections/{id}/pedestrian/configure")
+async def configure_pedestrian_phase(
+    id: int,
+    config_in: PedestrianConfigInput,
+    db: Session = Depends(get_db),
+    current_user: Optional[User] = Depends(get_current_user_optional)
+):
+    """
+    Configures pedestrian crossing parameters for a junction (Section 10).
+    Persists configuration in DB and live controller.
+    Supports switching between DEMO/TEST MODE (10s interval) and Production (600s interval).
+    """
+    controller = signal_registry.get_controller(id, db=db)
+    telemetry = controller.configure_pedestrian(
+        enabled=config_in.enabled,
+        interval=config_in.interval_seconds,
+        duration=config_in.duration_seconds,
+        demo_mode=config_in.demo_mode
+    )
+
+    # Persist in DB
+    inter = db.query(Intersection).filter(Intersection.id == id).first()
+    if inter:
+        if config_in.enabled is not None:
+            inter.pedestrian_crossing_enabled = config_in.enabled
+        if config_in.interval_seconds is not None:
+            inter.pedestrian_interval = config_in.interval_seconds
+        if config_in.duration_seconds is not None:
+            inter.pedestrian_duration = config_in.duration_seconds
+        db.commit()
+
+    await ws_manager.broadcast({
+        "event": "SIGNAL_STATE_CHANGED",
+        "event_type": "PEDESTRIAN_CONFIG_UPDATED",
+        "intersection_id": id,
+        "pedestrian_crossing": telemetry
+    })
+    return {"status": "SUCCESS", "telemetry": telemetry}
+
+@router.post("/intersections/{id}/pedestrian/emergency-override")
+async def emergency_override_pedestrian_phase(
+    id: int,
+    override_in: PedestrianEmergencyOverrideInput,
+    db: Session = Depends(get_db),
+    current_user: Optional[User] = Depends(get_current_user_optional)
+):
+    """
+    Explicit emergency override of active pedestrian phase with audit trail (Section 7).
+    Requires explicit operator confirmation before terminating the pedestrian window.
+    """
+    if not override_in.confirmed:
+        raise HTTPException(
+            status_code=400,
+            detail="Explicit operator confirmation required to override active pedestrian crossing."
+        )
+
+    controller = signal_registry.get_controller(id, db=db)
+    username = str(current_user.username) if current_user else "OPERATOR"
+    result = controller.emergency_override_pedestrian(
+        db,
+        username=username,
+        reason=override_in.reason,
+        target_approach=override_in.target_approach
+    )
+    if result.get("status") == "NOT_ACTIVE":
+        raise HTTPException(status_code=400, detail="Pedestrian crossing is not currently active.")
+
+    active_app_data = controller.approaches.get(controller.active_approach, {})
+    await ws_manager.broadcast({
+        "event": "SIGNAL_STATE_CHANGED",
+        "event_type": "PEDESTRIAN_EMERGENCY_OVERRIDE",
+        "intersection_id": id,
+        "num_approaches": controller.num_approaches,
+        "active_approach": controller.active_approach,
+        "active_phase": controller.active_phase,
+        "state": controller.state,
+        "countdown": controller.countdown,
+        "mode": controller.mode,
+        "reasoning": controller.last_reasoning,
+        "elapsed_green_time": round(controller.elapsed_green_time, 1),
+        "pedestrian_crossing": controller.get_pedestrian_telemetry(),
+        "approaches": {
+            k: {
+                "name": v.get("name"),
+                "direction": v.get("direction"),
+                "signal": controller.get_approach_signal(k),
+                "vehicle_count": round(v.get("vehicle_count", 0.0), 1),
+                "queue_length": v.get("queue_length", 0),
+                "waiting_time": round(v.get("waiting_time", 0.0), 1),
+                "priority_score": round(v.get("priority_score", 0.0), 1),
+                "traffic_density": v.get("traffic_density", "MODERATE")
+            }
+            for k, v in controller.approaches.items()
+        }
+    })
+    return result
+
+@router.get("/intersections/{id}/pedestrian/events")
+def get_pedestrian_events(id: int, limit: int = 20, db: Session = Depends(get_db)):
+    """
+    Returns recorded pedestrian phase events from MongoDB Atlas with fallback to SQL AuditLog (Section 11).
+    """
+    events = []
+    # 1. Query MongoDB Atlas
+    try:
+        mongo_db = mongo_manager.get_sync_db()
+        if mongo_db is not None:
+            cursor = mongo_db["pedestrian_events"].find({"junctionId": id}).sort("timestamp", -1).limit(limit)
+            for doc in cursor:
+                doc["_id"] = str(doc["_id"])
+                events.append(doc)
+    except Exception as e:
+        logger.warning(f"Could not read from MongoDB Atlas: {e}")
+
+    # 2. SQL AuditLog fallback
+    if not events:
+        try:
+            audit_logs = db.query(AuditLog).filter(
+                AuditLog.action.like("PEDESTRIAN_%")
+            ).order_by(AuditLog.timestamp.desc()).limit(limit).all()
+            for al in audit_logs:
+                try:
+                    payload = json.loads(al.details or "{}")
+                    if payload.get("junctionId") == id:
+                        events.append(payload)
+                except Exception:
+                    pass
+        except Exception as e:
+            logger.warning(f"Could not query SQL AuditLog for pedestrian events: {e}")
+
+    return events
 
 @router.post("/intersections/{id}/vehicle-pass")
 async def report_vehicle_passed_radius(

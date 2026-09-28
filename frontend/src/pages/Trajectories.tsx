@@ -277,14 +277,14 @@ export const Trajectories: React.FC = () => {
       <div className="w-full lg:w-[380px] border-b lg:border-b-0 lg:border-r border-[#DCE4EA] bg-[#F1F6F8] p-4 sm:p-5 flex flex-col justify-between shrink-0 overflow-y-auto select-none">
         <div className="space-y-4">
           <div>
-            <h1 className="text-xs sm:text-sm font-bold text-slate-800 tracking-tight uppercase">CROSS-CAMERA TRAJECTORY RECONSTRUCTION</h1>
-            <p className="text-[10px] text-slate-500 font-mono mt-0.5">Multi-Camera License Plate & Journey Timeline</p>
+            <h1 className="text-sm font-bold text-slate-900 tracking-tight font-sans uppercase">VEHICLE TRACKING</h1>
+            <p className="text-[10px] text-slate-500 font-sans mt-0.5">Journey reconstruction and route timeline</p>
           </div>
 
           {/* Search Box */}
           <form onSubmit={handleSearch} className="space-y-3">
             <div className="space-y-1">
-              <label className="block text-[9px] font-mono font-bold text-slate-500 uppercase">Authorized License Plate Search</label>
+              <label className="block text-[9px] font-mono font-bold text-slate-500 uppercase">License Plate Search</label>
               <div className="relative flex items-center gap-2">
                 <input
                   type="text"
