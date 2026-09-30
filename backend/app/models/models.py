@@ -261,23 +261,23 @@ class PlateObservation(Base):
 class Blacklist(Base):
     __tablename__ = "blacklist"
 
-    id = Column(Integer, primary_key=True, index=True)
-    plate = Column(String(50), unique=True, index=True, nullable=False)
-    reason = Column(String(255), nullable=False)
-    directory_type = Column(String(50), default="SECURITY_WATCHLIST", nullable=False) # STOLEN_VEHICLES, SECURITY_WATCHLIST, CHALLAN_DEFAULTER, RTO_COMPLIANCE, VIP_WHITELIST
-    severity = Column(String(50), default="CRITICAL", nullable=False) # CRITICAL, HIGH, MEDIUM, LOW
-    location = Column(String(255), nullable=True) # Surveillance location / checkpoint provided
-    vehicle_model = Column(String(100), nullable=True) # e.g. "White Swift Dzire"
-    owner_name = Column(String(100), nullable=True)
-    fir_number = Column(String(100), nullable=True) # e.g. "FIR-2026/89"
-    police_station = Column(String(100), nullable=True) # e.g. "Anna Salai PS"
-    auto_alert = Column(Boolean, default=True, nullable=False)
-    scan_count = Column(Integer, default=0, nullable=False)
-    last_scanned_at = Column(DateTime, nullable=True)
-    created_by = Column(String(100), default="admin")
-    created_at = Column(DateTime, default=datetime.utcnow)
-    status = Column(String(50), default="ACTIVE")
-    notes = Column(Text, nullable=True)
+    id: Mapped[int] = Column(Integer, primary_key=True, index=True) # type: ignore
+    plate: Mapped[str] = Column(String(50), unique=True, index=True, nullable=False) # type: ignore
+    reason: Mapped[str] = Column(String(255), nullable=False) # type: ignore
+    directory_type: Mapped[str] = Column(String(50), default="SECURITY_WATCHLIST", nullable=False) # type: ignore # STOLEN_VEHICLES, SECURITY_WATCHLIST, CHALLAN_DEFAULTER, RTO_COMPLIANCE, VIP_WHITELIST
+    severity: Mapped[str] = Column(String(50), default="CRITICAL", nullable=False) # type: ignore # CRITICAL, HIGH, MEDIUM, LOW
+    location: Mapped[Optional[str]] = Column(String(255), nullable=True) # type: ignore # Surveillance location / checkpoint provided
+    vehicle_model: Mapped[Optional[str]] = Column(String(100), nullable=True) # type: ignore # e.g. "White Swift Dzire"
+    owner_name: Mapped[Optional[str]] = Column(String(100), nullable=True) # type: ignore
+    fir_number: Mapped[Optional[str]] = Column(String(100), nullable=True) # type: ignore # e.g. "FIR-2026/89"
+    police_station: Mapped[Optional[str]] = Column(String(100), nullable=True) # type: ignore # e.g. "Anna Salai PS"
+    auto_alert: Mapped[bool] = Column(Boolean, default=True, nullable=False) # type: ignore
+    scan_count: Mapped[int] = Column(Integer, default=0, nullable=False) # type: ignore
+    last_scanned_at: Mapped[Optional[datetime]] = Column(DateTime, nullable=True) # type: ignore
+    created_by: Mapped[str] = Column(String(100), default="admin") # type: ignore
+    created_at: Mapped[datetime] = Column(DateTime, default=datetime.utcnow) # type: ignore
+    status: Mapped[str] = Column(String(50), default="ACTIVE") # type: ignore
+    notes: Mapped[Optional[str]] = Column(Text, nullable=True) # type: ignore
 
 # Semantic alias
 VehicleDirectory = Blacklist

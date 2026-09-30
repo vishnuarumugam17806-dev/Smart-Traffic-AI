@@ -1,11 +1,12 @@
 import os
+import json
 import asyncio
 import hashlib
 import random
 import logging
 import cv2
 from datetime import datetime, timezone
-from typing import List, Optional, Any, Dict
+from typing import List, Optional, Any, Dict, cast
 
 logger = logging.getLogger(__name__)
 from fastapi import APIRouter, Depends, HTTPException, status, Response, UploadFile, File, Form
@@ -16,7 +17,8 @@ from app.models.models import (
     Incident, Violation, NumberPlate, TrafficPrediction, AgentDecision, SignalDecision, User,
     Road, PlateObservation, Blacklist, RouteAnomaly, Alert, AuditLog,
     WeatherObservation, ODRecord, AIFeedback, AIModelMetric, Report,
-    MobileDevice, VideoRecording, EvidenceRecord, DataRetentionSetting, CameraStatusEnum
+    MobileDevice, VideoRecording, EvidenceRecord, DataRetentionSetting, CameraStatusEnum,
+    CongestionLevelEnum
 )
 from app.schemas.schemas import (
     IntersectionOut, IntersectionCreate, CameraOut, CameraCreate,
@@ -486,8 +488,8 @@ def optimize_signal_phase(signal_id: int, db: Session = Depends(get_db)):
         TrafficMeasurement.intersection_id == signal.intersection_id
     ).order_by(TrafficMeasurement.timestamp.desc()).first()
 
-    v_count = int(latest.vehicle_count) if (latest and latest.vehicle_count is not None) else 18
-    q_len = int(latest.queue_length) if (latest and latest.queue_length is not None) else 5
+    v_count = int(cast(Any, latest.vehicle_count)) if (latest and latest.vehicle_count is not None) else 18
+    q_len = int(cast(Any, latest.queue_length)) if (latest and latest.queue_length is not None) else 5
     density = latest.congestion_level.value if (latest and hasattr(latest.congestion_level, 'value')) else "MODERATE"
 
     result = signal_optimizer.optimize_signal(
@@ -578,7 +580,7 @@ def get_intersection_cameras(id: int, db: Session = Depends(get_db)):
     # If the intersection has configured approaches without a direct camera row, provide demo simulated camera inputs
     approaches = inter.approaches_config or []
     if not approaches and inter.num_approaches:
-        default_dirs = ["NORTH", "EAST", "SOUTH", "WEST"][:inter.num_approaches]
+        default_dirs = ["NORTH", "EAST", "SOUTH", "WEST"][:int(cast(Any, inter.num_approaches))]
         approaches = [{"id": d, "name": f"{d.title()} Approach", "direction": d} for d in default_dirs]
 
     for idx, app in enumerate(approaches):
@@ -611,7 +613,7 @@ def get_camera_control_comparison(id: int, db: Session = Depends(get_db)):
     if not inter:
         raise HTTPException(status_code=404, detail="Intersection not found")
 
-    num_app = inter.num_approaches or 4
+    num_app = int(cast(Any, inter.num_approaches)) if inter.num_approaches else 4
     controller = signal_registry.get_controller(id, db=db)
 
     comparisons = [
@@ -1162,7 +1164,7 @@ async def report_vehicle_passed_radius(
     automatically changes the signal and switches to the next approach.
     """
     controller = signal_registry.get_controller(id, db=db)
-    approach = payload.approach if payload else None
+    approach = (payload.approach if (payload and payload.approach) else controller.active_approach) or "NORTH"
     vehicle_id = payload.vehicle_id if payload else None
     result = controller.vehicle_passed_radius(db, approach_key=approach, vehicle_id=vehicle_id)
 
@@ -1302,7 +1304,7 @@ def get_decision_history(id: int, limit: int = 50, db: Session = Depends(get_db)
             "priority_level": d.priority_level,
             "reasoning": d.reasoning,
             "confidence": d.confidence,
-            "timestamp": d.timestamp.isoformat() if d.timestamp else datetime.utcnow().isoformat()
+            "timestamp": d.timestamp.isoformat() if d.timestamp else datetime.now(timezone.utc).isoformat()
         } for d in decisions
     ]
 
@@ -1311,7 +1313,7 @@ def get_high_density_zones(db: Session = Depends(get_db)):
     intersections = db.query(Intersection).all()
     zones = []
     for inter in intersections:
-        controller = signal_registry.get_controller(int(inter.id))
+        controller = signal_registry.get_controller(int(cast(Any, inter.id)))
         max_queue = max(app["queue_length"] for app in controller.approaches.values())
         tot_count = sum(app["vehicle_count"] for app in controller.approaches.values())
         if max_queue >= 10:
@@ -1630,17 +1632,19 @@ def get_anpr_records(
     result = []
     for r in records:
         cam_info = cam_map.get(r.camera_id, (f"Camera #{r.camera_id}", "Surveillance Network"))
+        v_type = str(r.violation_type) if r.violation_type else ""
+        conf = float(cast(Any, r.confidence)) if r.confidence is not None else 0.95
         result.append({
             "id": r.id,
             "plate": r.license_plate,
             "plate_number": r.license_plate,
-            "category": r.violation_type,
-            "category_label": CATEGORY_LABELS.get(r.violation_type, r.violation_type.replace("_", " ").title()),
+            "category": v_type,
+            "category_label": CATEGORY_LABELS.get(v_type, v_type.replace("_", " ").title()),
             "camera_id": r.camera_id,
             "camera_name": cam_info[0],
             "location": cam_info[1],
             "timestamp": r.timestamp.isoformat() if r.timestamp else datetime.now(timezone.utc).isoformat(),
-            "confidence": round(r.confidence, 2) if r.confidence else 0.95,
+            "confidence": round(conf, 2),
             "status": r.status or "Review",
             "evidence_image": r.evidence_image or "/sample_traffic.mp4"
         })
@@ -1738,7 +1742,7 @@ def get_traffic_health_index(db: Session = Depends(get_db)):
 
     total_queues = []
     for inter in intersections:
-        controller = signal_registry.get_controller(int(inter.id))
+        controller = signal_registry.get_controller(int(cast(Any, inter.id)))
         max_q = max(app["queue_length"] for app in controller.approaches.values())
         total_queues.append(max_q)
 
@@ -1829,12 +1833,12 @@ def link_mobile_device(dev_in: MobileLinkInput, db: Session = Depends(get_db)):
 
     mobile_manager.register_device_session(
         device_id=str(dev.device_id),
-        camera_id=dev.camera_id or 0,
-        operator_id=str(dev.operator_id),
-        location=str(dev.assigned_location),
-        device_name=dev.device_name or dev.name,
-        platform=dev.platform,
-        browser=dev.browser
+        camera_id=int(cast(Any, dev.camera_id)) if dev.camera_id else 0,
+        operator_id=str(dev.operator_id or "PATROL-OFFICER"),
+        location=str(dev.assigned_location or "Mobile Field Stream"),
+        device_name=str(dev.device_name or dev.name) if (dev.device_name or dev.name) else None,
+        platform=str(dev.platform) if dev.platform else None,
+        browser=str(dev.browser) if dev.browser else None
     )
     return dev
 
@@ -1871,7 +1875,7 @@ def update_mobile_location(loc_in: DeviceLocationInput, db: Session = Depends(ge
     return {"status": "SUCCESS", "location": loc_res}
 
 # Web Client Location Tracking & Storage
-_latest_web_user_location = {
+_latest_web_user_location: Dict[str, Any] = {
     "user_id": "WEB-OPERATOR",
     "latitude": None,
     "longitude": None,
@@ -2060,13 +2064,13 @@ async def ingest_mobile_frame(stream_in: FrameStreamInput, db: Session = Depends
 
         if stream_in.device_id not in mobile_manager.active_sessions:
             mobile_manager.register_device_session(
-                device_id=stream_in.device_id,
-                camera_id=dev.camera_id or 0,
-                operator_id=dev.operator_id or "PATROL-OFFICER",
-                location=dev.assigned_location or "Mobile Field Stream",
-                device_name=dev.device_name or dev.name,
-                platform=dev.platform,
-                browser=dev.browser
+                device_id=str(stream_in.device_id),
+                camera_id=int(cast(Any, dev.camera_id)) if dev.camera_id else 0,
+                operator_id=str(dev.operator_id or "PATROL-OFFICER"),
+                location=str(dev.assigned_location or "Mobile Field Stream"),
+                device_name=str(dev.device_name or dev.name) if (dev.device_name or dev.name) else None,
+                platform=str(dev.platform) if dev.platform else None,
+                browser=str(dev.browser) if dev.browser else None
             )
     except Exception as dbe:
         db.rollback()
@@ -2239,7 +2243,7 @@ def get_mobile_live_frame(device_id: str, db: Session = Depends(get_db)):
 
     import cv2, base64
     _, buffer = cv2.imencode(".jpg", frame, [cv2.IMWRITE_JPEG_QUALITY, 70])
-    b64_str = base64.b64encode(buffer).decode("utf-8")
+    b64_str = base64.b64encode(buffer.tobytes()).decode("utf-8")
 
     return {
         "device_id": device_id,
@@ -2671,7 +2675,8 @@ async def upload_mobile_recording(
     if not orig_ext:
         orig_ext = ".webm" if "webm" in (video_file.content_type or "") else ".mp4"
 
-    timestamp_str = datetime.utcnow().strftime("%Y%m%d_%H%M%S")
+    now_t = datetime.now(timezone.utc)
+    timestamp_str = now_t.strftime("%Y%m%d_%H%M%S")
     record_id = f"REC-MOB-{timestamp_str}-{random.randint(100, 999)}"
     filename = f"{record_id}{orig_ext}"
     dest_path = os.path.join(recordings_dir, filename)
@@ -2679,14 +2684,14 @@ async def upload_mobile_recording(
     with open(dest_path, "wb") as f:
         f.write(contents)
 
-    now_t = datetime.utcnow()
+    now_naive = now_t.replace(tzinfo=None)
     rec = VideoRecording(
         record_id=record_id,
         camera_id=1,  # Default fallback camera ID if foreign key enforced
         device_id=device_id,
         location=location,
-        start_time=now_t,
-        end_time=now_t,
+        start_time=now_naive,
+        end_time=now_naive,
         duration_sec=duration_sec,
         file_size_mb=max(0.1, file_size_mb),
         file_reference=f"/storage/recordings/{filename}",
@@ -2703,7 +2708,7 @@ async def upload_mobile_recording(
         try:
             cam = db.query(Camera).first()
             if cam:
-                rec.camera_id = cam.id
+                rec.camera_id = int(cast(Any, cam.id))
                 db.add(rec)
                 db.commit()
                 db.refresh(rec)
@@ -3600,13 +3605,13 @@ def run_what_if_simulation(
         TrafficMeasurement.intersection_id == sim_in.intersection_id
     ).order_by(TrafficMeasurement.timestamp.desc()).first()
     
-    vol = int(latest.vehicle_count) if (latest and latest.vehicle_count is not None) else 38
-    queue = int(latest.queue_length) if (latest and latest.queue_length is not None) else 6
+    vol = int(cast(Any, latest.vehicle_count)) if (latest and latest.vehicle_count is not None) else 38
+    queue = int(cast(Any, latest.queue_length)) if (latest and latest.queue_length is not None) else 6
     
     vol_impact = sim_in.closed_lanes * 15
     queue_impact = sim_in.closed_lanes * 4 - sim_in.green_time_delta * 0.2
     
-    vol_after = max(0, int(vol + vol_impact))
+    vol_after = max(0, vol + vol_impact)
     queue_after = max(0, int(queue + queue_impact))
     
     travel_time_before = 120.0 + float(queue) * 12.0
