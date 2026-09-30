@@ -8,7 +8,8 @@ from app.models.models import (
     User, RoleEnum, Intersection, Camera, Signal, TrafficMeasurement,
     CongestionLevelEnum, CameraStatusEnum, Incident, IncidentStatusEnum,
     EmergencyEvent, Violation, NumberPlate, AgentDecision, Road,
-    PlateObservation, Blacklist, RouteAnomaly, Alert, VideoRecording
+    PlateObservation, Blacklist, RouteAnomaly, Alert, VideoRecording,
+    EvidenceRecord
 )
 
 logger = logging.getLogger("VIGITRA.Seeder")
@@ -294,6 +295,9 @@ def auto_seed_database(db: Session, force: bool = False) -> None:
         db.commit()
 
         # 6. Seed Plate Observations if empty or low
+        all_cams = db.query(Camera).all()
+        cam_count = len(all_cams) if all_cams else 12
+
         if db.query(PlateObservation).count() < 10:
             base_time = now_utc - timedelta(hours=2)
             sample_plates = [
@@ -348,7 +352,7 @@ def auto_seed_database(db: Session, force: bool = False) -> None:
                 t_sighting = base_time + timedelta(minutes=i * 3)
                 obs = PlateObservation(
                     plate_number=plate,
-                    camera_id=cid if cid <= len(cameras) else 1,
+                    camera_id=cid if cid <= cam_count else 1,
                     timestamp=t_sighting,
                     ocr_confidence=ocr_c,
                     plate_detection_confidence=det_c,
@@ -365,7 +369,7 @@ def auto_seed_database(db: Session, force: bool = False) -> None:
                 t_sighting = base_time + timedelta(seconds=delta_s + 600)
                 obs = PlateObservation(
                     plate_number=plate,
-                    camera_id=cid if cid <= len(cameras) else 1,
+                    camera_id=cid if cid <= cam_count else 1,
                     timestamp=t_sighting,
                     ocr_confidence=0.96,
                     plate_detection_confidence=0.98,
@@ -394,7 +398,7 @@ def auto_seed_database(db: Session, force: bool = False) -> None:
                     type=atype,
                     severity=sev,
                     timestamp=now_utc - timedelta(minutes=random.randint(5, 60)),
-                    camera_id=cid if cid <= len(cameras) else 1,
+                    camera_id=cid if cid <= cam_count else 1,
                     location=loc,
                     vehicle_plate=vplate,
                     message=msg,
@@ -428,7 +432,7 @@ def auto_seed_database(db: Session, force: bool = False) -> None:
             for rid, cid, dev_id, loc, dur, fsize, fref, rtype in recordings_data:
                 rec = VideoRecording(
                     record_id=rid,
-                    camera_id=cid if cid <= len(cameras) else 1,
+                    camera_id=cid if cid <= cam_count else 1,
                     device_id=dev_id,
                     location=loc,
                     start_time=now_utc - timedelta(hours=2, minutes=dur/60),
@@ -481,7 +485,6 @@ def auto_seed_database(db: Session, force: bool = False) -> None:
                 ("SECURITY_WATCHLIST", "MH12PQ9999", 0.99, "Verified", 14),
                 ("SECURITY_WATCHLIST", "DL03CC4455", 0.94, "Review", 88)
             ]
-            cam_count = len(cameras) if cameras else 1
             for idx, (vcat, vplate, vconf, vstat, mins_ago) in enumerate(violations_to_seed):
                 v_cam_id = (idx % cam_count) + 1
                 v = Violation(
@@ -495,6 +498,37 @@ def auto_seed_database(db: Session, force: bool = False) -> None:
                 )
                 db.add(v)
             db.commit()
+
+        # 10. Seed Authentic Photo Evidence Records if empty
+        if db.query(EvidenceRecord).count() == 0:
+            evidence_records_data = [
+                ("EVD-20260930-001", 1, "FIELD_PHOTO_CAPTURE", "TN01AB1234", "Anna Salai - Spencers Junction", "car", "WITHOUT_SEATBELT", 0.94, "VERIFIED", "Driver observed without safety belt during northbound peak."),
+                ("EVD-20260930-002", 3, "FIELD_PHOTO_CAPTURE", "KA05MN3821", "Chennai Central - Ripon Cross", "motorcycle", "WITHOUT_HELMET", 0.98, "VERIFIED", "Rider without approved safety helmet navigating Ripon cross."),
+                ("EVD-20260930-003", 2, "FIELD_PHOTO_CAPTURE", "TNXX1002", "Anna Salai - Spencers Junction", "suv", "RTO_COMPLIANCE", 0.96, "PENDING", "Mandatory Third-Party Insurance policy expired >3 months."),
+                ("EVD-20260930-004", 4, "FIELD_PHOTO_CAPTURE", "DL02CP9012", "T. Nagar - Panagal Park", "car", "SPEED_VIOLATION", 0.97, "VERIFIED", "Recorded transit speed 65 km/h in designated 40 km/h commercial sector."),
+                ("EVD-20260930-005", 5, "FIELD_PHOTO_CAPTURE", "TNXX1003", "Gemini Flyover Circle", "car", "RTO_COMPLIANCE", 0.93, "PENDING", "PUC Emission certificate expired past mandatory grace period."),
+                ("EVD-20260930-006", 6, "FIELD_PHOTO_CAPTURE", "TN01AB1234", "Gemini Flyover Circle", "car", "SIGNAL_JUMP", 0.99, "VERIFIED", "Vehicular stop line breach during Red signal phase at south approach.")
+            ]
+            for r_id, c_id, ev_type, plate_num, loc_name, v_type, viol_type, ocr_c, rev_stat, note in evidence_records_data:
+                ev_rec = EvidenceRecord(
+                    record_id=r_id,
+                    timestamp=now_utc - timedelta(minutes=random.randint(10, 180)),
+                    camera_id=c_id if c_id <= cam_count else 1,
+                    device_id=f"CAM-FIXED-{c_id:02d}",
+                    operator_id="admin",
+                    location=loc_name,
+                    plate_number=plate_num,
+                    ocr_confidence=ocr_c,
+                    vehicle_type=v_type,
+                    event_type=ev_type,
+                    original_image=f"/storage/evidence/{r_id}.jpg",
+                    vehicle_image=f"/storage/evidence/{r_id}_vehicle.jpg",
+                    review_status=rev_stat,
+                    notes=note
+                )
+                db.add(ev_rec)
+            db.commit()
+            logger.info(f"Seeded {len(evidence_records_data)} authentic Evidence Records.")
 
         logger.info("[+] VIGITRA Auto-Seeder completed successfully. All test data active.")
     except Exception as e:

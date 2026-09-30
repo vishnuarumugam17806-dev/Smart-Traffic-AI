@@ -36,9 +36,10 @@ export const Trajectories: React.FC = () => {
   const [searchParams] = useSearchParams();
   const initialPlate = searchParams.get('plate') || '';
 
+  const defaultPlate = initialPlate || 'TN01AB1234';
   const [graphData, setGraphData] = useState<{ nodes: GraphNode[]; edges: GraphEdge[] }>(FALLBACK_GIS_GRAPH);
-  const [plate, setPlate] = useState<string>(initialPlate);
-  const [activePlate, setActivePlate] = useState<string>(initialPlate);
+  const [plate, setPlate] = useState<string>(defaultPlate);
+  const [activePlate, setActivePlate] = useState<string>(defaultPlate);
   const [globalVehicleId, setGlobalVehicleId] = useState<string>('');
   const [timeline, setTimeline] = useState<any[]>([]);
   const [anomalies, setAnomalies] = useState<any[]>([]);
@@ -51,7 +52,7 @@ export const Trajectories: React.FC = () => {
 
   // Quick suggestions from watchlist or recent observations
   const [suggestedPlates, setSuggestedPlates] = useState<string[]>([
-    'TNXX1234', 'TNXX5678', 'TNXX9012', 'KA05MN3821', 'TN01AB1234'
+    'TN01AB1234', 'TNXX1001', 'TNXX1002', 'KA05MN3821', 'TN01EM9999'
   ]);
 
   const [mapStyle, setMapStyle] = useState<MapStyleId>(getDefaultMapStyleId());
@@ -74,6 +75,10 @@ export const Trajectories: React.FC = () => {
       console.warn('Using resilient GIS camera graph:', err);
       initMap(FALLBACK_GIS_GRAPH.nodes, FALLBACK_GIS_GRAPH.edges);
     }
+    // Auto-search default vehicle to immediately display route
+    setTimeout(() => {
+      handleSearch(defaultPlate);
+    }, 400);
   };
 
   useEffect(() => {

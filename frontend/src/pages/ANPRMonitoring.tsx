@@ -41,9 +41,8 @@ export const ANPRMonitoring: React.FC = () => {
   // Navigation View Tabs
   const [activeTab, setActiveTab] = useState<'RECORDS' | 'SCANNER' | 'DIRECTORIES'>('RECORDS');
 
-  // Filter-First Core State
-  // Distinguish category === null (initial unselected) from a chosen category
-  const [selectedCategory, setSelectedCategory] = useState<string | null>(null);
+  // Filter-First Core State: Default to 'ALL' to populate records immediately
+  const [selectedCategory, setSelectedCategory] = useState<string | null>('ALL');
   const [categories, setCategories] = useState<CategoryOption[]>([]);
   const [records, setRecords] = useState<ANPRRecord[]>([]);
   const [loading, setLoading] = useState<boolean>(false);

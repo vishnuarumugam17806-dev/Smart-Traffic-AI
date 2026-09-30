@@ -87,8 +87,8 @@ export const RecordedVideo: React.FC = () => {
   const [currentTime, setCurrentTime] = useState<number>(0);
   const [loading, setLoading] = useState<boolean>(false);
 
-  // Filters
-  const [activeTab, setActiveTab] = useState<'ALL' | 'VIDEOS' | 'PHOTOS' | null>(null);
+  // Filters: Default to 'ALL' so unified records are populated on page visit
+  const [activeTab, setActiveTab] = useState<'ALL' | 'VIDEOS' | 'PHOTOS' | null>('ALL');
   const [searchQuery, setSearchQuery] = useState<string>('');
   const [plateFilter, setPlateFilter] = useState<string>('');
   const [deviceFilter, setDeviceFilter] = useState<string>('ALL');

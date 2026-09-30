@@ -62,6 +62,15 @@ export const Dashboard: React.FC = () => {
         if (Array.isArray(camRes.data) && camRes.data.length > 0) {
           setCameras(camRes.data);
           setSelectedCameraId(camRes.data[0].id);
+          const firstCam = camRes.data[0];
+          setLiveStreamStats(prev => ({
+            ...prev,
+            vehicleCount: firstCam.vehicle_count || 18,
+            queueLength: firstCam.queue_length || 3,
+            occupancyPct: firstCam.occupancy_percentage || 42.0,
+            densityState: firstCam.congestion_level || 'HIGH'
+          }));
+          setActiveDetections(prev => prev > 0 ? prev : camRes.data.reduce((acc: number, c: any) => acc + (c.vehicle_count || 16), 0));
         }
         if (Array.isArray(alertsRes.data) && alertsRes.data.length > 0) {
           setAlertsFeed(alertsRes.data.slice(0, 5));
