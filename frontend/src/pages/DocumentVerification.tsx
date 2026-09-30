@@ -41,6 +41,7 @@ interface ComplianceDossier {
   compliance_status: 'COMPLIANT' | 'ACTION_REQUIRED' | 'REVIEW_REQUIRED';
   action_required_reasons?: string[] | null;
   alerts_created?: boolean;
+  alerts?: Array<{ type: string; severity?: string; message: string }>;
   camera_id?: number;
   camera_name?: string;
   location?: string;
@@ -92,11 +93,133 @@ const PRESET_VEHICLES = [
   }
 ];
 
+const FALLBACK_COMPLIANCE_DOSSIERS: Record<string, ComplianceDossier> = {
+  'TNXX1001': {
+    verification_id: 'VERIF-TNXX1001-DEMO',
+    passage_id: 'PASS-TNXX1001-01',
+    vehicle_number: 'TNXX1001',
+    source: 'DEMO_VEHICLE_REGISTRY',
+    data_source_label: 'DEMO VEHICLE REGISTRY (Fictional Data)',
+    registration_status: 'ACTIVE',
+    vehicle_class: 'MOTOR CAR (LMV)',
+    manufacturer: 'TATA MOTORS',
+    model: 'NEXON EV PRIME',
+    registration_date: '2023-03-15',
+    fuel_type: 'ELECTRIC',
+    rc: { status: 'VALID', valid_until: '2038-03-14' },
+    insurance: { status: 'VALID', provider: 'ICICI LOMBARD GIC LTD', policy_number: 'POL-99281-DEMO', valid_until: '2027-03-14' },
+    puc: { status: 'VALID', valid_until: '2027-03-14' },
+    fitness: { status: 'VALID', valid_until: '2038-03-14' },
+    watchlist: { matched: false },
+    compliance_status: 'COMPLIANT'
+  },
+  'TNXX1002': {
+    verification_id: 'VERIF-TNXX1002-DEMO',
+    passage_id: 'PASS-TNXX1002-02',
+    vehicle_number: 'TNXX1002',
+    source: 'DEMO_VEHICLE_REGISTRY',
+    data_source_label: 'DEMO VEHICLE REGISTRY (Fictional Data)',
+    registration_status: 'ACTIVE',
+    vehicle_class: 'MOTOR CAR (LMV)',
+    manufacturer: 'HYUNDAI MOTOR INDIA',
+    model: 'CRETA SX DIESEL',
+    registration_date: '2021-05-30',
+    fuel_type: 'DIESEL',
+    rc: { status: 'VALID', valid_until: '2036-05-29' },
+    insurance: { status: 'EXPIRED', provider: 'NEW INDIA ASSURANCE CO', policy_number: 'POL-44102-EXP', valid_until: '2026-05-30' },
+    puc: { status: 'VALID', valid_until: '2026-11-20' },
+    fitness: { status: 'VALID', valid_until: '2036-05-29' },
+    watchlist: { matched: false },
+    compliance_status: 'ACTION_REQUIRED',
+    alerts: [{ type: 'INSURANCE_EXPIRED', severity: 'HIGH', message: 'Vehicle TNXX1002 has expired insurance policy (NEW INDIA ASSURANCE CO). Expired on 2026-05-30.' }]
+  },
+  'TNXX1003': {
+    verification_id: 'VERIF-TNXX1003-DEMO',
+    passage_id: 'PASS-TNXX1003-03',
+    vehicle_number: 'TNXX1003',
+    source: 'DEMO_VEHICLE_REGISTRY',
+    data_source_label: 'DEMO VEHICLE REGISTRY (Fictional Data)',
+    registration_status: 'ACTIVE',
+    vehicle_class: 'MOTOR CAR (LMV)',
+    manufacturer: 'MARUTI SUZUKI INDIA',
+    model: 'SWIFT DZIRE VXI',
+    registration_date: '2022-08-11',
+    fuel_type: 'PETROL/CNG',
+    rc: { status: 'VALID', valid_until: '2037-08-10' },
+    insurance: { status: 'VALID', provider: 'HDFC ERGO GENERAL INSURANCE', policy_number: 'POL-77301-VALID', valid_until: '2027-08-10' },
+    puc: { status: 'EXPIRED', valid_until: '2026-05-15' },
+    fitness: { status: 'VALID', valid_until: '2037-08-10' },
+    watchlist: { matched: false },
+    compliance_status: 'ACTION_REQUIRED',
+    alerts: [{ type: 'PUC_EXPIRED', severity: 'MEDIUM', message: 'Vehicle TNXX1003 PUC emission certificate has expired on 2026-05-15.' }]
+  },
+  'TNXX1004': {
+    verification_id: 'VERIF-TNXX1004-DEMO',
+    passage_id: 'PASS-TNXX1004-04',
+    vehicle_number: 'TNXX1004',
+    source: 'DEMO_VEHICLE_REGISTRY',
+    data_source_label: 'DEMO VEHICLE REGISTRY (Fictional Data)',
+    registration_status: 'ACTIVE',
+    vehicle_class: 'HEAVY COMMERCIAL (HCV)',
+    manufacturer: 'TATA MOTORS',
+    model: 'PRIMA 2830.K FREIGHT TRUCK',
+    registration_date: '2019-01-21',
+    fuel_type: 'DIESEL',
+    rc: { status: 'VALID', valid_until: '2030-01-20' },
+    insurance: { status: 'VALID', provider: 'BAJAJ ALLIANZ GENERAL INSURANCE', policy_number: 'POL-88204-COM', valid_until: '2027-01-20' },
+    puc: { status: 'VALID', valid_until: '2026-12-10' },
+    fitness: { status: 'EXPIRED', valid_until: '2026-04-10' },
+    watchlist: { matched: false },
+    compliance_status: 'ACTION_REQUIRED',
+    alerts: [{ type: 'FITNESS_EXPIRED', severity: 'HIGH', message: 'Commercial Freight Truck TNXX1004 fitness certificate expired on 2026-04-10.' }]
+  },
+  'TNXX1005': {
+    verification_id: 'VERIF-TNXX1005-DEMO',
+    passage_id: 'PASS-TNXX1005-05',
+    vehicle_number: 'TNXX1005',
+    source: 'DEMO_VEHICLE_REGISTRY',
+    data_source_label: 'DEMO VEHICLE REGISTRY (Fictional Data)',
+    registration_status: 'ACTIVE',
+    vehicle_class: 'MOTOR CAR (LMV)',
+    manufacturer: 'MAHINDRA & MAHINDRA',
+    model: 'SCORPIO-N Z8',
+    registration_date: '2022-11-05',
+    fuel_type: 'DIESEL',
+    rc: { status: 'VALID', valid_until: '2037-11-04' },
+    insurance: { status: 'VALID', provider: 'TATA AIG GENERAL INSURANCE', policy_number: 'POL-10059-DEMO', valid_until: '2027-11-04' },
+    puc: { status: 'VALID', valid_until: '2026-11-04' },
+    fitness: { status: 'VALID', valid_until: '2037-11-04' },
+    watchlist: { matched: true, reason: 'Stolen Vehicle Alert — Police FIR-2026/89 registered at T. Nagar PS.', reference: 'FIR-2026/89' },
+    compliance_status: 'REVIEW_REQUIRED',
+    alerts: [{ type: 'SECURITY_WATCHLIST_MATCH', severity: 'CRITICAL', message: 'CRITICAL ALERT: Stolen Vehicle FIR match detected for plate TNXX1005!' }]
+  },
+  'TN01AB1234': {
+    verification_id: 'VERIF-TN01AB1234-DEMO',
+    passage_id: 'PASS-TN01AB1234-06',
+    vehicle_number: 'TN01AB1234',
+    source: 'DEMO_VEHICLE_REGISTRY',
+    data_source_label: 'DEMO VEHICLE REGISTRY (Fictional Data)',
+    registration_status: 'ACTIVE',
+    vehicle_class: 'MOTOR CAR (LMV)',
+    manufacturer: 'TOYOTA',
+    model: 'INNOVA CRYSTA',
+    registration_date: '2020-09-13',
+    fuel_type: 'DIESEL',
+    rc: { status: 'VALID', valid_until: '2035-09-12' },
+    insurance: { status: 'VALID', provider: 'ORIENTAL INSURANCE CO', policy_number: 'POL-12345-REG', valid_until: '2027-09-12' },
+    puc: { status: 'VALID', valid_until: '2027-01-10' },
+    fitness: { status: 'VALID', valid_until: '2035-09-12' },
+    watchlist: { matched: true, reason: '14 Unpaid Red Light & Speeding Citations pending operator confirmation.', reference: 'CHALLAN-DEF-14' },
+    compliance_status: 'ACTION_REQUIRED',
+    alerts: [{ type: 'CHALLAN_DEFAULTER', severity: 'HIGH', message: 'Vehicle TN01AB1234 flagged for 14 outstanding traffic challans.' }]
+  }
+};
+
 export const DocumentVerification: React.FC = () => {
   const [plateInput, setPlateInput] = useState<string>('TNXX1001');
   const [selectedLocation, setSelectedLocation] = useState<string>('Anna Salai - Spencers Junction');
   const [isVerifying, setIsVerifying] = useState<boolean>(false);
-  const [dossier, setDossier] = useState<ComplianceDossier | null>(null);
+  const [dossier, setDossier] = useState<ComplianceDossier | null>(FALLBACK_COMPLIANCE_DOSSIERS['TNXX1001']);
   const [recentPassages, setRecentPassages] = useState<any[]>([]);
   const [eChallanIssued, setEChallanIssued] = useState<boolean>(false);
 
@@ -109,7 +232,7 @@ export const DocumentVerification: React.FC = () => {
   const fetchRecentPassages = async () => {
     try {
       const res = await apiClient.get('/compliance/passages/recent', { params: { limit: 10 } });
-      if (Array.isArray(res.data)) {
+      if (Array.isArray(res.data) && res.data.length > 0) {
         setRecentPassages(res.data);
       }
     } catch {
@@ -121,6 +244,11 @@ export const DocumentVerification: React.FC = () => {
     const clean = targetPlate.toUpperCase().replace(/[^A-Z0-9]/g, '');
     if (!clean) return;
 
+    // Immediately show fallback if present so UI never flickers or waits
+    if (FALLBACK_COMPLIANCE_DOSSIERS[clean]) {
+      setDossier(FALLBACK_COMPLIANCE_DOSSIERS[clean]);
+    }
+
     setIsVerifying(true);
     setEChallanIssued(false);
     try {
@@ -130,28 +258,34 @@ export const DocumentVerification: React.FC = () => {
         anpr_confidence: 0.98,
         vehicle_type: 'car'
       });
-      setDossier(res.data);
+      if (res.data) {
+        setDossier(res.data);
+      }
       fetchRecentPassages();
     } catch (err: any) {
       try {
         const rawRes = await apiClient.get(`/compliance/vehicle/${clean}`);
-        setDossier({
-          verification_id: `VERIF-${clean}`,
-          vehicle_number: clean,
-          source: rawRes.data?.source || 'REGISTRY',
-          registration_status: rawRes.data?.registration_status || 'ACTIVE',
-          vehicle_class: rawRes.data?.vehicle_class || 'MOTOR CAR (LMV)',
-          manufacturer: rawRes.data?.manufacturer || 'UNKNOWN',
-          model: rawRes.data?.model || 'PASSENGER VEHICLE',
-          rc: rawRes.data?.rc || { status: 'VALID' },
-          insurance: rawRes.data?.insurance || { status: 'VALID' },
-          puc: rawRes.data?.puc || { status: 'VALID' },
-          fitness: rawRes.data?.fitness || { status: 'VALID' },
-          watchlist: rawRes.data?.watchlist || { matched: false },
-          compliance_status: rawRes.data?.insurance?.status === 'EXPIRED' || rawRes.data?.puc?.status === 'EXPIRED' ? 'ACTION_REQUIRED' : 'COMPLIANT'
-        });
+        if (rawRes.data) {
+          setDossier({
+            verification_id: `VERIF-${clean}`,
+            vehicle_number: clean,
+            source: rawRes.data?.source || 'REGISTRY',
+            registration_status: rawRes.data?.registration_status || 'ACTIVE',
+            vehicle_class: rawRes.data?.vehicle_class || 'MOTOR CAR (LMV)',
+            manufacturer: rawRes.data?.manufacturer || 'UNKNOWN',
+            model: rawRes.data?.model || 'PASSENGER VEHICLE',
+            rc: rawRes.data?.rc || { status: 'VALID' },
+            insurance: rawRes.data?.insurance || { status: 'VALID' },
+            puc: rawRes.data?.puc || { status: 'VALID' },
+            fitness: rawRes.data?.fitness || { status: 'VALID' },
+            watchlist: rawRes.data?.watchlist || { matched: false },
+            compliance_status: rawRes.data?.insurance?.status === 'EXPIRED' || rawRes.data?.puc?.status === 'EXPIRED' ? 'ACTION_REQUIRED' : 'COMPLIANT'
+          });
+        }
       } catch {
-        // Ignore
+        if (FALLBACK_COMPLIANCE_DOSSIERS[clean]) {
+          setDossier(FALLBACK_COMPLIANCE_DOSSIERS[clean]);
+        }
       }
     } finally {
       setIsVerifying(false);
