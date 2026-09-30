@@ -3,7 +3,7 @@ import { NavLink } from 'react-router-dom';
 import {
   LayoutDashboard, Video, Map, Route, Search, TrafficCone,
   Bell, TrendingUp, Film, Smartphone, Settings, LogOut,
-  ChevronLeft, ChevronRight, Monitor, Tablet, LucideIcon
+  ChevronLeft, ChevronRight, Monitor, Tablet, LucideIcon, FileCheck
 } from 'lucide-react';
 import { useStore } from '../store/useStore';
 import { useResponsiveDevice } from '../hooks/useResponsiveDevice';
@@ -58,6 +58,7 @@ export const Sidebar: React.FC = () => {
       title: 'INTELLIGENCE',
       items: [
         { name: 'ANPR & Watchlist', path: '/anpr', icon: Search, badge: 'ALERT' },
+        { name: 'Doc Verification', path: '/compliance', icon: FileCheck, badge: 'RTO', badgeColor: 'bg-emerald-600 text-white' },
         { name: 'Traffic Forecast', path: '/forecast', icon: TrendingUp },
       ]
     },

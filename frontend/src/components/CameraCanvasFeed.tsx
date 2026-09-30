@@ -36,6 +36,7 @@ const CameraCanvasFeedComponent: React.FC<CameraCanvasFeedProps> = ({
   const [showOverlays, setShowOverlays] = useState<boolean>(false);
   const [activeTab, setActiveTab] = useState<'REAL' | 'OVERLAY'>('REAL');
   const [videoError, setVideoError] = useState<boolean>(false);
+  const [videoPlaying, setVideoPlaying] = useState<boolean>(false);
 
   const deviceConfig = useResponsiveDevice();
   const [ratioMode, setRatioMode] = useState<AspectRatioMode>('AUTO');
@@ -69,6 +70,29 @@ const CameraCanvasFeedComponent: React.FC<CameraCanvasFeedProps> = ({
       resolvedVideoUrl = `/videos/${fileName}`;
     }
   }
+
+  useEffect(() => {
+    const video = videoRef.current;
+    if (video) {
+      const handlePlaying = () => {
+        setVideoPlaying(true);
+        setVideoError(false);
+      };
+      const handlePause = () => setVideoPlaying(false);
+      const handleError = () => {
+        setVideoPlaying(false);
+        setVideoError(true);
+      };
+      video.addEventListener('playing', handlePlaying);
+      video.addEventListener('pause', handlePause);
+      video.addEventListener('error', handleError);
+      return () => {
+        video.removeEventListener('playing', handlePlaying);
+        video.removeEventListener('pause', handlePause);
+        video.removeEventListener('error', handleError);
+      };
+    }
+  }, [resolvedVideoUrl]);
 
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -160,7 +184,7 @@ const CameraCanvasFeedComponent: React.FC<CameraCanvasFeedProps> = ({
           : Math.max(1, 18 - Math.floor((step % 140) / 7.7));
 
       // If real video is playing, skip synthetic environment background and render transparent overlay
-      const isOverlayOverVideo = Boolean(resolvedVideoUrl && !videoError);
+      const isOverlayOverVideo = Boolean(resolvedVideoUrl && videoPlaying && !videoError);
 
       if (!isOverlayOverVideo) {
         // ==========================================
@@ -912,49 +936,31 @@ const CameraCanvasFeedComponent: React.FC<CameraCanvasFeedProps> = ({
 
       {/* Responsive Canvas Feed Container (Fluid 100% object-cover filling without black bars) */}
       <div className={`w-full relative overflow-hidden bg-slate-950 ${aspectClass}`}>
-        {resolvedVideoUrl && !videoError ? (
-          <>
-            <video
-              ref={videoRef}
-              src={resolvedVideoUrl}
-              autoPlay
-              loop
-              muted
-              playsInline
-              className="w-full h-full block object-cover"
-              onError={() => setVideoError(true)}
-            />
-            {showOverlays && (
-              <canvas
-                ref={canvasRef}
-                className="w-full h-full block object-cover absolute inset-0 pointer-events-none"
-              />
-            )}
-          </>
-        ) : videoError ? (
-          <div className="absolute inset-0 flex flex-col items-center justify-center bg-slate-900 text-white p-4 text-center z-20 font-mono">
-            <AlertTriangle className="w-8 h-8 text-amber-500 mb-2" />
-            <h4 className="text-sm font-bold tracking-wider">CAMERA OFFLINE</h4>
-            <p className="text-xs text-slate-400 mt-1">Unable to receive video feed.</p>
-            <button
-              onClick={() => {
-                setVideoError(false);
-                if (videoRef.current) {
-                  videoRef.current.load();
-                  videoRef.current.play().catch(() => {});
-                }
-              }}
-              className="mt-3 px-3.5 py-1.5 bg-[#245B84] hover:bg-[#1b4666] text-white text-xs font-bold rounded-md flex items-center gap-1.5 cursor-pointer shadow-2xs"
-            >
-              <RefreshCw className="w-3.5 h-3.5" /> Retry
-            </button>
-          </div>
-        ) : (
-          <canvas
-            ref={canvasRef}
-            className="w-full h-full block object-cover"
+        {resolvedVideoUrl && !videoError && (
+          <video
+            ref={videoRef}
+            src={resolvedVideoUrl}
+            autoPlay
+            loop
+            muted
+            playsInline
+            onPlaying={() => setVideoPlaying(true)}
+            onPause={() => setVideoPlaying(false)}
+            onError={() => {
+              setVideoPlaying(false);
+              setVideoError(true);
+            }}
+            className={`w-full h-full block object-cover absolute inset-0 transition-opacity duration-300 ${
+              videoPlaying ? 'opacity-100 z-10' : 'opacity-0 pointer-events-none z-0'
+            }`}
           />
         )}
+        <canvas
+          ref={canvasRef}
+          className={`w-full h-full block object-cover ${
+            videoPlaying ? 'absolute inset-0 z-20 pointer-events-none' : 'relative z-10'
+          }`}
+        />
 
         {/* Live Status Floating Pill */}
         <div className="absolute top-3 left-3 pointer-events-none z-10 flex items-center gap-2">

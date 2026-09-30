@@ -4,7 +4,7 @@ import {
   Search, ShieldAlert, FileText, AlertTriangle,
   Clock, MapPin, Filter, Route as RouteIcon,
   RefreshCw, CheckCircle2, Siren, Database, Eye,
-  Sliders, Calendar, Camera, X, ExternalLink, ShieldCheck
+  Sliders, Calendar, Camera, X, ExternalLink, ShieldCheck, FileCheck
 } from 'lucide-react';
 import { apiClient, resolveImageUrl } from '../api/client';
 import { PageHeader } from '../components/PageHeader';
@@ -243,37 +243,46 @@ export const ANPRMonitoring: React.FC = () => {
           )
         }
         actions={
-          <div className="flex bg-white p-0.5 rounded-lg border border-[#DCE4EA] text-xs font-semibold shadow-2xs">
-            <button
-              onClick={() => setActiveTab('RECORDS')}
-              className={`px-3 py-1.5 rounded-md transition-colors cursor-pointer ${
-                activeTab === 'RECORDS'
-                  ? 'bg-[#245B84] text-white shadow-xs'
-                  : 'text-slate-600 hover:text-slate-900'
-              }`}
+          <div className="flex flex-wrap items-center gap-2">
+            <Link
+              to="/compliance"
+              className="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg text-xs font-semibold flex items-center gap-1.5 shadow-2xs transition-colors"
             >
-              ANPR Records
-            </button>
-            <button
-              onClick={() => setActiveTab('SCANNER')}
-              className={`px-3 py-1.5 rounded-md transition-colors cursor-pointer ${
-                activeTab === 'SCANNER'
-                  ? 'bg-[#245B84] text-white shadow-xs'
-                  : 'text-slate-600 hover:text-slate-900'
-              }`}
-            >
-              Live Plate Scanner
-            </button>
-            <button
-              onClick={() => setActiveTab('DIRECTORIES')}
-              className={`px-3 py-1.5 rounded-md transition-colors cursor-pointer ${
-                activeTab === 'DIRECTORIES'
-                  ? 'bg-[#245B84] text-white shadow-xs'
-                  : 'text-slate-600 hover:text-slate-900'
-              }`}
-            >
-              Watchlist Directory
-            </button>
+              <FileCheck className="w-3.5 h-3.5" />
+              <span>RTO Document Verification</span>
+            </Link>
+            <div className="flex bg-white p-0.5 rounded-lg border border-[#DCE4EA] text-xs font-semibold shadow-2xs">
+              <button
+                onClick={() => setActiveTab('RECORDS')}
+                className={`px-3 py-1.5 rounded-md transition-colors cursor-pointer ${
+                  activeTab === 'RECORDS'
+                    ? 'bg-[#245B84] text-white shadow-xs'
+                    : 'text-slate-600 hover:text-slate-900'
+                }`}
+              >
+                ANPR Records
+              </button>
+              <button
+                onClick={() => setActiveTab('SCANNER')}
+                className={`px-3 py-1.5 rounded-md transition-colors cursor-pointer ${
+                  activeTab === 'SCANNER'
+                    ? 'bg-[#245B84] text-white shadow-xs'
+                    : 'text-slate-600 hover:text-slate-900'
+                }`}
+              >
+                Live Plate Scanner
+              </button>
+              <button
+                onClick={() => setActiveTab('DIRECTORIES')}
+                className={`px-3 py-1.5 rounded-md transition-colors cursor-pointer ${
+                  activeTab === 'DIRECTORIES'
+                    ? 'bg-[#245B84] text-white shadow-xs'
+                    : 'text-slate-600 hover:text-slate-900'
+                }`}
+              >
+                Watchlist Directory
+              </button>
+            </div>
           </div>
         }
       />

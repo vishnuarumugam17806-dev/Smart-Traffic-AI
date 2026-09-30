@@ -17,7 +17,8 @@ const routes = [
   { name: '05_vehicle_tracking', url: 'http://localhost:5173/trajectories' },
   { name: '06_anpr', url: 'http://localhost:5173/anpr' },
   { name: '07_alerts', url: 'http://localhost:5173/alerts' },
-  { name: '08_settings', url: 'http://localhost:5173/settings' }
+  { name: '08_settings', url: 'http://localhost:5173/settings' },
+  { name: '09_document_verification', url: 'http://localhost:5173/compliance' }
 ];
 
 async function run() {

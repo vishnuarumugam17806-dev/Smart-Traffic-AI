@@ -26,6 +26,7 @@ const LinkDeviceCamera = lazy(() => import('../pages/LinkDeviceCamera').then((m)
 const MobileCamera = lazy(() => import('../pages/MobileCamera').then((m) => ({ default: m.MobileCamera })));
 const RecordedVideo = lazy(() => import('../pages/RecordedVideo').then((m) => ({ default: m.RecordedVideo })));
 const TrafficForecast = lazy(() => import('../pages/TrafficForecast').then((m) => ({ default: m.TrafficForecast })));
+const DocumentVerification = lazy(() => import('../pages/DocumentVerification').then((m) => ({ default: m.DocumentVerification })));
 
 const RouteLoadingFallback: React.FC = () => (
   <div className="flex items-center justify-center min-h-[50vh] w-full select-none">
@@ -70,6 +71,8 @@ export const AppRoutes: React.FC = () => {
           <Route path="heatmap" element={<HeatMap />} />
           <Route path="trajectories" element={<Trajectories />} />
           <Route path="anpr" element={<ANPRMonitoring />} />
+          <Route path="compliance" element={<DocumentVerification />} />
+          <Route path="verification" element={<DocumentVerification />} />
           <Route path="signals" element={<Signals />} />
           <Route path="alerts" element={<Alerts />} />
           <Route path="predictions" element={<Predictions />} />

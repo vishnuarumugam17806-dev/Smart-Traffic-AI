@@ -3,7 +3,7 @@ import { NavLink } from 'react-router-dom';
 import {
   LayoutDashboard, Video, Map, Route, Search, TrafficCone,
   Bell, TrendingUp, Film, Smartphone, Settings, LogOut, X,
-  CheckCircle2, LucideIcon
+  CheckCircle2, LucideIcon, FileCheck
 } from 'lucide-react';
 import { useStore } from '../store/useStore';
 import { VigitraLogo } from './branding/VigitraLogo';
@@ -46,6 +46,7 @@ export const AndroidDrawer: React.FC<AndroidDrawerProps> = ({ isOpen, onClose })
     { name: 'Traffic Map', path: '/heatmap', icon: Map, group: 'MONITORING' },
     { name: 'Vehicle Tracking', path: '/trajectories', icon: Route, group: 'MONITORING' },
     { name: 'ANPR & Watchlist', path: '/anpr', icon: Search, badge: 'ALERT', group: 'INTELLIGENCE' },
+    { name: 'Doc Verification', path: '/compliance', icon: FileCheck, badge: 'RTO', badgeColor: 'bg-emerald-600 text-white', group: 'INTELLIGENCE' },
     { name: 'Traffic Forecast', path: '/forecast', icon: TrendingUp, group: 'INTELLIGENCE' },
     { name: 'Signal Control', path: '/signals', icon: TrafficCone, group: 'CONTROL' },
     { name: 'Alerts', path: '/alerts', icon: Bell, badge: 'LIVE', badgeColor: 'bg-red-500 text-white', group: 'CONTROL' },
