@@ -16,7 +16,6 @@ import {
   Alert,
   LiveTrafficUpdate,
 } from '../types';
-import { FALLBACK_ALERTS } from '../api/mockFallback';
 
 function getInitialUser(): User | null {
   try {
@@ -26,13 +25,6 @@ function getInitialUser(): User | null {
     return null;
   }
 }
-
-const initialAlerts: Alert[] = (FALLBACK_ALERTS as Alert[]).map((a) => ({
-  ...a,
-  severity: a.severity || 'HIGH',
-  status: a.status || 'NEW',
-  is_read: false,
-}));
 
 interface AppState {
   user: User | null;
@@ -76,8 +68,8 @@ export const useStore = create<AppState>((set) => ({
   emergencyEvents: [],
   incidents: [],
   violations: [],
-  alerts: initialAlerts,
-  unreadAlertsCount: initialAlerts.length,
+  alerts: [],
+  unreadAlertsCount: 0,
   activeLiveUpdate: null,
   isConnected: false,
 

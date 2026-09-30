@@ -33,6 +33,7 @@ import { Link } from 'react-router-dom';
 import { useWebLocation } from '../hooks/useWebLocation';
 import { createGoogleMapsEmbedUrl } from '../utils/mapProviders';
 import { PageHeader } from '../components/PageHeader';
+import { EmptyState } from '../components/EmptyState';
 
 interface RecordItem {
   id: number;
@@ -87,7 +88,7 @@ export const RecordedVideo: React.FC = () => {
   const [loading, setLoading] = useState<boolean>(false);
 
   // Filters
-  const [activeTab, setActiveTab] = useState<'ALL' | 'VIDEOS' | 'PHOTOS'>('ALL');
+  const [activeTab, setActiveTab] = useState<'ALL' | 'VIDEOS' | 'PHOTOS' | null>(null);
   const [searchQuery, setSearchQuery] = useState<string>('');
   const [plateFilter, setPlateFilter] = useState<string>('');
   const [deviceFilter, setDeviceFilter] = useState<string>('ALL');
@@ -260,6 +261,10 @@ export const RecordedVideo: React.FC = () => {
   };
 
   const fetchRecords = async () => {
+    if (!activeTab) {
+      setRecords([]);
+      return;
+    }
     setLoading(true);
     try {
       // 1. Fetch remote unified records from API
@@ -331,7 +336,12 @@ export const RecordedVideo: React.FC = () => {
   };
 
   useEffect(() => {
-    fetchRecords();
+    if (activeTab) {
+      fetchRecords();
+    } else {
+      setRecords([]);
+      setSelectedRecord(null);
+    }
   }, [activeTab]);
 
   const handleSeek = (timeSec: number) => {
@@ -600,40 +610,111 @@ export const RecordedVideo: React.FC = () => {
         </div>
       </div>
 
-      {/* Primary Section Tabs: ALL | VIDEOS | PHOTOS */}
-      <div className="flex flex-wrap items-center justify-between gap-3 bg-white p-2.5 rounded-lg border border-[#DCE4EA] shadow-xs">
-        <div className="flex items-center gap-1 bg-slate-100 p-1 rounded-md font-mono text-xs font-bold">
-          <button
-            onClick={() => setActiveTab('ALL')}
-            className={`px-3.5 py-1.5 rounded transition-all flex items-center gap-1.5 ${
-              activeTab === 'ALL'
-                ? 'bg-[#245B84] text-white shadow-xs'
-                : 'text-slate-600 hover:text-slate-900 hover:bg-slate-200'
-            }`}
-          >
-            <Layers className="w-3.5 h-3.5" /> ALL RECORDS ({records.length})
-          </button>
-          <button
-            onClick={() => setActiveTab('VIDEOS')}
-            className={`px-3.5 py-1.5 rounded transition-all flex items-center gap-1.5 ${
-              activeTab === 'VIDEOS'
-                ? 'bg-[#245B84] text-white shadow-xs'
-                : 'text-slate-600 hover:text-slate-900 hover:bg-slate-200'
-            }`}
-          >
-            <Film className="w-3.5 h-3.5" /> 🎥 VIDEOS ({totalVideos})
-          </button>
-          <button
-            onClick={() => setActiveTab('PHOTOS')}
-            className={`px-3.5 py-1.5 rounded transition-all flex items-center gap-1.5 ${
-              activeTab === 'PHOTOS'
-                ? 'bg-[#245B84] text-white shadow-xs'
-                : 'text-slate-600 hover:text-slate-900 hover:bg-slate-200'
-            }`}
-          >
-            <Camera className="w-3.5 h-3.5" /> 📸 PHOTOS ({totalPhotos})
-          </button>
-        </div>
+      {/* Filter-First Selection State */}
+      {!activeTab ? (
+        <EmptyState
+          icon={Film}
+          title="SELECT THE RECORD TYPE"
+          description="Choose an archive category below to inspect evidentiary recordings, violation photos, and CCTV clips."
+          action={
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 w-full max-w-2xl pt-2">
+              <button
+                onClick={() => setActiveTab('VIDEOS')}
+                className="p-4 bg-white hover:bg-[#EEF6FC] rounded-xl border border-[#DCE4EA] hover:border-[#245B84] text-left transition-all shadow-2xs group cursor-pointer"
+              >
+                <div className="flex items-center justify-between mb-2">
+                  <Film className="w-5 h-5 text-[#245B84]" />
+                  <span className="text-[10px] font-mono font-bold text-slate-500">CCTV & PATROL</span>
+                </div>
+                <h4 className="text-xs sm:text-sm font-bold text-slate-900 group-hover:text-[#245B84]">
+                  Incident Videos
+                </h4>
+                <p className="text-[11px] text-slate-500 font-sans mt-1">
+                  Continuous multi-angle video recordings and patrol clips
+                </p>
+              </button>
+
+              <button
+                onClick={() => setActiveTab('PHOTOS')}
+                className="p-4 bg-white hover:bg-[#EEF6FC] rounded-xl border border-[#DCE4EA] hover:border-[#245B84] text-left transition-all shadow-2xs group cursor-pointer"
+              >
+                <div className="flex items-center justify-between mb-2">
+                  <Camera className="w-5 h-5 text-emerald-600" />
+                  <span className="text-[10px] font-mono font-bold text-slate-500">HIGH-RES</span>
+                </div>
+                <h4 className="text-xs sm:text-sm font-bold text-slate-900 group-hover:text-[#245B84]">
+                  Evidence Photos
+                </h4>
+                <p className="text-[11px] text-slate-500 font-sans mt-1">
+                  Field patrol captures, ANPR crops, and violation snapshots
+                </p>
+              </button>
+
+              <button
+                onClick={() => setActiveTab('ALL')}
+                className="p-4 bg-white hover:bg-[#EEF6FC] rounded-xl border border-[#DCE4EA] hover:border-[#245B84] text-left transition-all shadow-2xs group cursor-pointer"
+              >
+                <div className="flex items-center justify-between mb-2">
+                  <Layers className="w-5 h-5 text-indigo-600" />
+                  <span className="text-[10px] font-mono font-bold text-slate-500">ARCHIVE</span>
+                </div>
+                <h4 className="text-xs sm:text-sm font-bold text-slate-900 group-hover:text-[#245B84]">
+                  All Records
+                </h4>
+                <p className="text-[11px] text-slate-500 font-sans mt-1">
+                  Combined repository of videos and photographic evidence
+                </p>
+              </button>
+            </div>
+          }
+        />
+      ) : (
+        <>
+          {/* Primary Section Tabs: ALL | VIDEOS | PHOTOS */}
+          <div className="flex flex-wrap items-center justify-between gap-3 bg-white p-2.5 rounded-lg border border-[#DCE4EA] shadow-xs">
+            <div className="flex items-center gap-1 bg-slate-100 p-1 rounded-md font-mono text-xs font-bold">
+              <button
+                onClick={() => setActiveTab('ALL')}
+                className={`px-3.5 py-1.5 rounded transition-all flex items-center gap-1.5 cursor-pointer ${
+                  activeTab === 'ALL'
+                    ? 'bg-[#245B84] text-white shadow-xs'
+                    : 'text-slate-600 hover:text-slate-900 hover:bg-slate-200'
+                }`}
+              >
+                <Layers className="w-3.5 h-3.5" /> ALL RECORDS ({records.length})
+              </button>
+              <button
+                onClick={() => setActiveTab('VIDEOS')}
+                className={`px-3.5 py-1.5 rounded transition-all flex items-center gap-1.5 cursor-pointer ${
+                  activeTab === 'VIDEOS'
+                    ? 'bg-[#245B84] text-white shadow-xs'
+                    : 'text-slate-600 hover:text-slate-900 hover:bg-slate-200'
+                }`}
+              >
+                <Film className="w-3.5 h-3.5" /> 🎥 VIDEOS ({totalVideos})
+              </button>
+              <button
+                onClick={() => setActiveTab('PHOTOS')}
+                className={`px-3.5 py-1.5 rounded transition-all flex items-center gap-1.5 cursor-pointer ${
+                  activeTab === 'PHOTOS'
+                    ? 'bg-[#245B84] text-white shadow-xs'
+                    : 'text-slate-600 hover:text-slate-900 hover:bg-slate-200'
+                }`}
+              >
+                <Camera className="w-3.5 h-3.5" /> 📸 PHOTOS ({totalPhotos})
+              </button>
+
+              <button
+                onClick={() => {
+                  setActiveTab(null);
+                  setRecords([]);
+                  setSelectedRecord(null);
+                }}
+                className="ml-2 px-2.5 py-1 text-[11px] font-sans text-slate-500 hover:text-slate-800 hover:bg-slate-200 rounded transition-colors cursor-pointer"
+              >
+                Clear Filter
+              </button>
+            </div>
 
         {/* Search & Filter Inputs */}
         <div className="flex flex-wrap items-center gap-2">
@@ -895,7 +976,7 @@ export const RecordedVideo: React.FC = () => {
                   alt="Captured Evidence"
                   className="max-h-full object-contain"
                   onError={(e) => {
-                    (e.target as any).src = '/vigitra_logo.jpg';
+                    (e.target as any).src = '/assets/vigitra-ai-logo.png';
                   }}
                 />
                 {selectedRecord.plate_number && (
@@ -1158,6 +1239,8 @@ export const RecordedVideo: React.FC = () => {
           </div>
         </div>
       </div>
+      </>
+      )}
 
       {/* MODAL 1: MUTABLE ADMIN LOCATION EDITOR */}
       {showEditLocationModal && (

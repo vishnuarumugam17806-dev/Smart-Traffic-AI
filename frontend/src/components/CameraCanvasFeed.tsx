@@ -1,5 +1,5 @@
 import React, { useRef, useEffect, useState } from 'react';
-import { Video, ShieldAlert, Eye, EyeOff, Radio, Monitor, Smartphone, Tablet, Layers, Sparkles } from 'lucide-react';
+import { Video, ShieldAlert, Eye, EyeOff, Radio, Monitor, Smartphone, Tablet, Layers, Sparkles, AlertTriangle, RefreshCw } from 'lucide-react';
 import { useResponsiveDevice, AspectRatioType } from '../hooks/useResponsiveDevice';
 
 interface CameraCanvasFeedProps {
@@ -35,6 +35,7 @@ const CameraCanvasFeedComponent: React.FC<CameraCanvasFeedProps> = ({
   // Requirement: Show Real Vehicles Video by default, AI Overlay only when selected
   const [showOverlays, setShowOverlays] = useState<boolean>(false);
   const [activeTab, setActiveTab] = useState<'REAL' | 'OVERLAY'>('REAL');
+  const [videoError, setVideoError] = useState<boolean>(false);
 
   const deviceConfig = useResponsiveDevice();
   const [ratioMode, setRatioMode] = useState<AspectRatioMode>('AUTO');
@@ -60,8 +61,13 @@ const CameraCanvasFeedComponent: React.FC<CameraCanvasFeedProps> = ({
 
   // Resolve video source if provided
   let resolvedVideoUrl: string | null = null;
-  if (sourceUrl && sourceUrl.endsWith('.mp4')) {
-    resolvedVideoUrl = sourceUrl.startsWith('/') ? sourceUrl : `/videos/${sourceUrl.split('/').pop()}`;
+  if (sourceUrl) {
+    if (sourceUrl.startsWith('http://') || sourceUrl.startsWith('https://') || sourceUrl.startsWith('blob:') || sourceUrl.startsWith('data:')) {
+      resolvedVideoUrl = sourceUrl;
+    } else if (sourceUrl.endsWith('.mp4')) {
+      const fileName = sourceUrl.split('/').pop() || sourceUrl;
+      resolvedVideoUrl = `/videos/${fileName}`;
+    }
   }
 
   useEffect(() => {
@@ -153,10 +159,14 @@ const CameraCanvasFeedComponent: React.FC<CameraCanvasFeedProps> = ({
           ? Math.max(1, 4 - Math.floor((step % 40) / 10)) 
           : Math.max(1, 18 - Math.floor((step % 140) / 7.7));
 
-      // ==========================================
-      // 1. SKY & URBAN HORIZON (Front-Angle Background)
-      // ==========================================
-      const skyGrad = ctx.createLinearGradient(0, 0, 0, horizonY);
+      // If real video is playing, skip synthetic environment background and render transparent overlay
+      const isOverlayOverVideo = Boolean(resolvedVideoUrl && !videoError);
+
+      if (!isOverlayOverVideo) {
+        // ==========================================
+        // 1. SKY & URBAN HORIZON (Front-Angle Background)
+        // ==========================================
+        const skyGrad = ctx.createLinearGradient(0, 0, 0, horizonY);
       skyGrad.addColorStop(0, '#0F172A');
       skyGrad.addColorStop(0.65, '#1E293B');
       skyGrad.addColorStop(1, '#334155');
@@ -407,6 +417,7 @@ const CameraCanvasFeedComponent: React.FC<CameraCanvasFeedProps> = ({
       ctx.textAlign = 'center';
       ctx.fillText(`${Math.max(1, secLeft)}`, headX + headW + 23, headY + 46);
       ctx.textAlign = 'left';
+      }
 
       // ==========================================
       // 5. APPROACHING VEHICLES (Front-Angle / Signal Post View)
@@ -461,9 +472,10 @@ const CameraCanvasFeedComponent: React.FC<CameraCanvasFeedProps> = ({
         const vx = Math.floor(x - vw / 2);
         const vy = Math.floor(y - vh * 0.75);
 
-        // ------------------------------------------
-        // A. Headlight Beams illuminating asphalt
-        // ------------------------------------------
+        if (!isOverlayOverVideo) {
+          // ------------------------------------------
+          // A. Headlight Beams illuminating asphalt
+          // ------------------------------------------
         const beamH = Math.floor(130 * scale);
         const beamSpread = Math.floor(65 * scale);
         const leftLightX = vx + Math.floor(vw * 0.18);
@@ -612,6 +624,7 @@ const CameraCanvasFeedComponent: React.FC<CameraCanvasFeedProps> = ({
           ctx.fillStyle = '#EF4444';
           ctx.fillRect(crossX - crossSize / 2, crossY - crossSize / 6, crossSize, crossSize / 3);
           ctx.fillRect(crossX - crossSize / 6, crossY - crossSize / 2, crossSize / 3, crossSize);
+        }
         }
 
         // ------------------------------------------
@@ -899,16 +912,55 @@ const CameraCanvasFeedComponent: React.FC<CameraCanvasFeedProps> = ({
 
       {/* Responsive Canvas Feed Container (Fluid 100% object-cover filling without black bars) */}
       <div className={`w-full relative overflow-hidden bg-slate-950 ${aspectClass}`}>
-        <canvas
-          ref={canvasRef}
-          className="w-full h-full block object-cover"
-        />
+        {resolvedVideoUrl && !videoError ? (
+          <>
+            <video
+              ref={videoRef}
+              src={resolvedVideoUrl}
+              autoPlay
+              loop
+              muted
+              playsInline
+              className="w-full h-full block object-cover"
+              onError={() => setVideoError(true)}
+            />
+            {showOverlays && (
+              <canvas
+                ref={canvasRef}
+                className="w-full h-full block object-cover absolute inset-0 pointer-events-none"
+              />
+            )}
+          </>
+        ) : videoError ? (
+          <div className="absolute inset-0 flex flex-col items-center justify-center bg-slate-900 text-white p-4 text-center z-20 font-mono">
+            <AlertTriangle className="w-8 h-8 text-amber-500 mb-2" />
+            <h4 className="text-sm font-bold tracking-wider">CAMERA OFFLINE</h4>
+            <p className="text-xs text-slate-400 mt-1">Unable to receive video feed.</p>
+            <button
+              onClick={() => {
+                setVideoError(false);
+                if (videoRef.current) {
+                  videoRef.current.load();
+                  videoRef.current.play().catch(() => {});
+                }
+              }}
+              className="mt-3 px-3.5 py-1.5 bg-[#245B84] hover:bg-[#1b4666] text-white text-xs font-bold rounded-md flex items-center gap-1.5 cursor-pointer shadow-2xs"
+            >
+              <RefreshCw className="w-3.5 h-3.5" /> Retry
+            </button>
+          </div>
+        ) : (
+          <canvas
+            ref={canvasRef}
+            className="w-full h-full block object-cover"
+          />
+        )}
 
         {/* Live Status Floating Pill */}
         <div className="absolute top-3 left-3 pointer-events-none z-10 flex items-center gap-2">
           <span className="px-2 py-1 bg-black/75 backdrop-blur-md rounded text-[10px] font-bold text-white border border-white/20 flex items-center gap-1.5">
             <span className="w-2 h-2 rounded-full bg-emerald-400 animate-ping"></span>
-            <span>SIGNAL POST #12 • FRONT VIEW</span>
+            <span>DEMO CAMERA • {cameraName.toUpperCase()}</span>
           </span>
           {showOverlays && (
             <span className="px-2 py-1 bg-[#245B84]/90 backdrop-blur-md rounded text-[10px] font-bold text-white border border-sky-400/40 flex items-center gap-1">

@@ -1,11 +1,16 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Lock, User as UserIcon, Shield, Phone, MapPin, BadgeCheck, AlertCircle, CheckCircle2 } from 'lucide-react';
+import { Lock, User as UserIcon, Phone, MapPin, BadgeCheck, AlertCircle, CheckCircle2 } from 'lucide-react';
 import { apiClient } from '../api/client';
 import { useStore } from '../store/useStore';
+import { VigitraLogo } from '../components/branding/VigitraLogo';
 
 export const Login: React.FC = () => {
   const [activeTab, setActiveTab] = useState<'admin' | 'police_login' | 'police_register'>('admin');
+  
+  useEffect(() => {
+    document.title = 'VIGITRA AI — Login';
+  }, []);
   
   // Admin Login state
   const [adminUsername, setAdminUsername] = useState('admin');
@@ -104,13 +109,9 @@ export const Login: React.FC = () => {
     <div className="min-h-screen bg-slate-900 flex items-center justify-center p-4 select-none">
       <div className="w-full max-w-md bg-slate-800 p-8 rounded-xl border border-slate-700 shadow-2xl relative overflow-hidden text-slate-100">
         
-        {/* Brand Logo & Command Portal Header */}
-        <div className="text-center mb-6 relative z-10">
-          <div className="w-14 h-14 mx-auto mb-3 rounded-xl bg-blue-600/20 border border-blue-500/30 flex items-center justify-center shadow-inner">
-            <Shield className="w-8 h-8 text-blue-400" />
-          </div>
-          <h2 className="text-2xl font-bold tracking-wider text-white">VIGITRA AI</h2>
-          <p className="text-xs text-blue-400 font-mono mt-1 uppercase tracking-widest">Traffic Operations Command Portal</p>
+        {/* Official VIGITRA AI Branding */}
+        <div className="mb-6 relative z-10 flex flex-col items-center">
+          <VigitraLogo variant="auth" />
         </div>
 
         {/* Tab Selection Navigation */}

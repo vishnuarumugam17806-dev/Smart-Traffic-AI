@@ -376,20 +376,23 @@ export const IntersectionRadiusRadar: React.FC<IntersectionRadiusRadarProps> = (
     }
   };
 
-  // Spawn new vehicle on active or specified approach
+  // Spawn new vehicle on active or specified approach with deterministic profile
+  const spawnCounterRef = useRef(500);
   const handleAddVehicle = (targetApproach?: string) => {
     const appKey = (targetApproach || activeApproach).toUpperCase();
-    const profile = INDIAN_PLATES_POOL[Math.floor(Math.random() * INDIAN_PLATES_POOL.length)];
+    const idx = spawnCounterRef.current;
+    spawnCounterRef.current += 1;
+    const profile = INDIAN_PLATES_POOL[idx % INDIAN_PLATES_POOL.length];
     const newVeh: SimVehicle = {
-      id: Date.now() % 100000 + Math.floor(Math.random() * 500),
+      id: (Date.now() % 100000) + (idx % 1000),
       approach: appKey,
-      distMeters: 25 + Math.random() * 5,
-      speedKmh: 35 + Math.floor(Math.random() * 15),
+      distMeters: 28.0,
+      speedKmh: profile.speed || 38,
       color: profile.color,
       type: profile.type,
       passedRadius: false,
       plate: profile.plate,
-      ocrConfidence: +(97.5 + Math.random() * 2.3).toFixed(1),
+      ocrConfidence: profile.ocr || 98.5,
       complianceStatus: profile.status,
       statusReason: profile.reason,
       owner: profile.owner,
@@ -474,18 +477,20 @@ export const IntersectionRadiusRadar: React.FC<IntersectionRadiusRadarProps> = (
   useEffect(() => {
     if (!isSimActive || !isAutoPilot) return;
 
+    let approachRotIdx = 0;
     const arrivalInterval = setInterval(() => {
       // Check approaches that have fewer than 2 active vehicles
       const approachesToCheck = localApproachesRef.current;
       if (!approachesToCheck || approachesToCheck.length === 0) return;
 
-      const randomApp = approachesToCheck[Math.floor(Math.random() * approachesToCheck.length)];
+      const targetApp = approachesToCheck[approachRotIdx % approachesToCheck.length];
+      approachRotIdx += 1;
       const activeCount = vehiclesRef.current.filter(
-        (v) => v.approach.toUpperCase() === randomApp.key.toUpperCase() && !v.passedRadius
+        (v) => v.approach.toUpperCase() === targetApp.key.toUpperCase() && !v.passedRadius
       ).length;
 
       if (activeCount < 3) {
-        handleAddVehicle(randomApp.key);
+        handleAddVehicle(targetApp.key);
       }
     }, 3500);
 

@@ -279,7 +279,7 @@ export const LinkDeviceCamera: React.FC = () => {
   };
 
   const handleGenerateNewQR = () => {
-    const newId = `MOBILE-CAM-${Math.floor(100 + Math.random() * 900)}`;
+    const newId = `MOBILE-CAM-${Date.now().toString().slice(-4)}`;
     setPairingDeviceId(newId);
     setPairingToken(`PAIR-TOK-${Date.now().toString(36).toUpperCase()}`);
     setTimeLeft(300);

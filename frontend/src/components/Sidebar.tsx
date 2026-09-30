@@ -7,6 +7,7 @@ import {
 } from 'lucide-react';
 import { useStore } from '../store/useStore';
 import { useResponsiveDevice } from '../hooks/useResponsiveDevice';
+import { VigitraLogo } from './branding/VigitraLogo';
 
 interface NavEntry {
   name: string;
@@ -99,45 +100,37 @@ export const Sidebar: React.FC = () => {
       <div className="flex flex-col h-[calc(100vh-68px)]">
         {/* Brand Header */}
         <div
-          className={`p-3 flex items-center bg-[#EBF1F5] border-b border-[#DCE4EA] shrink-0 ${
-            isCollapsed ? 'justify-center' : 'justify-between'
+          className={`border-b border-[#DCE4EA] bg-[#EBF1F5] shrink-0 transition-all ${
+            isCollapsed ? 'p-2 flex flex-col items-center gap-2' : 'p-3'
           }`}
         >
-          {!isCollapsed && (
-            <div className="flex items-center gap-2.5 overflow-hidden">
-              <img
-                src="/vigitra_logo.jpg"
-                alt="VIGITRA"
-                className="w-7 h-7 rounded-md object-cover shadow-2xs shrink-0"
-              />
-              <div className="truncate">
-                <span className="font-extrabold text-xs text-[#173F5F] tracking-wide font-sans block truncate">
-                  VIGITRA AI
-                </span>
-                <span className="text-[9px] text-slate-500 font-mono tracking-tight block truncate">
-                  Traffic Operations Center
-                </span>
-              </div>
+          {/* Header Controls & Toggle */}
+          <div className={`flex items-center ${isCollapsed ? 'justify-center w-full' : 'justify-between w-full mb-2.5'}`}>
+            {!isCollapsed && (
+              <span className="text-[10px] font-mono font-bold tracking-wider text-slate-500 uppercase">
+                Operations Console
+              </span>
+            )}
+            <button
+              onClick={toggleCollapse}
+              className="p-1 rounded-md text-slate-500 hover:text-[#173F5F] hover:bg-slate-200 transition-colors shrink-0"
+              title={isCollapsed ? "Expand sidebar" : "Collapse sidebar"}
+              aria-label={isCollapsed ? "Expand sidebar" : "Collapse sidebar"}
+            >
+              {isCollapsed ? <ChevronRight className="w-4 h-4" /> : <ChevronLeft className="w-4 h-4" />}
+            </button>
+          </div>
+
+          {/* Centered Logo Placement */}
+          {!isCollapsed ? (
+            <div className="flex items-center justify-center w-full pb-1">
+              <VigitraLogo variant="sidebar" />
+            </div>
+          ) : (
+            <div className="flex items-center justify-center w-full">
+              <VigitraLogo variant="sidebar-collapsed" />
             </div>
           )}
-
-          {isCollapsed && (
-            <img
-              src="/vigitra_logo.jpg"
-              alt="VIGITRA"
-              className="w-7 h-7 rounded-md object-cover shadow-2xs shrink-0"
-              title="VIGITRA AI Traffic Operations"
-            />
-          )}
-
-          <button
-            onClick={toggleCollapse}
-            className="p-1 rounded-md text-slate-500 hover:text-[#173F5F] hover:bg-slate-200 transition-colors shrink-0"
-            title={isCollapsed ? "Expand sidebar" : "Collapse sidebar"}
-            aria-label={isCollapsed ? "Expand sidebar" : "Collapse sidebar"}
-          >
-            {isCollapsed ? <ChevronRight className="w-4 h-4" /> : <ChevronLeft className="w-4 h-4" />}
-          </button>
         </div>
 
         {/* Grouped Navigation Links */}

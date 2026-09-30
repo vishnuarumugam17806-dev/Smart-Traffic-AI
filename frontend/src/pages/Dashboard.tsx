@@ -11,7 +11,7 @@ import { apiClient } from '../api/client';
 import { useStore } from '../store/useStore';
 import { PageHeader } from '../components/PageHeader';
 
-import { FALLBACK_CAMERAS, FALLBACK_INTERSECTIONS, FALLBACK_ALERTS } from '../api/mockFallback';
+import { FALLBACK_CAMERAS, FALLBACK_INTERSECTIONS } from '../api/mockFallback';
 import type { Camera as CameraType, Intersection } from '../types';
 
 export const Dashboard: React.FC = () => {
@@ -28,16 +28,16 @@ export const Dashboard: React.FC = () => {
   const [activeFilter, setActiveFilter] = useState<'ALL' | 'ONLINE' | 'OFFLINE' | 'HIGH'>('ALL');
 
   // Live KPI Metrics
-  const [activeDetections, setActiveDetections] = useState<number>(1482);
-  const [vehiclesInRange, setVehiclesInRange] = useState<number>(6);
+  const [activeDetections, setActiveDetections] = useState<number>(0);
+  const [vehiclesInRange, setVehiclesInRange] = useState<number>(0);
 
   // Live camera stream stats
   const [liveStreamStats, setLiveStreamStats] = useState({
-    vehicleCount: 18,
-    densityState: 'HIGH',
-    queueLength: 7,
-    occupancyPct: 62.4,
-    fps: 29.8,
+    vehicleCount: 0,
+    densityState: 'MODERATE',
+    queueLength: 0,
+    occupancyPct: 0.0,
+    fps: 30.0,
     status: 'ONLINE'
   });
 
@@ -45,7 +45,7 @@ export const Dashboard: React.FC = () => {
   const [demoStep, setDemoStep] = useState<number>(1);
   const [demoDescription, setDemoDescription] = useState<string>("Step 1: System Online");
   const [isDemoRunning, setIsDemoRunning] = useState<boolean>(false);
-  const [alertsFeed, setAlertsFeed] = useState<any[]>(FALLBACK_ALERTS);
+  const [alertsFeed, setAlertsFeed] = useState<any[]>([]);
 
   useEffect(() => {
     const fetchData = async () => {
@@ -73,6 +73,8 @@ export const Dashboard: React.FC = () => {
       }
     };
     fetchData();
+    const interval = setInterval(fetchData, 5000);
+    return () => clearInterval(interval);
   }, []);
 
   useEffect(() => {
@@ -86,10 +88,16 @@ export const Dashboard: React.FC = () => {
           fps: activeLiveUpdate.fps || 30.0,
           status: activeLiveUpdate.camera_health || 'ONLINE'
         });
-        setActiveDetections(prev => Math.max(100, prev + (Math.random() > 0.5 ? 1 : -1)));
+        if (typeof activeLiveUpdate.vehicle_count === 'number') {
+          setActiveDetections(activeLiveUpdate.vehicle_count);
+        }
         if (activeLiveUpdate.vehicle_count !== undefined) {
           setVehiclesInRange(Math.max(1, Math.round(activeLiveUpdate.vehicle_count * 0.45)));
         }
+      } else if (activeLiveUpdate.event === 'CAMERA_STATUS_CHANGED') {
+        setCameras(prev =>
+          prev.map(c => (c.id === activeLiveUpdate.camera_id ? { ...c, status: activeLiveUpdate.status as any } : c))
+        );
       } else if (activeLiveUpdate.event === 'ALERT_CREATED') {
         setAlertsFeed(prev => [activeLiveUpdate.alert, ...prev.slice(0, 4)]);
       } else if (activeLiveUpdate.event === 'DEMO_STEP_CHANGED') {
@@ -189,9 +197,9 @@ export const Dashboard: React.FC = () => {
         >
           <div>
             <p className="text-[10px] font-bold text-slate-400 uppercase font-mono tracking-wider">ACTIVE CAMERAS</p>
-            <h3 className="text-xl font-bold text-[#245B84] mt-0.5">{cameras.length || 4}</h3>
+            <h3 className="text-xl font-bold text-[#245B84] mt-0.5">{cameras.length}</h3>
             <p className="text-[11px] text-[#2E7D5B] font-semibold mt-0.5 font-mono">
-              {cameras.filter(c => c.status === 'ONLINE' || c.status === 'LIVE').length || 3} Live Streams
+              {cameras.filter(c => c.status === 'ONLINE' || c.status === 'LIVE').length} Live Streams
             </p>
           </div>
           <div className="p-2 rounded-md bg-[#EEF6FC] text-[#245B84]">
@@ -241,9 +249,9 @@ export const Dashboard: React.FC = () => {
         >
           <div>
             <p className="text-[10px] font-bold text-slate-400 uppercase font-mono tracking-wider">ALERTS</p>
-            <h3 className="text-xl font-bold text-rose-700 mt-0.5">{alertsFeed.length || 2}</h3>
+            <h3 className="text-xl font-bold text-rose-700 mt-0.5">{alertsFeed.length}</h3>
             <p className="text-[11px] text-rose-600 font-semibold mt-0.5 font-mono">
-              {alertsFeed.filter(a => a.severity === 'CRITICAL').length || 1} Critical Incidents
+              {alertsFeed.filter(a => a.severity === 'CRITICAL').length} Critical Incidents
             </p>
           </div>
           <div className="p-2 rounded-md bg-rose-50 text-rose-700">
@@ -298,10 +306,11 @@ export const Dashboard: React.FC = () => {
                         <span className="text-xs">{isMobile ? '📱' : '📹'}</span>
                         <h4 className="font-bold text-xs text-slate-800 truncate">{cam.name}</h4>
                       </div>
-                      <span className={`px-1.5 py-0.5 text-[9px] font-bold rounded font-mono ${
+                      <span className={`px-1.5 py-0.5 text-[9px] font-bold rounded font-mono flex items-center gap-1 ${
                         cam.status === 'OFFLINE' ? 'bg-red-100 text-red-700' : 'bg-[#EAF7EF] text-[#2E7D5B]'
                       }`}>
-                        {cam.status}
+                        <span className={`w-1 h-1 rounded-full ${cam.status === 'OFFLINE' ? 'bg-red-500' : 'bg-[#2E7D5B] animate-pulse'}`} />
+                        {(cam.status === 'LIVE' || cam.status === 'ONLINE') ? 'ONLINE' : cam.status}
                       </span>
                     </div>
                   </div>

@@ -117,7 +117,7 @@ export const HeatMap: React.FC = () => {
         subtitle="Live congestion layers, camera locations and active incidents"
         badge={
           <span className="px-2 py-0.5 rounded text-[10px] font-mono font-bold bg-[#EAF7EF] text-[#2E7D5B] border border-[#D2EADA]">
-            {intersections.length || 34} JUNCTIONS • {cameras.length || 22} CAMERAS • {alerts.length} ALERTS
+            {intersections.length} JUNCTIONS • {cameras.length} CAMERAS • {alerts.length} ALERTS
           </span>
         }
         actions={

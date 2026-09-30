@@ -26,7 +26,7 @@ export const resolveVideoUrl = (url?: string): string => {
 };
 
 export const resolveImageUrl = (url?: string): string => {
-  if (!url) return '/vigitra_logo.jpg';
+  if (!url) return '/assets/vigitra-ai-logo.png';
   if (url.startsWith('blob:') || url.startsWith('data:') || url.startsWith('http://') || url.startsWith('https://')) {
     return url;
   }

@@ -6,6 +6,7 @@ import {
   CheckCircle2, LucideIcon
 } from 'lucide-react';
 import { useStore } from '../store/useStore';
+import { VigitraLogo } from './branding/VigitraLogo';
 
 interface AndroidDrawerProps {
   isOpen: boolean;
@@ -73,21 +74,22 @@ export const AndroidDrawer: React.FC<AndroidDrawerProps> = ({ isOpen, onClose })
       {/* Slide-Out Drawer Content */}
       <div className="relative w-[85vw] max-w-[320px] bg-[#F4F7F9] h-full flex flex-col justify-between z-50 overflow-hidden shadow-2xl">
         {/* Drawer Header */}
-        <div className="p-3 bg-[#EBF1F5] border-b border-[#DCE4EA] flex items-center justify-between shrink-0">
-          <div className="flex items-center gap-2">
-            <img src="/vigitra_logo.jpg" alt="VIGITRA" className="w-7 h-7 rounded object-cover shadow-2xs" />
-            <div>
-              <h2 className="font-extrabold text-xs text-[#173F5F] tracking-wide font-sans">VIGITRA AI</h2>
-              <p className="text-[9px] text-slate-500 font-mono">Mobile Operations Rail</p>
-            </div>
+        <div className="p-3 bg-[#EBF1F5] border-b border-[#DCE4EA] flex flex-col shrink-0 gap-2">
+          <div className="flex items-center justify-between w-full">
+            <span className="text-[10px] font-mono font-bold tracking-wider text-slate-500 uppercase">
+              Mobile Operations
+            </span>
+            <button
+              onClick={onClose}
+              className="p-1.5 text-slate-500 hover:text-slate-900 hover:bg-slate-200 rounded-md transition-colors"
+              aria-label="Close Navigation Drawer"
+            >
+              <X className="w-5 h-5" />
+            </button>
           </div>
-          <button
-            onClick={onClose}
-            className="p-1.5 text-slate-500 hover:text-slate-900 hover:bg-slate-200 rounded-md transition-colors"
-            aria-label="Close Navigation Drawer"
-          >
-            <X className="w-5 h-5" />
-          </button>
+          <div className="flex items-center justify-center w-full py-1">
+            <VigitraLogo variant="sidebar" className="max-w-[190px]" />
+          </div>
         </div>
 
         {/* Quick Search Bar */}

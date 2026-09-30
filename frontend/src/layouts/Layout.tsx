@@ -8,6 +8,7 @@ import { AndroidDrawer } from '../components/AndroidDrawer';
 import { AndroidBottomNav } from '../components/AndroidBottomNav';
 import { useStore } from '../store/useStore';
 import { useViewportScaler } from '../hooks/useViewportScaler';
+import { apiClient } from '../api/client';
 
 export const Layout: React.FC = () => {
   useViewportScaler();
@@ -25,43 +26,85 @@ export const Layout: React.FC = () => {
   }, [location.pathname]);
 
   useEffect(() => {
-    const isRenderProd = typeof window !== 'undefined' && window.location.hostname.includes('onrender.com');
-    const defaultWsUrl = isRenderProd
-      ? 'wss://vigitra-backend-k0yj.onrender.com/ws/traffic'
-      : 'ws://localhost:8000/ws/traffic';
-
-    let envWsUrl = import.meta.env.VITE_WS_URL;
-    if (envWsUrl && envWsUrl.includes('vigitra-backend.onrender.com')) {
-      envWsUrl = 'wss://vigitra-backend-k0yj.onrender.com/ws/traffic';
-    }
-    const wsUrl = (envWsUrl && !envWsUrl.startsWith('/')) ? envWsUrl : defaultWsUrl;
-
     let ws: WebSocket | null = null;
-    try {
-      ws = new WebSocket(wsUrl);
-      ws.onopen = () => {
-        setIsConnected(true);
-      };
-      ws.onmessage = (event) => {
-        try {
-          const data = JSON.parse(event.data);
-          setActiveLiveUpdate(data);
-        } catch (e) {
-          console.error('Error parsing WebSocket data:', e);
+    let reconnectTimer: any = null;
+    let isDisposed = false;
+
+    const checkHealth = async () => {
+      try {
+        const res = await apiClient.get('/health');
+        if (res.data?.status === 'HEALTHY' || res.status === 200) {
+          if (!isDisposed) setIsConnected(true);
         }
-      };
-      ws.onclose = () => {
-        setIsConnected(false);
-      };
-      ws.onerror = () => {
-        setIsConnected(false);
-      };
-    } catch (e) {
-      console.warn('WebSocket connection failed:', e);
-    }
+      } catch {
+        // If HTTP also fails and WS is closed, then disconnected
+      }
+    };
+    checkHealth();
+    const healthInterval = setInterval(checkHealth, 5000);
+
+    const connectWs = () => {
+      if (isDisposed) return;
+
+      const isRenderProd = typeof window !== 'undefined' && window.location.hostname.includes('onrender.com');
+      const host = typeof window !== 'undefined' && window.location.hostname ? window.location.hostname : '127.0.0.1';
+      const defaultWsUrl = isRenderProd
+        ? 'wss://vigitra-backend-k0yj.onrender.com/ws/traffic'
+        : `ws://${host}:8000/ws/traffic`;
+
+      let envWsUrl = import.meta.env.VITE_WS_URL;
+      if (envWsUrl && envWsUrl.includes('vigitra-backend.onrender.com')) {
+        envWsUrl = 'wss://vigitra-backend-k0yj.onrender.com/ws/traffic';
+      }
+      const wsUrl = (envWsUrl && !envWsUrl.startsWith('/') && !envWsUrl.endsWith('/ws'))
+        ? envWsUrl
+        : defaultWsUrl;
+
+      try {
+        ws = new WebSocket(wsUrl);
+        ws.onopen = () => {
+          if (!isDisposed) setIsConnected(true);
+        };
+        ws.onmessage = (event) => {
+          try {
+            const data = JSON.parse(event.data);
+            if (!isDisposed) setActiveLiveUpdate(data);
+          } catch (e) {
+            console.error('Error parsing WebSocket data:', e);
+          }
+        };
+        ws.onclose = () => {
+          if (!isDisposed) {
+            setIsConnected(false);
+            reconnectTimer = setTimeout(connectWs, 2500);
+          }
+        };
+        ws.onerror = () => {
+          if (!isDisposed) {
+            setIsConnected(false);
+            if (ws) {
+              try { ws.close(); } catch {}
+            }
+          }
+        };
+      } catch (e) {
+        console.warn('WebSocket connection failed:', e);
+        if (!isDisposed) {
+          setIsConnected(false);
+          reconnectTimer = setTimeout(connectWs, 2500);
+        }
+      }
+    };
+
+    connectWs();
 
     return () => {
-      if (ws) ws.close();
+      isDisposed = true;
+      clearInterval(healthInterval);
+      if (reconnectTimer) clearTimeout(reconnectTimer);
+      if (ws) {
+        try { ws.close(); } catch {}
+      }
     };
   }, []);
 

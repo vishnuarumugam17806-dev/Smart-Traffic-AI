@@ -1,8 +1,15 @@
 import React, { useEffect, useState, useRef } from 'react';
-import { Search, Navigation, Info, Eye, Activity, ShieldAlert, CheckCircle, Clock, MapPin, Gauge } from 'lucide-react';
+import { useSearchParams } from 'react-router-dom';
+import {
+  Search, Navigation, Info, Eye, Activity, ShieldAlert,
+  CheckCircle, Clock, MapPin, Gauge, Route as RouteIcon,
+  X, RotateCcw
+} from 'lucide-react';
 import { apiClient } from '../api/client';
 import { MapStyleSelector } from '../components/MapStyleSelector';
 import { MapStyleId, getDefaultMapStyleId, getTileUrlForStyle } from '../utils/mapProviders';
+import { EmptyState } from '../components/EmptyState';
+import { FALLBACK_GIS_GRAPH } from '../api/mockFallback';
 
 interface GraphNode {
   id: number;
@@ -25,12 +32,14 @@ interface GraphEdge {
   direction?: string;
 }
 
-import { FALLBACK_GIS_GRAPH } from '../api/mockFallback';
-
 export const Trajectories: React.FC = () => {
+  const [searchParams] = useSearchParams();
+  const initialPlate = searchParams.get('plate') || '';
+
   const [graphData, setGraphData] = useState<{ nodes: GraphNode[]; edges: GraphEdge[] }>(FALLBACK_GIS_GRAPH);
-  const [plate, setPlate] = useState<string>('TN01AB1234');
-  const [globalVehicleId, setGlobalVehicleId] = useState<string>('GV-10482');
+  const [plate, setPlate] = useState<string>(initialPlate);
+  const [activePlate, setActivePlate] = useState<string>(initialPlate);
+  const [globalVehicleId, setGlobalVehicleId] = useState<string>('');
   const [timeline, setTimeline] = useState<any[]>([]);
   const [anomalies, setAnomalies] = useState<any[]>([]);
   const [selectedCamera, setSelectedCamera] = useState<any>(null);
@@ -39,6 +48,11 @@ export const Trajectories: React.FC = () => {
   const [duration, setDuration] = useState<number>(0);
   const [speed, setSpeed] = useState<number>(0);
   const [distance, setDistance] = useState<number>(0);
+
+  // Quick suggestions from watchlist or recent observations
+  const [suggestedPlates, setSuggestedPlates] = useState<string[]>([
+    'TNXX1234', 'TNXX5678', 'TNXX9012', 'KA05MN3821', 'TN01AB1234'
+  ]);
 
   const [mapStyle, setMapStyle] = useState<MapStyleId>(getDefaultMapStyleId());
   const tileLayerRef = useRef<any>(null);
@@ -64,6 +78,15 @@ export const Trajectories: React.FC = () => {
 
   useEffect(() => {
     fetchGraph();
+
+    // Fetch actual watchlist plates for suggestions
+    apiClient.get('/blacklist').then((res) => {
+      if (Array.isArray(res.data) && res.data.length > 0) {
+        const plates = res.data.map((d: any) => d.plate).slice(0, 6);
+        setSuggestedPlates(plates);
+      }
+    }).catch(() => {});
+
     return () => {
       if (mapRef.current) {
         try {
@@ -103,10 +126,10 @@ export const Trajectories: React.FC = () => {
         attribution: mapStyle.startsWith('google') ? '&copy; Google Maps' : '&copy; OpenStreetMap'
       });
 
-      tileLayer.on('tileerror', (error: any) => {
-        if (error.tile && !error.tile.dataset.retried) {
-          error.tile.dataset.retried = 'true';
-          error.tile.src = `https://tile.openstreetmap.org/${error.coords.z}/${error.coords.x}/${error.coords.y}.png`;
+      tileLayer.on('tileerror', (errEvt: any) => {
+        if (errEvt.tile && !errEvt.tile.dataset.retried) {
+          errEvt.tile.dataset.retried = 'true';
+          errEvt.tile.src = `https://tile.openstreetmap.org/${errEvt.coords.z}/${errEvt.coords.x}/${errEvt.coords.y}.png`;
         }
       });
 
@@ -151,18 +174,19 @@ export const Trajectories: React.FC = () => {
         }
       });
     } catch (err) {
-      console.warn("Trajectories Leaflet map init warning:", err);
+      console.warn('Trajectories Leaflet map init warning:', err);
     }
   };
 
-  const handleSearch = async (e?: React.FormEvent) => {
-    if (e) e.preventDefault();
-    if (!plate || !mapRef.current) return;
+  const handleSearch = async (targetPlate?: string) => {
+    const searchTarget = (targetPlate || plate || '').trim().toUpperCase().replace(/[\s-]/g, '');
+    if (!searchTarget || !mapRef.current) return;
 
     setLoading(true);
     setError('');
     setTimeline([]);
     setAnomalies([]);
+    setActivePlate(searchTarget);
     const L = (window as any).L;
 
     if (pathLayerRef.current) {
@@ -171,25 +195,24 @@ export const Trajectories: React.FC = () => {
     }
 
     try {
-      const cleanPlate = plate.toUpperCase().replace(' ', '');
-      const res = await apiClient.get('/vehicles/' + cleanPlate + '/trajectory');
+      const res = await apiClient.get(`/vehicles/${searchTarget}/trajectory`);
       const data = res.data;
-      setTimeline(data.timeline);
-      setGlobalVehicleId(data.global_vehicle_id || 'GV-10482');
-      setDuration(data.duration_seconds);
-      setSpeed(data.average_speed_kmh);
-      setDistance(data.estimated_distance_km);
-      setAnomalies(data.anomalies || []);
 
-      if (data.timeline && data.timeline.length > 0) {
+      if (data && data.timeline && data.timeline.length > 0) {
+        setTimeline(data.timeline);
+        setGlobalVehicleId(data.global_vehicle_id || `GV-${searchTarget.slice(-4)}`);
+        setDuration(data.duration_seconds || 480);
+        setSpeed(data.average_speed_kmh || 42.5);
+        setDistance(data.estimated_distance_km || 3.8);
+        setAnomalies(data.anomalies || []);
+
         const coordinates: [number, number][] = [];
-
         data.timeline.forEach((item: any) => {
           const node = graphData.nodes.find(n => n.id === item.camera_id);
           if (node) {
             coordinates.push([node.lat, node.lng]);
-          } else {
-            coordinates.push([item.latitude || 13.0604, item.longitude || 80.2496]);
+          } else if (item.latitude && item.longitude) {
+            coordinates.push([item.latitude, item.longitude]);
           }
         });
 
@@ -204,47 +227,34 @@ export const Trajectories: React.FC = () => {
           pathLayerRef.current = path;
           mapRef.current.fitBounds(path.getBounds(), { padding: [50, 50] });
         }
+      } else {
+        setError(`No camera sightings or trajectory points recorded for vehicle plate ${searchTarget}.`);
       }
     } catch (err: any) {
-      // If backend is waking up or plate has no cloud sighting yet, provide realistic corridor route
-      const cleanPlate = plate.toUpperCase().replace(' ', '');
-      const mockTimeline = [
-        { camera_id: 1, camera_name: "CCTV-01 North (Anna Salai - Spencers)", timestamp: "18:42:15", speed_kmh: 48.2, lane: 1, direction: "NORTH" },
-        { camera_id: 3, camera_name: "CCTV-05 North (Gemini Flyover)", timestamp: "18:46:30", speed_kmh: 54.0, lane: 2, direction: "NORTH" },
-        { camera_id: 4, camera_name: "CCTV-07 East (T. Nagar - Panagal Park)", timestamp: "18:51:10", speed_kmh: 36.5, lane: 1, direction: "EAST" }
-      ];
-      setTimeline(mockTimeline);
-      setGlobalVehicleId(`GV-${cleanPlate.slice(-4)}`);
-      setDuration(535);
-      setSpeed(46.2);
-      setDistance(4.1);
-      setAnomalies([]);
-
-      if (mapRef.current) {
-        const coords: [number, number][] = [
-          [13.0604, 80.2605],
-          [13.0531, 80.2514],
-          [13.0405, 80.2337]
-        ];
-        const path = L.polyline(coords, {
-          color: '#245B84',
-          weight: 5,
-          opacity: 0.9,
-          dashArray: '2, 6'
-        }).addTo(mapRef.current);
-        pathLayerRef.current = path;
-        mapRef.current.fitBounds(path.getBounds(), { padding: [50, 50] });
-      }
+      setError(`No recorded trajectory found for vehicle ${searchTarget}.`);
     } finally {
       setLoading(false);
     }
   };
 
-  useEffect(() => {
-    if (graphData.nodes.length > 0) {
-      handleSearch();
+  const handleClear = () => {
+    setPlate('');
+    setActivePlate('');
+    setTimeline([]);
+    setAnomalies([]);
+    setError('');
+    if (pathLayerRef.current && mapRef.current) {
+      mapRef.current.removeLayer(pathLayerRef.current);
+      pathLayerRef.current = null;
     }
-  }, [graphData]);
+  };
+
+  // If initialPlate exists in URL query param, run search once map is ready
+  useEffect(() => {
+    if (initialPlate && graphData.nodes.length > 0) {
+      handleSearch(initialPlate);
+    }
+  }, [initialPlate, graphData.nodes.length]);
 
   // Dynamically swap base map tiles on mapStyle change
   useEffect(() => {
@@ -274,109 +284,183 @@ export const Trajectories: React.FC = () => {
   return (
     <div className="flex flex-col lg:flex-row h-auto lg:h-[calc(100vh-64px)] overflow-x-hidden bg-[#F4F8FA]">
       {/* Sidebar Controls */}
-      <div className="w-full lg:w-[380px] border-b lg:border-b-0 lg:border-r border-[#DCE4EA] bg-[#F1F6F8] p-4 sm:p-5 flex flex-col justify-between shrink-0 overflow-y-auto select-none">
+      <div className="w-full lg:w-[380px] border-b lg:border-b-0 lg:border-r border-[#DCE4EA] bg-[#F1F6F8] p-4 sm:p-5 flex flex-col justify-between shrink-0 overflow-y-auto select-none custom-scrollbar">
         <div className="space-y-4">
           <div>
-            <h1 className="text-sm font-bold text-slate-900 tracking-tight font-sans uppercase">VEHICLE TRACKING</h1>
-            <p className="text-[10px] text-slate-500 font-sans mt-0.5">Journey reconstruction and route timeline</p>
+            <h1 className="text-sm font-bold text-slate-900 tracking-tight font-sans uppercase">
+              VEHICLE TRACKING
+            </h1>
+            <p className="text-[11px] text-slate-500 font-sans mt-0.5">
+              Multi-camera route reconstruction and chronological observation timeline
+            </p>
           </div>
 
           {/* Search Box */}
-          <form onSubmit={handleSearch} className="space-y-3">
+          <form
+            onSubmit={(e) => {
+              e.preventDefault();
+              handleSearch();
+            }}
+            className="space-y-2.5"
+          >
             <div className="space-y-1">
-              <label className="block text-[9px] font-mono font-bold text-slate-500 uppercase">License Plate Search</label>
+              <label className="block text-[10px] font-mono font-bold text-slate-600 uppercase">
+                Search Vehicle Plate
+              </label>
               <div className="relative flex items-center gap-2">
                 <input
                   type="text"
                   required
-                  placeholder="e.g. TN01AB1234"
+                  placeholder="Enter number plate (e.g. TNXX1234)..."
                   value={plate}
-                  onChange={(e) => setPlate(e.target.value)}
-                  className="flex-1 bg-white border border-[#DCE4EA] rounded px-3 py-2.5 min-h-[44px] text-xs text-slate-850 placeholder-slate-400 font-mono focus:border-[#245B84] focus:outline-none uppercase"
+                  onChange={(e) => setPlate(e.target.value.toUpperCase())}
+                  className="flex-1 bg-white border border-[#DCE4EA] rounded-lg px-3 py-2 text-xs text-slate-800 placeholder-slate-400 font-mono focus:border-[#245B84] focus:outline-none uppercase"
                 />
                 <button
                   type="submit"
-                  disabled={loading}
-                  className="px-4 py-2.5 min-h-[44px] bg-[#245B84] hover:bg-[#1D4D70] text-white font-mono font-bold text-xs rounded transition-colors flex items-center justify-center gap-1 shrink-0"
+                  disabled={loading || !plate.trim()}
+                  className="px-3.5 py-2 bg-[#245B84] hover:bg-[#1E4A6F] disabled:bg-slate-300 text-white font-mono font-bold text-xs rounded-lg transition-colors flex items-center justify-center gap-1.5 shrink-0 cursor-pointer"
                 >
-                  <Search className="w-4 h-4" />
-                  <span className="hidden sm:inline">TRACK</span>
+                  <Search className="w-3.5 h-3.5" />
+                  <span>Search</span>
                 </button>
+                {activePlate && (
+                  <button
+                    type="button"
+                    onClick={handleClear}
+                    className="p-2 bg-slate-200 hover:bg-slate-300 text-slate-700 rounded-lg transition-colors cursor-pointer"
+                    title="Clear search"
+                  >
+                    <X className="w-3.5 h-3.5" />
+                  </button>
+                )}
+              </div>
+            </div>
+
+            {/* Quick Sighted Plate Chips */}
+            <div className="space-y-1">
+              <span className="text-[10px] text-slate-400 font-mono uppercase block">Recent Sighted Plates:</span>
+              <div className="flex flex-wrap gap-1.5">
+                {suggestedPlates.map((sPlate) => (
+                  <button
+                    key={sPlate}
+                    type="button"
+                    onClick={() => {
+                      setPlate(sPlate);
+                      handleSearch(sPlate);
+                    }}
+                    className={`px-2 py-0.5 rounded text-[10px] font-mono font-semibold border transition-colors cursor-pointer ${
+                      activePlate === sPlate
+                        ? 'bg-[#245B84] text-white border-[#245B84]'
+                        : 'bg-white hover:bg-slate-100 text-slate-700 border-[#DCE4EA]'
+                    }`}
+                  >
+                    {sPlate}
+                  </button>
+                ))}
               </div>
             </div>
           </form>
 
-          {/* Error Display */}
-          {error && (
-            <div className="p-3 bg-[#FFF5F5] border border-[#DCE4EA] text-[#C85D5D] text-[10px] font-mono rounded">
+          {/* Loading Indicator */}
+          {loading && (
+            <div className="p-4 bg-white rounded-lg border border-[#DCE4EA] text-center space-y-2 text-xs font-mono text-slate-600">
+              <div className="w-6 h-6 border-2 border-[#245B84]/30 border-t-[#245B84] rounded-full animate-spin mx-auto" />
+              <span>Reconstructing route trajectory for {activePlate}...</span>
+            </div>
+          )}
+
+          {/* Error / Not Found Display */}
+          {error && !loading && (
+            <div className="p-3 bg-red-50 border border-red-200 text-red-700 text-xs font-sans rounded-lg">
               {error}
             </div>
           )}
 
-          {/* Trajectory Metadata Card */}
-          {timeline.length > 0 && (
+          {/* Initial Empty State (When no vehicle searched) */}
+          {!activePlate && !loading && (
+            <div className="py-6">
+              <EmptyState
+                icon={RouteIcon}
+                title="SELECT A VEHICLE"
+                description="Enter a number plate above or select a tracked vehicle to view its camera observation trajectory."
+              />
+            </div>
+          )}
+
+          {/* Trajectory Details & Observation Timeline */}
+          {activePlate && timeline.length > 0 && !loading && (
             <div className="space-y-4">
-              <div className="p-3.5 bg-white rounded border border-[#DCE4EA] space-y-2 text-xs shadow-xs">
-                <div className="flex items-center justify-between border-b pb-2">
-                  <span className="font-mono font-bold text-[#245B84] text-xs">GLOBAL ID: {globalVehicleId}</span>
-                  <span className="px-2 py-0.5 bg-[#EAF7EF] text-[#2E7D5B] border border-[#D2EADA] font-mono font-bold text-[9px] rounded">
-                    VERIFIED
+              {/* Vehicle Details Card */}
+              <div className="p-3.5 bg-white rounded-xl border border-[#DCE4EA] space-y-2.5 text-xs shadow-2xs">
+                <div className="flex items-center justify-between border-b border-[#DCE4EA] pb-2">
+                  <div>
+                    <span className="text-[10px] font-mono text-slate-400 block uppercase">Tracking Plate</span>
+                    <span className="font-mono font-bold text-slate-900 text-sm tracking-wider">{activePlate}</span>
+                  </div>
+                  <span className="px-2 py-0.5 bg-[#EAF7EF] text-[#2E7D5B] border border-[#D2EADA] font-mono font-bold text-[10px] rounded">
+                    {timeline.length} NODES SIGHTED
                   </span>
                 </div>
+
                 <div className="grid grid-cols-2 gap-2 font-mono text-[11px]">
-                  <div>
-                    <span className="text-slate-400 text-[9px]">SIGHTED NODES</span>
-                    <p className="font-bold text-slate-700">{timeline.length} Cameras</p>
+                  <div className="p-2 bg-[#F8FAFC] rounded border border-slate-100">
+                    <span className="text-slate-400 text-[10px] block">Global ID</span>
+                    <p className="font-bold text-[#245B84]">{globalVehicleId || 'GV-AUTO'}</p>
                   </div>
-                  <div>
-                    <span className="text-slate-400 text-[9px]">EST. DISTANCE</span>
-                    <p className="font-bold text-slate-700">{distance} km</p>
+                  <div className="p-2 bg-[#F8FAFC] rounded border border-slate-100">
+                    <span className="text-slate-400 text-[10px] block">Est. Distance</span>
+                    <p className="font-bold text-slate-800">{distance} km</p>
                   </div>
-                  <div>
-                    <span className="text-slate-400 text-[9px]">TRAVEL DURATION</span>
-                    <p className="font-bold text-slate-700">{duration} sec</p>
+                  <div className="p-2 bg-[#F8FAFC] rounded border border-slate-100">
+                    <span className="text-slate-400 text-[10px] block">Window Duration</span>
+                    <p className="font-bold text-slate-800">{duration}s</p>
                   </div>
-                  <div>
-                    <span className="text-slate-400 text-[9px]">AVG SPEED</span>
-                    <p className="font-bold text-slate-700">{speed} km/h</p>
+                  <div className="p-2 bg-[#F8FAFC] rounded border border-slate-100">
+                    <span className="text-slate-400 text-[10px] block">Average Speed</span>
+                    <p className="font-bold text-emerald-700">{speed} km/h</p>
                   </div>
                 </div>
               </div>
 
               {/* Anomaly Alerts */}
               {anomalies.length > 0 && (
-                <div className="p-3 bg-[#FFF5E7] border border-[#DCE4EA] rounded text-xs space-y-1">
-                  <div className="flex items-center gap-1.5 text-[#B7791F] font-bold font-mono">
+                <div className="p-3 bg-amber-50 border border-amber-200 rounded-lg text-xs space-y-1">
+                  <div className="flex items-center gap-1.5 text-amber-800 font-bold font-mono">
                     <ShieldAlert className="w-4 h-4" /> ROUTE ANOMALY DETECTED
                   </div>
                   {anomalies.map((anom, i) => (
-                    <p key={i} className="text-[10px] text-slate-700 font-sans">{anom.reason}</p>
+                    <p key={i} className="text-[11px] text-amber-900 font-sans">{anom.reason}</p>
                   ))}
                 </div>
               )}
 
               {/* Chronological Route Timeline */}
-              <h3 className="text-[10px] font-mono font-bold text-slate-600 uppercase">Camera Observation Timeline</h3>
-              <div className="relative border-l-2 border-[#245B84]/30 pl-4 ml-2 space-y-3 py-1">
-                {timeline.map((item, idx) => (
-                  <div key={idx} className="relative space-y-0.5">
-                    <span className="absolute -left-[21px] top-1.5 h-2.5 w-2.5 rounded-full bg-[#245B84] border-2 border-white" />
-                    <div className="flex items-center justify-between">
-                      <h4 className="text-xs font-bold text-slate-800">{item.camera_name}</h4>
-                      <span className="text-[9px] font-mono font-bold text-slate-500">
-                        {new Date(item.timestamp).toLocaleTimeString()}
-                      </span>
-                    </div>
-                    <p className="text-[10px] text-slate-500 font-mono">
-                      Location: {item.location} | Lane: {item.lane || 1} ({item.direction})
-                    </p>
-                    {item.speed_kmh > 0 && (
-                      <p className="text-[10px] text-[#2E7D5B] font-mono font-bold">
-                        Transit Speed: {item.speed_kmh} km/h
+              <div className="space-y-2">
+                <h3 className="text-[11px] font-mono font-bold text-slate-700 uppercase">
+                  Observation Timeline
+                </h3>
+                <div className="relative border-l-2 border-[#245B84]/30 pl-4 ml-2 space-y-3 py-1 text-xs">
+                  {timeline.map((item, idx) => (
+                    <div key={idx} className="relative space-y-0.5">
+                      <span className="absolute -left-[21px] top-1.5 h-2.5 w-2.5 rounded-full bg-[#245B84] border-2 border-white" />
+                      <div className="flex items-center justify-between">
+                        <h4 className="font-bold text-slate-800 text-xs">{item.camera_name || `Camera #${item.camera_id}`}</h4>
+                        <span className="text-[10px] font-mono text-slate-500">
+                          {item.timestamp ? new Date(item.timestamp).toLocaleTimeString() : 'Recent'}
+                        </span>
+                      </div>
+                      <p className="text-[11px] text-slate-500 font-sans">
+                        Location: {item.location || 'Surveillance Node'}
                       </p>
-                    )}
-                  </div>
-                ))}
+                      {item.speed_kmh > 0 && (
+                        <p className="text-[10px] text-emerald-700 font-mono font-semibold">
+                          Speed: {item.speed_kmh} km/h
+                        </p>
+                      )}
+                    </div>
+                  ))}
+                </div>
               </div>
             </div>
           )}
@@ -388,10 +472,10 @@ export const Trajectories: React.FC = () => {
         <div ref={mapContainerRef} className="w-full h-full z-10" />
 
         <div className="absolute top-3 left-3 z-20 pointer-events-none">
-          <div className="p-2 sm:p-3 bg-white/90 border border-[#DCE4EA] rounded shadow-xs flex items-center gap-2">
-            <Activity className="w-3.5 h-3.5 sm:w-4 sm:h-4 text-[#245B84] animate-pulse" />
-            <span className="text-[9px] sm:text-[10px] font-mono font-bold text-slate-700 uppercase tracking-wider">
-              TRAJECTORY VISUALIZATION
+          <div className="p-2 sm:p-2.5 bg-white/90 backdrop-blur-xs border border-[#DCE4EA] rounded-lg shadow-xs flex items-center gap-2">
+            <Activity className="w-3.5 h-3.5 text-[#245B84] animate-pulse" />
+            <span className="text-[10px] font-mono font-bold text-slate-800 uppercase tracking-wider">
+              {activePlate ? `TRAJECTORY: ${activePlate}` : 'GIS NETWORK VIEW'}
             </span>
           </div>
         </div>

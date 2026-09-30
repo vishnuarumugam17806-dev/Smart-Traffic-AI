@@ -10,6 +10,7 @@ import { Layout } from '../layouts/Layout';
 import { Login } from '../pages/Login';
 import { Dashboard } from '../pages/Dashboard';
 import { useStore } from '../store/useStore';
+import { VigitraLogo } from '../components/branding/VigitraLogo';
 
 // Code-split heavy pages to eliminate 500kB+ monolithic bundle warning
 const Cameras = lazy(() => import('../pages/Cameras').then((m) => ({ default: m.Cameras })));
@@ -27,12 +28,15 @@ const RecordedVideo = lazy(() => import('../pages/RecordedVideo').then((m) => ({
 const TrafficForecast = lazy(() => import('../pages/TrafficForecast').then((m) => ({ default: m.TrafficForecast })));
 
 const RouteLoadingFallback: React.FC = () => (
-  <div className="flex items-center justify-center min-h-[50vh] w-full">
-    <div className="flex flex-col items-center gap-3">
-      <div className="w-10 h-10 border-3 border-primary-500/20 border-t-primary-500 rounded-full animate-spin" />
-      <span className="text-xs font-medium text-slate-500 tracking-wide uppercase">
-        Loading module...
-      </span>
+  <div className="flex items-center justify-center min-h-[50vh] w-full select-none">
+    <div className="flex flex-col items-center gap-3.5 animate-in fade-in duration-200">
+      <VigitraLogo variant="compact" />
+      <div className="flex items-center gap-2">
+        <div className="w-3.5 h-3.5 border-2 border-slate-300 border-t-[#245B84] rounded-full animate-spin" />
+        <span className="text-xs font-medium font-mono text-slate-500 tracking-wide">
+          Loading VIGITRA AI module...
+        </span>
+      </div>
     </div>
   </div>
 );

@@ -35,6 +35,7 @@ import { useStore } from '../store/useStore';
 import { FALLBACK_INTERSECTIONS, FALLBACK_SIGNAL_DATA } from '../api/mockFallback';
 import { IntersectionRadiusRadar } from '../components/IntersectionRadiusRadar';
 import { PageHeader } from '../components/PageHeader';
+import { EmptyState } from '../components/EmptyState';
 
 interface ApproachData {
   key: string;
@@ -96,7 +97,8 @@ const APPROACH_ANPR_DATA: Record<string, { plate: string; ocr: string; status: s
 export const Signals: React.FC = () => {
   const { activeLiveUpdate } = useStore();
   const [intersections, setIntersections] = useState<Intersection[]>(FALLBACK_INTERSECTIONS);
-  const [selectedJunctionId, setSelectedJunctionId] = useState<number>(13); // Default to TEST-JUNCTION-2 for instant demo
+  const [selectedJunctionId, setSelectedJunctionId] = useState<number | null>(null);
+  const [activeSignalTab, setActiveSignalTab] = useState<'CURRENT' | 'DEMAND' | 'PEDESTRIAN' | 'DECISIONS'>('CURRENT');
   const [signalData, setSignalData] = useState<any>(FALLBACK_SIGNAL_DATA);
   const [trafficData, setTrafficData] = useState<any>(null);
   const [optimizationData, setOptimizationData] = useState<any>(null);
@@ -669,8 +671,55 @@ export const Signals: React.FC = () => {
     handleReturnToAuto();
   };
 
+  if (selectedJunctionId === null) {
+    return (
+      <div className="p-3 sm:p-5 space-y-4 bg-[#F8FAFC] min-h-screen font-sans select-none">
+        <PageHeader
+          title="Signal Control"
+          subtitle="Adaptive junction phase management, real-time approach demand & pedestrian safety"
+          badge={
+            <span className="px-2.5 py-0.5 rounded text-[10px] font-mono font-bold bg-slate-100 text-slate-600 border border-slate-200">
+              JUNCTION FIRST
+            </span>
+          }
+        />
+        <EmptyState
+          icon={TrafficCone}
+          title="SELECT A JUNCTION"
+          description="Choose a traffic intersection below to monitor and control adaptive signal phases, approach demand, and safety controls."
+          action={
+            <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-3 w-full max-w-4xl pt-3">
+              {intersections.map((int) => (
+                <button
+                  key={int.id}
+                  onClick={() => handleSelectJunction(int.id)}
+                  className="p-4 bg-white hover:bg-[#EEF6FC] rounded-xl border border-[#DCE4EA] hover:border-[#245B84] text-left transition-all shadow-2xs group cursor-pointer"
+                >
+                  <div className="flex items-center justify-between mb-2">
+                    <span className="text-[10px] font-mono font-bold text-[#245B84] bg-blue-50 px-2 py-0.5 rounded border border-blue-100">
+                      JUNCTION #{int.id}
+                    </span>
+                    <span className="text-[10px] font-mono text-slate-500">
+                      {int.num_approaches || 4} APPROACHES
+                    </span>
+                  </div>
+                  <h4 className="text-xs sm:text-sm font-bold text-slate-900 group-hover:text-[#245B84] truncate">
+                    {int.name}
+                  </h4>
+                  <p className="text-[11px] text-slate-500 font-sans mt-1">
+                    Click to inspect live signals and radar
+                  </p>
+                </button>
+              ))}
+            </div>
+          }
+        />
+      </div>
+    );
+  }
+
   return (
-    <div className="p-4 sm:p-6 space-y-6 bg-[#F6F8FA] min-h-screen select-none">
+    <div className="p-4 sm:p-6 space-y-5 bg-[#F6F8FA] min-h-screen select-none font-sans">
       {/* Standardized Page Header */}
       <PageHeader
         title="Signal Control"
@@ -685,7 +734,7 @@ export const Signals: React.FC = () => {
         <div className="flex flex-wrap items-center gap-2">
           <button
             onClick={() => setShowHistoryModal(true)}
-            className="px-3 py-2 bg-slate-600 hover:bg-slate-700 text-white rounded text-xs font-mono font-bold flex items-center justify-center gap-1.5 transition-colors shadow-xs"
+            className="px-3 py-2 bg-slate-600 hover:bg-slate-700 text-white rounded text-xs font-mono font-bold flex items-center justify-center gap-1.5 transition-colors shadow-xs cursor-pointer"
           >
             <History className="w-4 h-4" /> DECISION AUDIT
           </button>
@@ -694,54 +743,105 @@ export const Signals: React.FC = () => {
               if (approachesList.length > 0) setManualApproach(approachesList[0].key);
               setShowOverrideModal(true);
             }}
-            className="px-3 py-2 bg-[#B7791F] hover:bg-[#9B6416] text-white rounded text-xs font-mono font-bold flex items-center justify-center gap-1.5 transition-colors shadow-xs"
+            className="px-3 py-2 bg-[#B7791F] hover:bg-[#9B6416] text-white rounded text-xs font-mono font-bold flex items-center justify-center gap-1.5 transition-colors shadow-xs cursor-pointer"
           >
             <ShieldAlert className="w-4 h-4" /> MANUAL OVERRIDE
           </button>
           <button
             onClick={handleReturnToAuto}
-            className="px-3 py-2 bg-[#2E7D5B] hover:bg-[#236347] text-white rounded text-xs font-mono font-bold flex items-center justify-center gap-1.5 transition-colors shadow-xs"
+            className="px-3 py-2 bg-[#2E7D5B] hover:bg-[#236347] text-white rounded text-xs font-mono font-bold flex items-center justify-center gap-1.5 transition-colors shadow-xs cursor-pointer"
           >
             <RotateCcw className="w-4 h-4" /> RETURN TO AUTO
           </button>
         </div>
       </PageHeader>
 
-      {/* Pre-configured Test Junctions Switcher Bar */}
-      {testJunctions.length > 0 && (
-        <div className="bg-emerald-50/80 border border-emerald-300 p-3.5 rounded-lg flex flex-col md:flex-row items-start md:items-center justify-between gap-3 shadow-xs">
-          <div className="flex items-center gap-2">
-            <span className="px-2 py-0.5 bg-emerald-600 text-white text-[10px] font-mono font-extrabold rounded uppercase">
-              TEST JUNCTIONS
-            </span>
-            <span className="text-xs font-mono font-bold text-emerald-950">
-              Multi-approach evaluation junctions with test streams:
-            </span>
-          </div>
-
-          <div className="flex flex-wrap gap-2 w-full md:w-auto">
-            {testJunctions.map((tj) => (
-              <button
-                key={tj.id}
-                onClick={() => handleSelectJunction(tj.id)}
-                className={`px-3.5 py-2 rounded text-xs font-mono font-bold border transition-all flex items-center gap-2 ${
-                  selectedJunctionId === tj.id
-                    ? 'bg-emerald-700 text-white border-emerald-700 shadow-sm'
-                    : 'bg-white hover:bg-emerald-100 text-emerald-900 border-emerald-300'
-                }`}
-              >
-                <span>{tj.name}</span>
-                <span className="px-1.5 py-0.2 text-[9px] font-extrabold rounded bg-emerald-200/90 text-emerald-900">
-                  {tj.num_approaches}-WAY
-                </span>
-              </button>
+      {/* Junction Navigation & Filter Bar */}
+      <div className="bg-white p-3 rounded-xl border border-[#DCE4EA] shadow-2xs flex flex-wrap items-center justify-between gap-3 text-xs">
+        <div className="flex items-center gap-2.5">
+          <TrafficCone className="w-4 h-4 text-[#245B84]" />
+          <span className="font-bold text-slate-700">JUNCTION:</span>
+          <select
+            value={selectedJunctionId}
+            onChange={(e) => handleSelectJunction(Number(e.target.value))}
+            className="bg-[#F8FAFC] border border-[#DCE4EA] rounded-lg px-2.5 py-1.5 font-semibold text-slate-800 text-xs focus:outline-none focus:border-[#245B84] cursor-pointer"
+          >
+            {intersections.map((j) => (
+              <option key={j.id} value={j.id}>
+                {j.name} ({j.num_approaches || 4} Approaches)
+              </option>
             ))}
-          </div>
+          </select>
+        </div>
+
+        <button
+          onClick={() => setSelectedJunctionId(null)}
+          className="text-xs font-semibold text-slate-600 hover:text-slate-900 bg-slate-100 hover:bg-slate-200 px-3 py-1.5 rounded-lg border border-slate-200 transition-colors cursor-pointer"
+        >
+          Change Junction
+        </button>
+      </div>
+
+      {/* Notification Banner */}
+      {overrideMessage && (
+        <div className="p-3 bg-[#EEF6FC] border border-[#DCE4EA] text-[#245B84] text-xs font-mono font-bold rounded flex items-center justify-between">
+          <span>{overrideMessage}</span>
+          <button onClick={() => setOverrideMessage('')} className="text-slate-400 hover:text-slate-700">
+            ✕
+          </button>
         </div>
       )}
 
-      {/* Camera Display & Scenario Controls */}
-      <div className="bg-white p-4 rounded-lg border border-[#DCE4EA] shadow-xs space-y-4">
+
+      {/* Clean Tab Navigation */}
+      <div className="flex border-b border-[#DCE4EA] bg-white px-2 rounded-xl shadow-2xs text-xs font-semibold overflow-x-auto">
+        <button
+          onClick={() => setActiveSignalTab('CURRENT')}
+          className={`py-3 px-4 border-b-2 transition-colors cursor-pointer whitespace-nowrap ${
+            activeSignalTab === 'CURRENT'
+              ? 'border-[#245B84] text-[#173F5F] font-bold'
+              : 'border-transparent text-slate-500 hover:text-slate-800'
+          }`}
+        >
+          Current Signal & Live Feeds
+        </button>
+        <button
+          onClick={() => setActiveSignalTab('DEMAND')}
+          className={`py-3 px-4 border-b-2 transition-colors cursor-pointer whitespace-nowrap ${
+            activeSignalTab === 'DEMAND'
+              ? 'border-[#245B84] text-[#173F5F] font-bold'
+              : 'border-transparent text-slate-500 hover:text-slate-800'
+          }`}
+        >
+          Traffic Demand & 20m Radar
+        </button>
+        <button
+          onClick={() => setActiveSignalTab('PEDESTRIAN')}
+          className={`py-3 px-4 border-b-2 transition-colors cursor-pointer whitespace-nowrap ${
+            activeSignalTab === 'PEDESTRIAN'
+              ? 'border-[#245B84] text-[#173F5F] font-bold'
+              : 'border-transparent text-slate-500 hover:text-slate-800'
+          }`}
+        >
+          Pedestrian Safety Phase
+        </button>
+        <button
+          onClick={() => setActiveSignalTab('DECISIONS')}
+          className={`py-3 px-4 border-b-2 transition-colors cursor-pointer whitespace-nowrap ${
+            activeSignalTab === 'DECISIONS'
+              ? 'border-[#245B84] text-[#173F5F] font-bold'
+              : 'border-transparent text-slate-500 hover:text-slate-800'
+          }`}
+        >
+          Decision Details & Audit
+        </button>
+      </div>
+
+      {/* TAB 1: CURRENT SIGNAL & LIVE VIDEO FEEDS */}
+      {activeSignalTab === 'CURRENT' && (
+        <div className="space-y-4 animate-fadeIn">
+          {/* Camera Display & Scenario Controls */}
+          <div className="bg-white p-4 rounded-lg border border-[#DCE4EA] shadow-xs space-y-4">
         <div className="flex flex-col lg:flex-row items-start lg:items-center justify-between gap-4 border-b border-[#DCE4EA] pb-3">
           <div className="flex items-center gap-2">
             <Sliders className="w-5 h-5 text-[#245B84]" />
@@ -857,390 +957,6 @@ export const Signals: React.FC = () => {
           </div>
         </div>
       </div>
-
-      {/* Notification Banner */}
-      {overrideMessage && (
-        <div className="p-3 bg-[#EEF6FC] border border-[#DCE4EA] text-[#245B84] text-xs font-mono font-bold rounded flex items-center justify-between">
-          <span>{overrideMessage}</span>
-          <button onClick={() => setOverrideMessage('')} className="text-slate-400 hover:text-slate-700">
-            ✕
-          </button>
-        </div>
-      )}
-
-      {/* SECTION 1, 2, 3, 5, 9, 10 & 13: PEDESTRIAN CROSSING SAFETY PHASE STATUS CARD */}
-      {(() => {
-        const isPedActive = pedestrianTelemetry?.isActive || pedestrianTelemetry?.is_active || false;
-        const pedState = pedestrianTelemetry?.pedestrianPhaseState || pedestrianTelemetry?.pedestrian_phase_state || 'NORMAL';
-        const pedStatus = pedestrianTelemetry?.pedestrianPhaseStatus || pedestrianTelemetry?.pedestrian_phase_status || 'SCHEDULED';
-        const remainingSec = pedestrianTelemetry?.remainingPedestrianSeconds ?? pedestrianTelemetry?.remaining_seconds ?? 0;
-        const timeToNextSec = pedestrianTelemetry?.timeToNextSeconds ?? pedestrianTelemetry?.time_to_next_seconds ?? 600;
-        const isDemo = pedestrianTelemetry?.isDemoMode ?? pedestrianTelemetry?.is_demo_mode ?? pedConfigDemoMode;
-        const isEnabled = pedestrianTelemetry?.pedestrianPhaseEnabled ?? pedestrianTelemetry?.pedestrian_phase_enabled ?? true;
-
-        return (
-          <div
-            className={`rounded-lg border p-4 sm:p-5 transition-all shadow-xs ${
-              isPedActive
-                ? 'bg-rose-50/80 border-rose-400 ring-2 ring-rose-500/20 shadow-md'
-                : pedState === 'TRANSITION' || pedState === 'ALL_RED'
-                ? 'bg-amber-50/80 border-amber-400 ring-1 ring-amber-400/20'
-                : 'bg-white border-[#DCE4EA]'
-            }`}
-          >
-            {/* Header row */}
-            <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 border-b border-slate-200/80 pb-3">
-              <div className="flex items-center gap-2.5">
-                <div
-                  className={`p-2 rounded-lg ${
-                    isPedActive
-                      ? 'bg-rose-600 text-white animate-bounce'
-                      : 'bg-[#EEF6FC] text-[#245B84]'
-                  }`}
-                >
-                  <Footprints className="w-5 h-5" />
-                </div>
-                <div>
-                  <div className="flex items-center gap-2">
-                    <h2 className="text-xs sm:text-sm font-mono font-extrabold text-slate-800 uppercase tracking-tight">
-                      PEDESTRIAN CROSSING SAFETY PHASE
-                    </h2>
-                    {isDemo && (
-                      <span className="px-2 py-0.5 bg-amber-500 text-white text-[9px] font-mono font-extrabold rounded uppercase tracking-wider animate-pulse">
-                        DEMO / TEST MODE
-                      </span>
-                    )}
-                  </div>
-                  <p className="text-[11px] text-slate-500 font-mono">
-                    Protected Pedestrian Window (10-min scheduled interval / 30s All-Red hold)
-                  </p>
-                </div>
-              </div>
-
-              {/* Status Badges & Quick Action Buttons */}
-              <div className="flex flex-wrap items-center gap-2 w-full sm:w-auto justify-end">
-                {/* Active Status Badge */}
-                {isPedActive ? (
-                  <span className="px-3 py-1 bg-rose-600 text-white rounded font-mono font-extrabold text-xs flex items-center gap-1.5 shadow-sm animate-pulse">
-                    <span className="w-2 h-2 rounded-full bg-white" />
-                    PEDESTRIAN CROSSING ACTIVE
-                  </span>
-                ) : pedState === 'TRANSITION' || pedState === 'ALL_RED' ? (
-                  <span className="px-3 py-1 bg-amber-500 text-white rounded font-mono font-bold text-xs flex items-center gap-1.5">
-                    <AlertTriangle className="w-3.5 h-3.5" />
-                    CLEARING VEHICLES (ALL-RED PENDING)
-                  </span>
-                ) : pedState === 'PEDESTRIAN_COMPLETE' || pedState === 'TRANSITION_BACK' ? (
-                  <span className="px-3 py-1 bg-emerald-600 text-white rounded font-mono font-bold text-xs flex items-center gap-1.5">
-                    <CheckCircle2 className="w-3.5 h-3.5" />
-                    RETURNING TO ADAPTIVE CONTROL
-                  </span>
-                ) : (
-                  <span className="px-3 py-1 bg-slate-100 text-slate-700 border border-slate-300 rounded font-mono font-bold text-xs flex items-center gap-1.5">
-                    <Timer className="w-3.5 h-3.5 text-[#245B84]" />
-                    STATUS: SCHEDULED
-                  </span>
-                )}
-
-                {/* Demo Mode Toggle */}
-                <button
-                  type="button"
-                  onClick={() => handleToggleDemoMode(!isDemo)}
-                  className={`px-2.5 py-1 rounded text-xs font-mono font-bold border transition-colors ${
-                    isDemo
-                      ? 'bg-amber-100 text-amber-900 border-amber-300 hover:bg-amber-200'
-                      : 'bg-slate-100 hover:bg-slate-200 text-slate-700 border-slate-300'
-                  }`}
-                  title={isDemo ? 'Switch to Production 10-Minute interval' : 'Switch to Demo 10-Second interval'}
-                >
-                  {isDemo ? 'DEMO: 10s (ACTIVE)' : 'PROD: 10m'}
-                </button>
-
-                {/* Instant Trigger */}
-                <button
-                  type="button"
-                  onClick={handleTriggerPedestrian}
-                  className="px-3 py-1 bg-emerald-700 hover:bg-emerald-800 text-white rounded font-mono font-bold text-xs flex items-center gap-1 transition-all shadow-xs active:scale-95 cursor-pointer"
-                  title="Manually trigger pedestrian crossing phase now"
-                >
-                  <Footprints className="w-3.5 h-3.5" /> TRIGGER NOW
-                </button>
-
-                {/* Configure */}
-                <button
-                  type="button"
-                  onClick={() => setShowPedestrianConfigModal(true)}
-                  className="px-2.5 py-1 bg-slate-100 hover:bg-slate-200 text-slate-700 border border-slate-300 rounded font-mono font-bold text-xs flex items-center gap-1 transition-colors"
-                >
-                  <Settings className="w-3.5 h-3.5" /> CONFIG
-                </button>
-
-                {/* Audit Events */}
-                <button
-                  type="button"
-                  onClick={handleFetchPedestrianEvents}
-                  className="px-2.5 py-1 bg-slate-100 hover:bg-slate-200 text-slate-700 border border-slate-300 rounded font-mono font-bold text-xs flex items-center gap-1 transition-colors"
-                >
-                  <History className="w-3.5 h-3.5" /> EVENTS
-                </button>
-
-                {/* Emergency Override Button */}
-                {isPedActive && (
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setEmergencyConfirmed(false);
-                      setEmergencyTargetApproach(activeApproachKey);
-                      setShowEmergencyOverrideModal(true);
-                    }}
-                    className="px-3 py-1 bg-red-700 hover:bg-red-800 text-white rounded font-mono font-bold text-xs flex items-center gap-1 shadow-md animate-pulse active:scale-95 cursor-pointer"
-                  >
-                    <AlertOctagon className="w-3.5 h-3.5" /> EMERGENCY OVERRIDE
-                  </button>
-                )}
-              </div>
-            </div>
-
-            {/* Active Pedestrian Phase Display (Section 9) */}
-            {isPedActive ? (
-              <div className="pt-4 space-y-3 font-mono">
-                <div className="grid grid-cols-1 md:grid-cols-12 gap-3 items-center">
-                  {/* Digital Countdown Box */}
-                  <div className="md:col-span-4 bg-rose-600 text-white p-4 rounded-lg flex flex-col items-center justify-center shadow-inner text-center">
-                    <span className="text-[10px] uppercase font-bold tracking-widest text-rose-200">
-                      CROSSING COUNTDOWN
-                    </span>
-                    <div className="text-4xl sm:text-5xl font-extrabold tracking-tighter my-0.5">
-                      {remainingSec}
-                      <span className="text-xs font-normal text-rose-200 ml-1">sec remaining</span>
-                    </div>
-                    {/* Linear Countdown Progress Bar */}
-                    <div className="w-full bg-rose-800/80 rounded-full h-2 mt-1 overflow-hidden">
-                      <div
-                        className="bg-white h-2 rounded-full transition-all duration-1000 ease-linear"
-                        style={{
-                          width: `${Math.min(100, Math.max(0, (remainingSec / (pedestrianTelemetry?.pedestrianPhaseDuration || 30)) * 100))}%`
-                        }}
-                      />
-                    </div>
-                  </div>
-
-                  {/* All Vehicle Signals Status Banner */}
-                  <div className="md:col-span-8 bg-white border border-rose-300 rounded-lg p-4 space-y-2">
-                    <div className="flex items-center justify-between">
-                      <div className="flex items-center gap-2">
-                        <span className="w-3 h-3 rounded-full bg-red-600 animate-ping" />
-                        <span className="text-xs font-extrabold text-rose-950 uppercase tracking-wide">
-                          ALL VEHICLE SIGNALS: 🔴 RED
-                        </span>
-                      </div>
-                      <span className="text-[10px] text-rose-700 font-bold bg-rose-100 px-2 py-0.5 rounded">
-                        PROTECTED CROSSWALK WINDOW
-                      </span>
-                    </div>
-
-                    {/* Approaches Grid Showing All RED */}
-                    <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 pt-1">
-                      {approachesList.map((app) => (
-                        <div
-                          key={app.key}
-                          className="p-2 bg-red-50 border border-red-200 rounded flex items-center justify-between"
-                        >
-                          <span className="text-[11px] font-bold text-slate-800">{app.direction}</span>
-                          <span className="px-1.5 py-0.5 bg-red-600 text-white text-[9px] font-extrabold rounded">
-                            🔴 RED
-                          </span>
-                        </div>
-                      ))}
-                    </div>
-
-                    <div className="flex items-center justify-between text-[10px] text-slate-500 pt-1 border-t border-slate-100">
-                      <span>Adaptive Optimization: <strong className="text-rose-700">PAUSED</strong></span>
-                      <span>Manual Green Changes: <strong className="text-rose-700">BLOCKED</strong></span>
-                      <span>Next Phase: <strong className="text-emerald-700">ADAPTIVE AUTO</strong></span>
-                    </div>
-                  </div>
-                </div>
-              </div>
-            ) : (
-              /* Scheduled / Inactive Phase Display */
-              <div className="pt-3 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 font-mono text-xs">
-                <div className="p-3 bg-[#F6F8FA] rounded border border-[#DCE4EA]">
-                  <span className="text-[10px] text-slate-500 font-bold uppercase block">NEXT PEDESTRIAN CROSSING</span>
-                  <div className="text-base font-extrabold text-[#245B84] mt-0.5 flex items-center gap-1.5">
-                    <Clock className="w-4 h-4 text-[#245B84]" />
-                    <span>In {formatTimerSeconds(timeToNextSec)}</span>
-                  </div>
-                  <span className="text-[9px] text-slate-400 block mt-0.5">Authoritative Server Timer</span>
-                </div>
-
-                <div className="p-3 bg-[#F6F8FA] rounded border border-[#DCE4EA]">
-                  <span className="text-[10px] text-slate-500 font-bold uppercase block">INTERVAL SCHEDULE</span>
-                  <div className="text-base font-extrabold text-slate-800 mt-0.5">
-                    {isDemo ? '10 Seconds' : '10 Minutes (600s)'}
-                  </div>
-                  <span className="text-[9px] text-slate-400 block mt-0.5">
-                    {isDemo ? 'Simulation Testing Mode' : 'Default Production Setting'}
-                  </span>
-                </div>
-
-                <div className="p-3 bg-[#F6F8FA] rounded border border-[#DCE4EA]">
-                  <span className="text-[10px] text-slate-500 font-bold uppercase block">CROSSING DURATION</span>
-                  <div className="text-base font-extrabold text-emerald-700 mt-0.5">
-                    {pedestrianTelemetry?.pedestrianPhaseDuration ?? pedConfigDuration} Seconds
-                  </div>
-                  <span className="text-[9px] text-slate-400 block mt-0.5">All-Red Protected Hold</span>
-                </div>
-
-                <div className="p-3 bg-[#F6F8FA] rounded border border-[#DCE4EA]">
-                  <span className="text-[10px] text-slate-500 font-bold uppercase block">SAFETY STATUS</span>
-                  <div className="text-base font-extrabold text-emerald-700 mt-0.5 flex items-center gap-1.5">
-                    <ShieldCheck className="w-4 h-4 text-emerald-600" />
-                    <span>{isEnabled ? 'SYSTEM ARMED' : 'DISABLED'}</span>
-                  </div>
-                  <span className="text-[9px] text-slate-400 block mt-0.5">
-                    Applies to all {approachesList.length} Approaches
-                  </span>
-                </div>
-              </div>
-            )}
-          </div>
-        );
-      })()}
-
-      {/* SECTION 20 & 7: ACTIVE ADAPTIVE OPTIMIZER INTELLIGENCE CARD */}
-      <div className="bg-white rounded-lg border border-[#DCE4EA] shadow-xs p-5 space-y-4">
-        <div className="flex flex-col md:flex-row md:items-center justify-between gap-3 border-b border-[#DCE4EA] pb-3">
-          <div className="flex items-center gap-2">
-            <Activity className="w-5 h-5 text-[#245B84]" />
-            <h2 className="text-xs font-mono font-extrabold text-slate-800 uppercase">
-              REAL-TIME ADAPTIVE OPTIMIZER TELEMETRY
-            </h2>
-          </div>
-          <div className="flex items-center gap-2">
-            <span className="px-2.5 py-1 bg-slate-100 text-slate-700 border border-slate-300 rounded font-mono font-bold text-xs">
-              JUNCTION #{selectedJunctionId} ({approachesList.length}-APPROACH DYNAMIC)
-            </span>
-          </div>
-        </div>
-
-        {/* Real-time telemetry row matching prompt Section 20 */}
-        <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-8 gap-3">
-          <div className="p-3 bg-[#F6F8FA] rounded border border-[#DCE4EA]">
-            <span className="text-[10px] font-mono text-slate-500 font-bold uppercase block">MODE</span>
-            <span className="text-sm font-extrabold font-mono text-slate-800">{signalData?.mode || 'AUTOMATIC'}</span>
-          </div>
-
-          <div className="p-3 bg-emerald-50 rounded border border-emerald-200">
-            <span className="text-[10px] font-mono text-emerald-700 font-bold uppercase block">CURRENT APPROACH</span>
-            <span className="text-sm font-extrabold font-mono text-emerald-800 uppercase truncate block">
-              {activeApproachData?.name || activeApproachKey}
-            </span>
-          </div>
-
-          <div className="p-3 bg-[#F6F8FA] rounded border border-[#DCE4EA]">
-            <span className="text-[10px] font-mono text-slate-500 font-bold uppercase block">QUEUE</span>
-            <span className="text-sm font-extrabold font-mono text-[#245B84]">
-              {activeApproachData?.queue_length ?? 0} veh
-            </span>
-          </div>
-
-          <div className="p-3 bg-[#F6F8FA] rounded border border-[#DCE4EA]">
-            <span className="text-[10px] font-mono text-slate-500 font-bold uppercase block">VEHICLES</span>
-            <span className="text-sm font-extrabold font-mono text-slate-800">
-              {activeApproachData?.vehicle_count ?? 0}
-            </span>
-          </div>
-
-          <div className="p-3 bg-[#F6F8FA] rounded border border-[#DCE4EA]">
-            <span className="text-[10px] font-mono text-slate-500 font-bold uppercase block">WAITING</span>
-            <span className="text-sm font-extrabold font-mono text-slate-800">
-              {activeApproachData?.waiting_time ?? 0} sec
-            </span>
-          </div>
-
-          <div className="p-3 bg-[#F6F8FA] rounded border border-[#DCE4EA]">
-            <span className="text-[10px] font-mono text-slate-500 font-bold uppercase block">DENSITY</span>
-            <span className="text-sm font-extrabold font-mono text-slate-800">
-              {activeApproachData?.traffic_density ?? 'MODERATE'}
-            </span>
-          </div>
-
-          <div className="p-3 bg-[#F6F8FA] rounded border border-[#DCE4EA]">
-            <span className="text-[10px] font-mono text-slate-500 font-bold uppercase block">PRIORITY SCORE</span>
-            <span className="text-sm font-extrabold font-mono text-[#245B84]">
-              {activeApproachData?.priority_score ?? 0} pts
-            </span>
-          </div>
-
-          <div className="p-3 bg-emerald-50 rounded border border-emerald-200">
-            <span className="text-[10px] font-mono text-emerald-700 font-bold uppercase block">GREEN TIME</span>
-            <span className="text-sm font-extrabold font-mono text-emerald-800">
-              {signalData?.countdown}s ({activeApproachData?.green_duration ?? 30}s max)
-            </span>
-          </div>
-        </div>
-
-        {/* Explainable Decision Reasoning & Next Step (Section 13 & 20) */}
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-          <div className="md:col-span-2 p-3 bg-slate-50 rounded border border-slate-200 text-xs font-mono space-y-1">
-            <span className="font-bold text-[#245B84] uppercase">DECISION REASON:</span>
-            <p className="text-slate-700 leading-relaxed font-semibold">
-              {signalData?.reasoning || optimizationData?.explanation || 'Optimal multi-approach balance evaluated based on queue length and accumulated wait.'}
-            </p>
-          </div>
-          <div className="p-3 bg-amber-50 rounded border border-amber-200 text-xs font-mono space-y-1">
-            <span className="font-bold text-amber-800 uppercase">NEXT REASSESSMENT:</span>
-            <p className="text-amber-900 leading-relaxed">
-              Dynamic recalculation triggers upon phase expiry or early queue clearance (Anti-waste active).
-            </p>
-          </div>
-        </div>
-      </div>
-
-      {/* SECTION: INTERACTIVE DETECTION RADIUS (20m) & ZERO-WASTE AUTO-SWITCH RADAR */}
-      <IntersectionRadiusRadar
-        junctionId={selectedJunctionId}
-        junctionName={activeJunction?.name || `Junction #${selectedJunctionId}`}
-        activeApproach={activeApproachKey}
-        activeSignal={signalData?.state || 'GREEN'}
-        countdown={signalData?.countdown || 30}
-        approaches={approachesList.map((a) => ({
-          key: a.key,
-          name: a.name,
-          direction: a.direction,
-          vehicle_count: a.vehicle_count,
-          queue_length: a.queue_length,
-          signal: a.signal,
-          priority_score: a.priority_score
-        }))}
-        onRefresh={fetchJunctionData}
-        onApproachSwitch={(nextApproach: string, nextState: string = 'GREEN') => {
-          setSignalData((prev: any) => ({
-            ...prev,
-            active_approach: nextApproach,
-            active_phase: nextApproach,
-            state: nextState,
-            countdown: 30,
-            mode: 'AUTOMATIC',
-            reasoning: `Zero-waste automatic transmission: 0 vehicles in 20m radius. Switched to ${nextApproach} Approach.`,
-            approaches: {
-              ...(prev?.approaches || {}),
-              [activeApproachKey]: {
-                ...(prev?.approaches?.[activeApproachKey] || {}),
-                signal: 'RED',
-                vehicle_count: 0,
-                queue_length: 0
-              },
-              [nextApproach]: {
-                ...(prev?.approaches?.[nextApproach] || {}),
-                signal: nextState
-              }
-            }
-          }));
-          setOverrideMessage(`⚡ Automatic transmission: Zero vehicles in radius — Switched green to ${nextApproach} approach.`);
-        }}
-      />
 
       {/* SECTION 1, 3, 8 & 13: DYNAMIC VIDEO PANELS WITH MOVEMENT VS STOPPING SIMULATION LAYER */}
       <div className="space-y-3">
@@ -1579,6 +1295,484 @@ export const Signals: React.FC = () => {
           })}
         </div>
       </div>
+
+      {/* SECTION 20 & 7: ACTIVE ADAPTIVE OPTIMIZER INTELLIGENCE CARD */}
+      <div className="bg-white rounded-lg border border-[#DCE4EA] shadow-xs p-5 space-y-4">
+        <div className="flex flex-col md:flex-row md:items-center justify-between gap-3 border-b border-[#DCE4EA] pb-3">
+          <div className="flex items-center gap-2">
+            <Activity className="w-5 h-5 text-[#245B84]" />
+            <h2 className="text-xs font-mono font-extrabold text-slate-800 uppercase">
+              REAL-TIME ADAPTIVE OPTIMIZER TELEMETRY
+            </h2>
+          </div>
+          <div className="flex items-center gap-2">
+            <span className="px-2.5 py-1 bg-slate-100 text-slate-700 border border-slate-300 rounded font-mono font-bold text-xs">
+              JUNCTION #{selectedJunctionId} ({approachesList.length}-APPROACH DYNAMIC)
+            </span>
+          </div>
+        </div>
+
+        {/* Real-time telemetry row matching prompt Section 20 */}
+        <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-8 gap-3">
+          <div className="p-3 bg-[#F6F8FA] rounded border border-[#DCE4EA]">
+            <span className="text-[10px] font-mono text-slate-500 font-bold uppercase block">MODE</span>
+            <span className="text-sm font-extrabold font-mono text-slate-800">{signalData?.mode || 'AUTOMATIC'}</span>
+          </div>
+
+          <div className="p-3 bg-emerald-50 rounded border border-emerald-200">
+            <span className="text-[10px] font-mono text-emerald-700 font-bold uppercase block">CURRENT APPROACH</span>
+            <span className="text-sm font-extrabold font-mono text-emerald-800 uppercase truncate block">
+              {activeApproachData?.name || activeApproachKey}
+            </span>
+          </div>
+
+          <div className="p-3 bg-[#F6F8FA] rounded border border-[#DCE4EA]">
+            <span className="text-[10px] font-mono text-slate-500 font-bold uppercase block">QUEUE</span>
+            <span className="text-sm font-extrabold font-mono text-[#245B84]">
+              {activeApproachData?.queue_length ?? 0} veh
+            </span>
+          </div>
+
+          <div className="p-3 bg-[#F6F8FA] rounded border border-[#DCE4EA]">
+            <span className="text-[10px] font-mono text-slate-500 font-bold uppercase block">VEHICLES</span>
+            <span className="text-sm font-extrabold font-mono text-slate-800">
+              {activeApproachData?.vehicle_count ?? 0}
+            </span>
+          </div>
+
+          <div className="p-3 bg-[#F6F8FA] rounded border border-[#DCE4EA]">
+            <span className="text-[10px] font-mono text-slate-500 font-bold uppercase block">WAITING</span>
+            <span className="text-sm font-extrabold font-mono text-slate-800">
+              {activeApproachData?.waiting_time ?? 0} sec
+            </span>
+          </div>
+
+          <div className="p-3 bg-[#F6F8FA] rounded border border-[#DCE4EA]">
+            <span className="text-[10px] font-mono text-slate-500 font-bold uppercase block">DENSITY</span>
+            <span className="text-sm font-extrabold font-mono text-slate-800">
+              {activeApproachData?.traffic_density ?? 'MODERATE'}
+            </span>
+          </div>
+
+          <div className="p-3 bg-[#F6F8FA] rounded border border-[#DCE4EA]">
+            <span className="text-[10px] font-mono text-slate-500 font-bold uppercase block">PRIORITY SCORE</span>
+            <span className="text-sm font-extrabold font-mono text-[#245B84]">
+              {activeApproachData?.priority_score ?? 0} pts
+            </span>
+          </div>
+
+          <div className="p-3 bg-emerald-50 rounded border border-emerald-200">
+            <span className="text-[10px] font-mono text-emerald-700 font-bold uppercase block">GREEN TIME</span>
+            <span className="text-sm font-extrabold font-mono text-emerald-800">
+              {signalData?.countdown}s ({activeApproachData?.green_duration ?? 30}s max)
+            </span>
+          </div>
+        </div>
+
+        {/* Explainable Decision Reasoning & Next Step (Section 13 & 20) */}
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+          <div className="md:col-span-2 p-3 bg-slate-50 rounded border border-slate-200 text-xs font-mono space-y-1">
+            <span className="font-bold text-[#245B84] uppercase">DECISION REASON:</span>
+            <p className="text-slate-700 leading-relaxed font-semibold">
+              {signalData?.reasoning || optimizationData?.explanation || 'Optimal multi-approach balance evaluated based on queue length and accumulated wait.'}
+            </p>
+          </div>
+          <div className="p-3 bg-amber-50 rounded border border-amber-200 text-xs font-mono space-y-1">
+            <span className="font-bold text-amber-800 uppercase">NEXT REASSESSMENT:</span>
+            <p className="text-amber-900 leading-relaxed">
+              Dynamic recalculation triggers upon phase expiry or early queue clearance (Anti-waste active).
+            </p>
+          </div>
+        </div>
+      </div>
+
+      </div>
+      )}
+
+      {/* TAB 2: TRAFFIC DEMAND & 20m RADAR */}
+      {activeSignalTab === 'DEMAND' && (
+        <div className="space-y-4 animate-fadeIn">
+          <IntersectionRadiusRadar
+            junctionId={selectedJunctionId}
+            junctionName={activeJunction?.name || `Junction #${selectedJunctionId}`}
+            activeApproach={activeApproachKey}
+            activeSignal={signalData?.state || 'GREEN'}
+            countdown={signalData?.countdown || 30}
+            approaches={approachesList.map((a) => ({
+              key: a.key,
+              name: a.name,
+              direction: a.direction,
+              vehicle_count: a.vehicle_count,
+              queue_length: a.queue_length,
+              signal: a.signal,
+              priority_score: a.priority_score
+            }))}
+            onRefresh={fetchJunctionData}
+            onApproachSwitch={(nextApproach: string, nextState: string = 'GREEN') => {
+              setSignalData((prev: any) => ({
+                ...prev,
+                active_approach: nextApproach,
+                active_phase: nextApproach,
+                state: nextState,
+                countdown: 30,
+                mode: 'AUTOMATIC',
+                reasoning: `Zero-waste automatic transmission: 0 vehicles in 20m radius. Switched to ${nextApproach} Approach.`,
+                approaches: {
+                  ...(prev?.approaches || {}),
+                  [activeApproachKey]: {
+                    ...(prev?.approaches?.[activeApproachKey] || {}),
+                    signal: 'RED',
+                    vehicle_count: 0,
+                    queue_length: 0
+                  },
+                  [nextApproach]: {
+                    ...(prev?.approaches?.[nextApproach] || {}),
+                    signal: nextState
+                  }
+                }
+              }));
+              setOverrideMessage(`⚡ Automatic transmission: Zero vehicles in radius — Switched green to ${nextApproach} approach.`);
+            }}
+          />
+        </div>
+      )}
+
+
+      {/* TAB 3: PEDESTRIAN SAFETY PHASE */}
+      {activeSignalTab === 'PEDESTRIAN' && (
+        <div className="space-y-4 animate-fadeIn">
+          {(() => {
+        const isPedActive = pedestrianTelemetry?.isActive || pedestrianTelemetry?.is_active || false;
+        const pedState = pedestrianTelemetry?.pedestrianPhaseState || pedestrianTelemetry?.pedestrian_phase_state || 'NORMAL';
+        const pedStatus = pedestrianTelemetry?.pedestrianPhaseStatus || pedestrianTelemetry?.pedestrian_phase_status || 'SCHEDULED';
+        const remainingSec = pedestrianTelemetry?.remainingPedestrianSeconds ?? pedestrianTelemetry?.remaining_seconds ?? 0;
+        const timeToNextSec = pedestrianTelemetry?.timeToNextSeconds ?? pedestrianTelemetry?.time_to_next_seconds ?? 600;
+        const isDemo = pedestrianTelemetry?.isDemoMode ?? pedestrianTelemetry?.is_demo_mode ?? pedConfigDemoMode;
+        const isEnabled = pedestrianTelemetry?.pedestrianPhaseEnabled ?? pedestrianTelemetry?.pedestrian_phase_enabled ?? true;
+
+        return (
+          <div
+            className={`rounded-lg border p-4 sm:p-5 transition-all shadow-xs ${
+              isPedActive
+                ? 'bg-rose-50/80 border-rose-400 ring-2 ring-rose-500/20 shadow-md'
+                : pedState === 'TRANSITION' || pedState === 'ALL_RED'
+                ? 'bg-amber-50/80 border-amber-400 ring-1 ring-amber-400/20'
+                : 'bg-white border-[#DCE4EA]'
+            }`}
+          >
+            {/* Header row */}
+            <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 border-b border-slate-200/80 pb-3">
+              <div className="flex items-center gap-2.5">
+                <div
+                  className={`p-2 rounded-lg ${
+                    isPedActive
+                      ? 'bg-rose-600 text-white animate-bounce'
+                      : 'bg-[#EEF6FC] text-[#245B84]'
+                  }`}
+                >
+                  <Footprints className="w-5 h-5" />
+                </div>
+                <div>
+                  <div className="flex items-center gap-2">
+                    <h2 className="text-xs sm:text-sm font-mono font-extrabold text-slate-800 uppercase tracking-tight">
+                      PEDESTRIAN CROSSING SAFETY PHASE
+                    </h2>
+                    {isDemo && (
+                      <span className="px-2 py-0.5 bg-amber-500 text-white text-[9px] font-mono font-extrabold rounded uppercase tracking-wider animate-pulse">
+                        DEMO / TEST MODE
+                      </span>
+                    )}
+                  </div>
+                  <p className="text-[11px] text-slate-500 font-mono">
+                    Protected Pedestrian Window (10-min scheduled interval / 30s All-Red hold)
+                  </p>
+                </div>
+              </div>
+
+              {/* Status Badges & Quick Action Buttons */}
+              <div className="flex flex-wrap items-center gap-2 w-full sm:w-auto justify-end">
+                {/* Active Status Badge */}
+                {isPedActive ? (
+                  <span className="px-3 py-1 bg-rose-600 text-white rounded font-mono font-extrabold text-xs flex items-center gap-1.5 shadow-sm animate-pulse">
+                    <span className="w-2 h-2 rounded-full bg-white" />
+                    PEDESTRIAN CROSSING ACTIVE
+                  </span>
+                ) : pedState === 'TRANSITION' || pedState === 'ALL_RED' ? (
+                  <span className="px-3 py-1 bg-amber-500 text-white rounded font-mono font-bold text-xs flex items-center gap-1.5">
+                    <AlertTriangle className="w-3.5 h-3.5" />
+                    CLEARING VEHICLES (ALL-RED PENDING)
+                  </span>
+                ) : pedState === 'PEDESTRIAN_COMPLETE' || pedState === 'TRANSITION_BACK' ? (
+                  <span className="px-3 py-1 bg-emerald-600 text-white rounded font-mono font-bold text-xs flex items-center gap-1.5">
+                    <CheckCircle2 className="w-3.5 h-3.5" />
+                    RETURNING TO ADAPTIVE CONTROL
+                  </span>
+                ) : (
+                  <span className="px-3 py-1 bg-slate-100 text-slate-700 border border-slate-300 rounded font-mono font-bold text-xs flex items-center gap-1.5">
+                    <Timer className="w-3.5 h-3.5 text-[#245B84]" />
+                    STATUS: SCHEDULED
+                  </span>
+                )}
+
+                {/* Demo Mode Toggle */}
+                <button
+                  type="button"
+                  onClick={() => handleToggleDemoMode(!isDemo)}
+                  className={`px-2.5 py-1 rounded text-xs font-mono font-bold border transition-colors ${
+                    isDemo
+                      ? 'bg-amber-100 text-amber-900 border-amber-300 hover:bg-amber-200'
+                      : 'bg-slate-100 hover:bg-slate-200 text-slate-700 border-slate-300'
+                  }`}
+                  title={isDemo ? 'Switch to Production 10-Minute interval' : 'Switch to Demo 10-Second interval'}
+                >
+                  {isDemo ? 'DEMO: 10s (ACTIVE)' : 'PROD: 10m'}
+                </button>
+
+                {/* Instant Trigger */}
+                <button
+                  type="button"
+                  onClick={handleTriggerPedestrian}
+                  className="px-3 py-1 bg-emerald-700 hover:bg-emerald-800 text-white rounded font-mono font-bold text-xs flex items-center gap-1 transition-all shadow-xs active:scale-95 cursor-pointer"
+                  title="Manually trigger pedestrian crossing phase now"
+                >
+                  <Footprints className="w-3.5 h-3.5" /> TRIGGER NOW
+                </button>
+
+                {/* Configure */}
+                <button
+                  type="button"
+                  onClick={() => setShowPedestrianConfigModal(true)}
+                  className="px-2.5 py-1 bg-slate-100 hover:bg-slate-200 text-slate-700 border border-slate-300 rounded font-mono font-bold text-xs flex items-center gap-1 transition-colors"
+                >
+                  <Settings className="w-3.5 h-3.5" /> CONFIG
+                </button>
+
+                {/* Audit Events */}
+                <button
+                  type="button"
+                  onClick={handleFetchPedestrianEvents}
+                  className="px-2.5 py-1 bg-slate-100 hover:bg-slate-200 text-slate-700 border border-slate-300 rounded font-mono font-bold text-xs flex items-center gap-1 transition-colors"
+                >
+                  <History className="w-3.5 h-3.5" /> EVENTS
+                </button>
+
+                {/* Emergency Override Button */}
+                {isPedActive && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setEmergencyConfirmed(false);
+                      setEmergencyTargetApproach(activeApproachKey);
+                      setShowEmergencyOverrideModal(true);
+                    }}
+                    className="px-3 py-1 bg-red-700 hover:bg-red-800 text-white rounded font-mono font-bold text-xs flex items-center gap-1 shadow-md animate-pulse active:scale-95 cursor-pointer"
+                  >
+                    <AlertOctagon className="w-3.5 h-3.5" /> EMERGENCY OVERRIDE
+                  </button>
+                )}
+              </div>
+            </div>
+
+            {/* Active Pedestrian Phase Display (Section 9) */}
+            {isPedActive ? (
+              <div className="pt-4 space-y-3 font-mono">
+                <div className="grid grid-cols-1 md:grid-cols-12 gap-3 items-center">
+                  {/* Digital Countdown Box */}
+                  <div className="md:col-span-4 bg-rose-600 text-white p-4 rounded-lg flex flex-col items-center justify-center shadow-inner text-center">
+                    <span className="text-[10px] uppercase font-bold tracking-widest text-rose-200">
+                      CROSSING COUNTDOWN
+                    </span>
+                    <div className="text-4xl sm:text-5xl font-extrabold tracking-tighter my-0.5">
+                      {remainingSec}
+                      <span className="text-xs font-normal text-rose-200 ml-1">sec remaining</span>
+                    </div>
+                    {/* Linear Countdown Progress Bar */}
+                    <div className="w-full bg-rose-800/80 rounded-full h-2 mt-1 overflow-hidden">
+                      <div
+                        className="bg-white h-2 rounded-full transition-all duration-1000 ease-linear"
+                        style={{
+                          width: `${Math.min(100, Math.max(0, (remainingSec / (pedestrianTelemetry?.pedestrianPhaseDuration || 30)) * 100))}%`
+                        }}
+                      />
+                    </div>
+                  </div>
+
+                  {/* All Vehicle Signals Status Banner */}
+                  <div className="md:col-span-8 bg-white border border-rose-300 rounded-lg p-4 space-y-2">
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-2">
+                        <span className="w-3 h-3 rounded-full bg-red-600 animate-ping" />
+                        <span className="text-xs font-extrabold text-rose-950 uppercase tracking-wide">
+                          ALL VEHICLE SIGNALS: 🔴 RED
+                        </span>
+                      </div>
+                      <span className="text-[10px] text-rose-700 font-bold bg-rose-100 px-2 py-0.5 rounded">
+                        PROTECTED CROSSWALK WINDOW
+                      </span>
+                    </div>
+
+                    {/* Approaches Grid Showing All RED */}
+                    <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 pt-1">
+                      {approachesList.map((app) => (
+                        <div
+                          key={app.key}
+                          className="p-2 bg-red-50 border border-red-200 rounded flex items-center justify-between"
+                        >
+                          <span className="text-[11px] font-bold text-slate-800">{app.direction}</span>
+                          <span className="px-1.5 py-0.5 bg-red-600 text-white text-[9px] font-extrabold rounded">
+                            🔴 RED
+                          </span>
+                        </div>
+                      ))}
+                    </div>
+
+                    <div className="flex items-center justify-between text-[10px] text-slate-500 pt-1 border-t border-slate-100">
+                      <span>Adaptive Optimization: <strong className="text-rose-700">PAUSED</strong></span>
+                      <span>Manual Green Changes: <strong className="text-rose-700">BLOCKED</strong></span>
+                      <span>Next Phase: <strong className="text-emerald-700">ADAPTIVE AUTO</strong></span>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            ) : (
+              /* Scheduled / Inactive Phase Display */
+              <div className="pt-3 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 font-mono text-xs">
+                <div className="p-3 bg-[#F6F8FA] rounded border border-[#DCE4EA]">
+                  <span className="text-[10px] text-slate-500 font-bold uppercase block">NEXT PEDESTRIAN CROSSING</span>
+                  <div className="text-base font-extrabold text-[#245B84] mt-0.5 flex items-center gap-1.5">
+                    <Clock className="w-4 h-4 text-[#245B84]" />
+                    <span>In {formatTimerSeconds(timeToNextSec)}</span>
+                  </div>
+                  <span className="text-[9px] text-slate-400 block mt-0.5">Authoritative Server Timer</span>
+                </div>
+
+                <div className="p-3 bg-[#F6F8FA] rounded border border-[#DCE4EA]">
+                  <span className="text-[10px] text-slate-500 font-bold uppercase block">INTERVAL SCHEDULE</span>
+                  <div className="text-base font-extrabold text-slate-800 mt-0.5">
+                    {isDemo ? '10 Seconds' : '10 Minutes (600s)'}
+                  </div>
+                  <span className="text-[9px] text-slate-400 block mt-0.5">
+                    {isDemo ? 'Simulation Testing Mode' : 'Default Production Setting'}
+                  </span>
+                </div>
+
+                <div className="p-3 bg-[#F6F8FA] rounded border border-[#DCE4EA]">
+                  <span className="text-[10px] text-slate-500 font-bold uppercase block">CROSSING DURATION</span>
+                  <div className="text-base font-extrabold text-emerald-700 mt-0.5">
+                    {pedestrianTelemetry?.pedestrianPhaseDuration ?? pedConfigDuration} Seconds
+                  </div>
+                  <span className="text-[9px] text-slate-400 block mt-0.5">All-Red Protected Hold</span>
+                </div>
+
+                <div className="p-3 bg-[#F6F8FA] rounded border border-[#DCE4EA]">
+                  <span className="text-[10px] text-slate-500 font-bold uppercase block">SAFETY STATUS</span>
+                  <div className="text-base font-extrabold text-emerald-700 mt-0.5 flex items-center gap-1.5">
+                    <ShieldCheck className="w-4 h-4 text-emerald-600" />
+                    <span>{isEnabled ? 'SYSTEM ARMED' : 'DISABLED'}</span>
+                  </div>
+                  <span className="text-[9px] text-slate-400 block mt-0.5">
+                    Applies to all {approachesList.length} Approaches
+                  </span>
+                </div>
+              </div>
+            )}
+          </div>
+        );
+      })()}
+        </div>
+      )}
+
+      {/* TAB 4: DECISION DETAILS & AUDIT */}
+      {activeSignalTab === 'DECISIONS' && (
+        <div className="space-y-4 animate-fadeIn">
+          {/* Explainable Decision Reasoning Card */}
+          <div className="bg-white p-4 sm:p-5 rounded-xl border border-[#DCE4EA] shadow-2xs space-y-3">
+            <h3 className="text-xs font-mono font-bold text-slate-800 uppercase">
+              Explainable AI Signal Decision Reasoning
+            </h3>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-3 text-xs font-sans">
+              <div className="p-3 bg-[#F8FAFC] rounded-lg border border-slate-200">
+                <span className="font-bold text-[#245B84] block mb-1">CURRENT REASONING</span>
+                <p className="text-slate-700 leading-relaxed">
+                  {signalData?.reasoning || optimizationData?.explanation || 'Optimal multi-approach balance evaluated based on queue length and accumulated wait.'}
+                </p>
+              </div>
+              <div className="p-3 bg-amber-50 rounded-lg border border-amber-200">
+                <span className="font-bold text-amber-800 block mb-1">REASSESSMENT TRIGGER</span>
+                <p className="text-amber-900 leading-relaxed">
+                  Dynamic recalculation triggers upon phase countdown expiry or zero-vehicle detection in the 20m radius.
+                </p>
+              </div>
+            </div>
+          </div>
+
+          {/* Decision Audit History Table */}
+          <div className="bg-white p-4 sm:p-5 rounded-xl border border-[#DCE4EA] shadow-2xs space-y-3">
+            <div className="flex items-center justify-between border-b border-[#DCE4EA] pb-3">
+              <div>
+                <h3 className="text-xs font-mono font-bold text-slate-800 uppercase">
+                  Signal Decision Audit History (Junction #{selectedJunctionId})
+                </h3>
+                <p className="text-[11px] text-slate-500 font-sans">
+                  Chronological record of automated and manual signal phase cycles
+                </p>
+              </div>
+              <span className="text-[11px] font-mono font-bold text-slate-600 bg-slate-100 px-2.5 py-1 rounded-md border border-slate-200">
+                {decisionHistory.length} CYCLES STORED
+              </span>
+            </div>
+
+            {decisionHistory.length === 0 ? (
+              <p className="text-xs font-mono text-slate-500 py-8 text-center">
+                No signal decision history recorded for Junction #{selectedJunctionId} yet.
+              </p>
+            ) : (
+              <div className="overflow-x-auto">
+                <table className="w-full text-left font-mono text-xs divide-y divide-[#DCE4EA]">
+                  <thead className="bg-[#F8FAFC] text-slate-600 text-[10px] uppercase font-bold">
+                    <tr>
+                      <th className="py-2.5 px-3">Time</th>
+                      <th className="py-2.5 px-3">Approach</th>
+                      <th className="py-2.5 px-3">Queue</th>
+                      <th className="py-2.5 px-3">Vehicles</th>
+                      <th className="py-2.5 px-3">Wait</th>
+                      <th className="py-2.5 px-3">Priority</th>
+                      <th className="py-2.5 px-3">Green Time</th>
+                      <th className="py-2.5 px-3">Mode</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-[#DCE4EA] text-slate-800">
+                    {decisionHistory.map((d) => (
+                      <tr key={d.id} className="hover:bg-slate-50">
+                        <td className="py-2 px-3 text-[11px] text-slate-500 whitespace-nowrap">
+                          {new Date(d.timestamp).toLocaleTimeString()}
+                        </td>
+                        <td className="py-2 px-3 font-bold text-emerald-700">{d.approach_id}</td>
+                        <td className="py-2 px-3">{d.queue_length} veh</td>
+                        <td className="py-2 px-3">{d.vehicle_count}</td>
+                        <td className="py-2 px-3">{d.waiting_time}s</td>
+                        <td className="py-2 px-3 font-bold text-[#245B84]">{d.priority_score} pts</td>
+                        <td className="py-2 px-3 font-bold">{d.green_duration}s</td>
+                        <td className="py-2 px-3">
+                          <span
+                            className={`px-2 py-0.5 text-[9px] rounded font-bold ${
+                              d.mode === 'AUTOMATIC'
+                                ? 'bg-emerald-50 text-emerald-700 border border-emerald-200'
+                                : 'bg-amber-50 text-amber-700 border border-amber-200'
+                            }`}
+                          >
+                            {d.mode}
+                          </span>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
 
       {/* Manual Override Confirmation Modal */}
       {showOverrideModal && (

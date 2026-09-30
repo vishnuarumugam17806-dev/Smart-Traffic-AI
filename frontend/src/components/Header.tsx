@@ -51,6 +51,10 @@ export const Header: React.FC = () => {
   );
 
   useEffect(() => {
+    document.title = `VIGITRA AI — ${currentSectionName}`;
+  }, [currentSectionName]);
+
+  useEffect(() => {
     const timer = setInterval(() => {
       const now = new Date();
       setTimeStr(now.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' }));
@@ -105,8 +109,8 @@ export const Header: React.FC = () => {
     <header className="h-13 sm:h-14 border-b border-[#DCE4EA] bg-white px-3 sm:px-5 flex items-center justify-between sticky top-0 z-30 select-none shadow-2xs">
       {/* Left Minimal Breadcrumb */}
       <div className="flex items-center gap-2 overflow-hidden">
-        <span className="text-[11px] font-mono font-bold text-slate-400 uppercase tracking-wider hidden sm:inline">
-          VIGITRA
+        <span className="text-[11px] font-mono font-bold text-slate-500 uppercase tracking-wider hidden sm:inline">
+          VIGITRA AI
         </span>
         <span className="text-slate-300 text-xs hidden sm:inline">/</span>
         <h2 className="text-xs sm:text-sm font-bold text-slate-800 tracking-tight font-sans truncate">
@@ -305,7 +309,11 @@ export const Header: React.FC = () => {
         </div>
 
         {/* System Health / Connection Badge */}
-        <div className="flex items-center gap-1.5 px-2 py-1 sm:px-3 sm:py-1.5 rounded bg-[#EAF7EF] border border-[#D2EADA] text-xs">
+        <div className={`flex items-center gap-1.5 px-2 py-1 sm:px-3 sm:py-1.5 rounded text-xs border ${
+          isConnected
+            ? 'bg-[#EAF7EF] border-[#D2EADA]'
+            : 'bg-amber-50 border-amber-200'
+        }`}>
           {isConnected ? (
             <>
               <Wifi className="w-3.5 h-3.5 text-[#2E7D5B] shrink-0" />

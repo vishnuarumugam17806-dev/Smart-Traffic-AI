@@ -347,6 +347,68 @@ def seed_database():
             db.commit()
             print(f"[+] Seeded {db.query(VideoRecording).count()} Archive Video Recordings.")
 
+        # 9. Seed Multi-Category ANPR & Traffic Violations
+        if db.query(Violation).filter(Violation.violation_type == "WITHOUT_HELMET").count() == 0:
+            evidence_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "storage", "evidence"))
+            ev_files = []
+            if os.path.exists(evidence_dir):
+                ev_files = [f"/storage/evidence/{f}" for f in os.listdir(evidence_dir) if f.endswith(('.jpg', '.png'))]
+            if not ev_files:
+                ev_files = ["/sample_traffic.mp4"]
+
+            cat_violations = [
+                ("WITHOUT_HELMET", "TNXX1234", 0.94, "Review", 15),
+                ("WITHOUT_HELMET", "TNXX5678", 0.97, "Verified", 32),
+                ("WITHOUT_HELMET", "TNXX9012", 0.91, "Review", 48),
+                ("WITHOUT_HELMET", "KA05MN3821", 0.96, "Verified", 65),
+                ("WITHOUT_HELMET", "TN07CK7788", 0.93, "Pending", 90),
+                ("WITHOUT_HELMET", "KA51Z1234", 0.95, "Review", 120),
+                ("WITHOUT_SEATBELT", "TN01AB1234", 0.92, "Review", 25),
+                ("WITHOUT_SEATBELT", "DL02CP9012", 0.95, "Verified", 55),
+                ("WITHOUT_SEATBELT", "TS08EE8899", 0.89, "Pending", 80),
+                ("WITHOUT_SEATBELT", "TNXX1001", 0.94, "Verified", 110),
+                ("SIGNAL_JUMP", "TN01AB1234", 0.98, "Verified", 10),
+                ("SIGNAL_JUMP", "MH12DE5678", 0.95, "Review", 40),
+                ("SIGNAL_JUMP", "HR26BC9999", 0.96, "Verified", 70),
+                ("SIGNAL_JUMP", "KL07CD3333", 0.93, "Pending", 105),
+                ("SIGNAL_JUMP", "TNXX1003", 0.97, "Review", 135),
+                ("WRONG_LANE", "WB02EF7777", 0.91, "Review", 35),
+                ("WRONG_LANE", "TS09FA9999", 0.94, "Verified", 75),
+                ("WRONG_LANE", "GA01C8888", 0.88, "Pending", 115),
+                ("WRONG_WAY", "OR02XY4321", 0.96, "Verified", 20),
+                ("WRONG_WAY", "MP09AB3456", 0.93, "Review", 60),
+                ("WRONG_WAY", "CH01AB3333", 0.95, "Verified", 130),
+                ("SPEED_VIOLATION", "DL02CP9012", 0.99, "Verified", 18),
+                ("SPEED_VIOLATION", "KA02MB8080", 0.95, "Review", 50),
+                ("SPEED_VIOLATION", "HR51AU2345", 0.92, "Pending", 95),
+                ("SPEED_VIOLATION", "TS09FA9999", 0.97, "Verified", 140),
+                ("ILLEGAL_PARKING", "GJ01AB5555", 0.94, "Review", 45),
+                ("ILLEGAL_PARKING", "MH14GH9000", 0.90, "Pending", 85),
+                ("ILLEGAL_PARKING", "KL11BH2020", 0.95, "Verified", 125),
+                ("STOLEN_VEHICLES", "KA05MN3821", 0.98, "Verified", 12),
+                ("STOLEN_VEHICLES", "TN09BZ9999", 0.96, "Verified", 62),
+                ("STOLEN_VEHICLES", "TNXX1002", 0.95, "Review", 100),
+                ("CHALLAN_DEFAULTER", "TN01AB1234", 0.97, "Verified", 8),
+                ("CHALLAN_DEFAULTER", "TNXX1004", 0.93, "Review", 72),
+                ("SECURITY_WATCHLIST", "MH12PQ9999", 0.99, "Verified", 14),
+                ("SECURITY_WATCHLIST", "DL03CC4455", 0.94, "Review", 88)
+            ]
+            cam_count = max(1, len(cameras))
+            for i, (cat, plate, conf, stat, min_ago) in enumerate(cat_violations):
+                v_cam_id = cameras[i % cam_count].id if cameras else 1
+                v_img = ev_files[i % len(ev_files)]
+                db.add(Violation(
+                    violation_type=cat,
+                    camera_id=v_cam_id,
+                    license_plate=plate,
+                    confidence=conf,
+                    evidence_image=v_img,
+                    status=stat,
+                    timestamp=now_utc - timedelta(minutes=min_ago)
+                ))
+            db.commit()
+            print(f"[+] Seeded {len(cat_violations)} Multi-Category ANPR & Traffic Violations.")
+
         print("=" * 65)
         print("  [SUCCESS] Database Seeded Successfully with Complete Test Data!  ")
         print("=" * 65)

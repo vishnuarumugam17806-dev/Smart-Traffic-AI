@@ -147,6 +147,13 @@ def create_intersection(
 def get_cameras(db: Session = Depends(get_db)):
     return db.query(Camera).all()
 
+@router.get("/cameras/{camera_id}", response_model=CameraOut)
+def get_camera(camera_id: int, db: Session = Depends(get_db)):
+    camera = db.query(Camera).filter(Camera.id == camera_id).first()
+    if not camera:
+        raise HTTPException(status_code=404, detail="Camera not found")
+    return camera
+
 @router.post("/cameras", response_model=CameraOut, status_code=status.HTTP_201_CREATED)
 def create_camera(
     camera_in: CameraCreate,
@@ -1525,9 +1532,120 @@ def seed_example_anpr_observations(db: Session = Depends(get_db)):
         "total_observations": db.query(PlateObservation).count()
     }
 
-@router.get("/anpr", response_model=List[NumberPlateOut])
-def get_legacy_plates(db: Session = Depends(get_db)):
-    return db.query(NumberPlate).order_by(NumberPlate.timestamp.desc()).all()
+CATEGORY_LABELS = {
+    "WITHOUT_HELMET": "Without Helmet",
+    "WITHOUT_SEATBELT": "Without Seatbelt",
+    "SIGNAL_JUMP": "Signal Jump",
+    "WRONG_LANE": "Wrong Lane",
+    "WRONG_WAY": "Wrong Way",
+    "SPEED_VIOLATION": "Speed Violation",
+    "ILLEGAL_PARKING": "Illegal Parking",
+    "STOLEN_VEHICLES": "Stolen Vehicle",
+    "CHALLAN_DEFAULTER": "Challan Defaulter",
+    "SECURITY_WATCHLIST": "Security Watchlist",
+    "POLICE_WARRANT_STOLEN_VEHICLE": "Stolen Vehicle",
+    "VEHICLE_COMPLIANCE: Watchlist Match: Unpaid Traffic Fines": "Challan Defaulter"
+}
+
+@router.get("/anpr/categories")
+def get_anpr_categories(db: Session = Depends(get_db)):
+    """Returns available ANPR violation categories with count of records."""
+    counts = {}
+    violations = db.query(Violation.violation_type).all()
+    for v in violations:
+        v_type = v[0]
+        key = v_type
+        if "STOLEN" in v_type:
+            key = "STOLEN_VEHICLES"
+        elif "Unpaid" in v_type or "CHALLAN" in v_type:
+            key = "CHALLAN_DEFAULTER"
+        counts[key] = counts.get(key, 0) + 1
+
+    categories = [
+        {"id": "WITHOUT_HELMET", "label": "Without Helmet", "count": counts.get("WITHOUT_HELMET", 0)},
+        {"id": "WITHOUT_SEATBELT", "label": "Without Seatbelt", "count": counts.get("WITHOUT_SEATBELT", 0)},
+        {"id": "SIGNAL_JUMP", "label": "Signal Jump", "count": counts.get("SIGNAL_JUMP", 0)},
+        {"id": "WRONG_LANE", "label": "Wrong Lane", "count": counts.get("WRONG_LANE", 0)},
+        {"id": "WRONG_WAY", "label": "Wrong Way", "count": counts.get("WRONG_WAY", 0)},
+        {"id": "SPEED_VIOLATION", "label": "Speed Violation", "count": counts.get("SPEED_VIOLATION", 0)},
+        {"id": "ILLEGAL_PARKING", "label": "Illegal Parking", "count": counts.get("ILLEGAL_PARKING", 0)},
+        {"id": "STOLEN_VEHICLES", "label": "Stolen Vehicle", "count": counts.get("STOLEN_VEHICLES", 0)},
+        {"id": "CHALLAN_DEFAULTER", "label": "Challan Defaulter", "count": counts.get("CHALLAN_DEFAULTER", 0)},
+        {"id": "SECURITY_WATCHLIST", "label": "Security Watchlist", "count": counts.get("SECURITY_WATCHLIST", 0)}
+    ]
+    return categories
+
+@router.get("/anpr")
+def get_anpr_records(
+    category: Optional[str] = None,
+    search: Optional[str] = None,
+    camera_id: Optional[int] = None,
+    status: Optional[str] = None,
+    date: Optional[str] = None,
+    limit: int = 50,
+    offset: int = 0,
+    db: Session = Depends(get_db)
+):
+    """
+    Filter-first ANPR endpoint:
+    - If category is None or empty: returns [] (does NOT dump large dataset)
+    - If category is provided: retrieves only records for that category
+    - Search operates strictly within category
+    - Supports secondary filters: camera_id, status, date
+    """
+    if not category:
+        return []
+
+    query = db.query(Violation)
+
+    cat_norm = category.strip().upper()
+    if cat_norm != "ALL":
+        if cat_norm == "STOLEN_VEHICLES":
+            query = query.filter(Violation.violation_type.in_(["STOLEN_VEHICLES", "POLICE_WARRANT_STOLEN_VEHICLE"]))
+        elif cat_norm == "CHALLAN_DEFAULTER":
+            query = query.filter(Violation.violation_type.like("%CHALLAN%") | Violation.violation_type.like("%Unpaid%"))
+        else:
+            query = query.filter(Violation.violation_type == cat_norm)
+
+    if search and search.strip():
+        s = search.strip().upper()
+        query = query.filter(Violation.license_plate.ilike(f"%{s}%"))
+
+    if camera_id:
+        query = query.filter(Violation.camera_id == camera_id)
+
+    if status and status.strip().upper() != "ALL":
+        query = query.filter(Violation.status.ilike(f"%{status.strip()}%"))
+
+    if date and date.strip():
+        query = query.filter(Violation.timestamp.like(f"{date.strip()}%"))
+
+    records = query.order_by(Violation.timestamp.desc()).offset(offset).limit(limit).all()
+
+    cam_map = {}
+    for c in db.query(Camera).all():
+        loc = c.intersection.name if (c.intersection and c.intersection.name) else c.name
+        cam_map[c.id] = (c.name, loc)
+
+    result = []
+    for r in records:
+        cam_info = cam_map.get(r.camera_id, (f"Camera #{r.camera_id}", "Surveillance Network"))
+        result.append({
+            "id": r.id,
+            "plate": r.license_plate,
+            "plate_number": r.license_plate,
+            "category": r.violation_type,
+            "category_label": CATEGORY_LABELS.get(r.violation_type, r.violation_type.replace("_", " ").title()),
+            "camera_id": r.camera_id,
+            "camera_name": cam_info[0],
+            "location": cam_info[1],
+            "timestamp": r.timestamp.isoformat() if r.timestamp else datetime.now(timezone.utc).isoformat(),
+            "confidence": round(r.confidence, 2) if r.confidence else 0.95,
+            "status": r.status or "Review",
+            "evidence_image": r.evidence_image or "/sample_traffic.mp4"
+        })
+
+    return result
 
 # 7. Single-Plate Trajectories
 @router.get("/trajectories")

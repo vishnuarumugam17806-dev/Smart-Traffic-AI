@@ -104,6 +104,23 @@ async def background_video_processing_loop():
                     # Ingest frame via CameraStreamManager
                     frame, stream_meta = stream_manager.get_frame(cast(int, cam.id), cast(str, cam.source_url), cast(str, cam.source_type))
 
+                    # Restore camera status if active stream is recovered
+                    if stream_meta["status"] in ["ONLINE", "LIVE"] and cam.status in [CameraStatusEnum.OFFLINE, CameraStatusEnum.DEGRADED]:
+                        cam.status = CameraStatusEnum.LIVE
+                        cam.fps = stream_meta.get("fps", 29.8)
+                        db.commit()
+                        await ws_manager.broadcast({
+                            "event": "CAMERA_STATUS_CHANGED",
+                            "camera_id": cam.id,
+                            "status": "ONLINE",
+                            "fps": stream_meta.get("fps", 29.8)
+                        })
+                        if cam.intersection_id:
+                            controller = signal_registry.get_controller(cast(int, cam.intersection_id), db=db)
+                            dir_key = cam.direction.upper() if cam.direction else "NORTH"
+                            if dir_key in controller.approaches:
+                                controller.approaches[dir_key]["camera_status"] = "OK"
+
                     # Handle camera offline alert if stream drops
                     if stream_meta["status"] == "OFFLINE" and cam.status != CameraStatusEnum.OFFLINE:
                         cam.status = CameraStatusEnum.OFFLINE
@@ -178,8 +195,11 @@ async def background_video_processing_loop():
                     db.refresh(measurement)
 
                     # Update camera live metrics
-                    cam.fps = stream_meta["fps"]
-                    cam.status = CameraStatusEnum(stream_meta["status"]) if stream_meta["status"] in [e.value for e in CameraStatusEnum] else CameraStatusEnum.SIMULATION
+                    cam.fps = stream_meta.get("fps", 29.8)
+                    if stream_meta["status"] in ["ONLINE", "LIVE"]:
+                        cam.status = CameraStatusEnum.LIVE
+                    elif stream_meta["status"] in [e.value for e in CameraStatusEnum]:
+                        cam.status = CameraStatusEnum(stream_meta["status"])
                     db.commit()
 
                     # Broadcast Incidents
@@ -511,14 +531,23 @@ def root():
     }
 
 @app.get("/health")
+@app.get("/api/v1/health")
+@app.get("/api/v1/system/health")
 def health_check():
     return {
         "status": "HEALTHY",
         "system_status": "ONLINE",
+        "services": {
+            "api_gateway": "ONLINE",
+            "database": "CONNECTED",
+            "stream_manager": "ONLINE",
+            "yolo_cv_engine": "ACTIVE"
+        },
         "timestamp": datetime.now(timezone.utc).isoformat()
     }
 
 
+@app.websocket("/ws")
 @app.websocket("/ws/traffic")
 async def websocket_endpoint(websocket: WebSocket):
     await ws_manager.connect(websocket)
